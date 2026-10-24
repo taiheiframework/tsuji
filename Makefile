@@ -36,6 +36,12 @@ STRAY_GUARD = STRAY=$$(git status --porcelain --ignored --untracked-files=all --
 	if [ -n "$$FILTERED" ]; then echo "[ERROR] files with a git filter, whose checkout differs from the reviewed content:"; echo "$$FILTERED"; exit 1; fi; \
 	if [ -n "$$ATTRS" ]; then echo "[ERROR] tracked .gitattributes, .lfsconfig or .gitmodules, which change what a checkout holds:"; echo "$$ATTRS"; exit 1; fi
 
+# A tracked change to build.mill can add a published module as well as a stray file can: every
+# publishing step checks that exactly these modules are published.
+PUBLISHED = i18n.js.publishArtifacts i18n.jvm.publishArtifacts
+MODULE_GUARD = MODULES=$$(./mill resolve __.publishArtifacts | sort | tr '\n' ' ' | sed 's/ $$//'); \
+	if [ "$$MODULES" != "$(PUBLISHED)" ]; then echo "[ERROR] the build would publish '$$MODULES', not '$(PUBLISHED)'"; exit 1; fi
+
 # The release credentials (MILL_SONATYPE_USERNAME / MILL_SONATYPE_PASSWORD for the Central Portal
 # user token, MILL_PGP_SECRET_BASE64 / MILL_PGP_PASSPHRASE for the release key). Read from this
 # file when it exists, otherwise from the environment (CI). Never passed as arguments: a
@@ -113,6 +119,7 @@ publishLocal:
 publish:
 	@set -e; \
 	$(STRAY_GUARD); \
+	$(MODULE_GUARD); \
 	if [ -f "$(RELEASE_ENV)" ]; then . "$(RELEASE_ENV)"; fi; \
 	for V in MILL_SONATYPE_USERNAME MILL_SONATYPE_PASSWORD MILL_PGP_SECRET_BASE64 MILL_PGP_PASSPHRASE; do \
 	  if [ -z "$${!V}" ]; then echo "[publish] $$V is not set ($(RELEASE_ENV) or the environment)"; exit 1; fi; \
@@ -126,6 +133,7 @@ publish:
 publish-dry-run:
 	@set -e; \
 	$(STRAY_GUARD); \
+	$(MODULE_GUARD); \
 	if [ -f "$(RELEASE_ENV)" ]; then . "$(RELEASE_ENV)"; fi; \
 	MILL_TESTS_PUBLISH_DRY_RUN=1 ./mill mill.javalib.SonatypeCentralPublishModule/; \
 	echo "[publish-dry-run] bundle in out/mill.javalib.SonatypeCentralPublishModule/publishAll.dest/repository"
@@ -134,6 +142,7 @@ publish-dry-run:
 release-preflight:
 	@set -e; \
 	$(STRAY_GUARD); \
+	$(MODULE_GUARD); \
 	VERSION=$$(./mill show release.gitVersion | tr -d '"'); \
 	case "$$VERSION" in *-SNAPSHOT) echo "[preflight] $$VERSION is not a release"; exit 1;; esac; \
 	CODE=$$(curl -s -o /dev/null -w '%{http_code}' "https://repo1.maven.org/maven2/$(CENTRAL_PATH)/$$VERSION/"); \

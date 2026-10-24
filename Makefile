@@ -15,14 +15,17 @@ CENTRAL_PATH = dev/taihei/taihei-i18n_3
 # not in the reviewed diff: the guard refuses any tracked entry anywhere in the repository that
 # is not a regular file. A filter attribute (Git LFS, a clean/smudge filter) makes the checkout
 # differ from the reviewed blob, so the guard refuses any file that has one.
+# Without -z, git quotes a path that holds a tab or a newline, so a crafted file name cannot pose
+# as another line of check-attr's output; pipefail makes a failing git refuse instead of finding
+# nothing.
 SOURCE_DIRS = shared jvm js i18n
 # The build definition decides what is published: a stray .mill file anywhere in the tree adds a
 # module, so the guard covers the files Mill reads for its build too.
 BUILD_FILES = '*.mill' '*.mill.yaml' '*.mill.scala' '*.sc' mill-build .mill-version .mill-jvm-opts .mill-opts .config ':(exclude)out'
 STRAY_GUARD = STRAY=$$(git status --porcelain --ignored --untracked-files=all -- $(SOURCE_DIRS) $(BUILD_FILES)); \
-	HIDDEN=$$(git ls-files -v | grep -E '^[a-zS]' || true); \
-	LINKS=$$(git ls-files -s | awk '$$1 != "100644" && $$1 != "100755"'); \
-	FILTERED=$$(git ls-files -z | git check-attr --stdin -z filter | tr '\0' '\n' | paste - - - | awk -F'\t' '$$3 != "unspecified"'); \
+	HIDDEN=$$(set -o pipefail; git ls-files -v | awk '/^[a-zS]/'); \
+	LINKS=$$(set -o pipefail; git ls-files -s | awk '$$1 != "100644" && $$1 != "100755"'); \
+	FILTERED=$$(set -o pipefail; git ls-files | git check-attr --stdin filter | awk '!/: filter: unspecified$$/'); \
 	if [ -n "$$STRAY$$HIDDEN" ]; then echo "[ERROR] files git does not track, or hides changes of, would be published:"; echo "$$STRAY$$HIDDEN"; exit 1; fi; \
 	if [ -n "$$LINKS" ]; then echo "[ERROR] tracked symlinks or submodules, which Mill would follow into a published jar:"; echo "$$LINKS"; exit 1; fi; \
 	if [ -n "$$FILTERED" ]; then echo "[ERROR] files with a git filter, whose checkout differs from the reviewed content:"; echo "$$FILTERED"; exit 1; fi
@@ -124,9 +127,9 @@ publish-dry-run:
 # Refuses when the version at HEAD is already on Central (immutable) or is not a release.
 release-preflight:
 	@set -e; \
+	$(STRAY_GUARD); \
 	VERSION=$$(./mill show release.gitVersion | tr -d '"'); \
 	case "$$VERSION" in *-SNAPSHOT) echo "[preflight] $$VERSION is not a release"; exit 1;; esac; \
-	$(STRAY_GUARD); \
 	CODE=$$(curl -s -o /dev/null -w '%{http_code}' "https://repo1.maven.org/maven2/$(CENTRAL_PATH)/$$VERSION/"); \
 	if [ "$$CODE" = "200" ]; then echo "[preflight] $$VERSION is already on Maven Central"; exit 1; fi; \
 	echo "[preflight] $$VERSION is not on Maven Central yet"

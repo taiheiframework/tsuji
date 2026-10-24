@@ -61,7 +61,7 @@ jobs:
           git ls-files -s > "$RUNNER_TEMP/entries"
           links="$(awk '$1 != "100644" && $1 != "100755"' "$RUNNER_TEMP/entries")"
           if [ -n "$links" ]; then echo "::error::tracked entries that are not regular files:"; echo "$links"; exit 1; fi
-          filtered="$(git ls-files -z | git check-attr --stdin -z filter | tr '\0' '\n' | paste - - - | awk -F'\t' '$3 != "unspecified"')"
+          filtered="$(git ls-files | git check-attr --stdin filter | awk '!/: filter: unspecified$/')"
           if [ -n "$filtered" ]; then echo "::error::files with a git filter:"; echo "$filtered"; exit 1; fi
 
       - name: Check formatting

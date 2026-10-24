@@ -15,7 +15,7 @@ permissions:
 
 env:
   JAVA_VERSION: '25'
-  NODE_VERSION: '20'
+  NODE_VERSION: '24'
   # Everything resolves from Maven Central: the build needs no credentials.
 
 jobs:
@@ -50,6 +50,19 @@ jobs:
           key: mill-${{ runner.os }}-${{ hashFiles('build.mill', '.mill-version') }}
           restore-keys: |
             mill-${{ runner.os }}-
+
+      # A symlink or a submodule is a tracked, clean entry to git, but Mill follows a symlink into
+      # the published jars, wherever it points, and a filter (Git LFS) checks out other bytes than
+      # the reviewed ones. The release refuses them (make's STRAY_GUARD); a pull request that adds
+      # one fails here, visibly. bash with pipefail, so a failing git cannot pass as "none found".
+      - name: Refuse symlinks, submodules and filtered files
+        shell: bash
+        run: |
+          git ls-files -s > "$RUNNER_TEMP/entries"
+          links="$(awk '$1 != "100644" && $1 != "100755"' "$RUNNER_TEMP/entries")"
+          if [ -n "$links" ]; then echo "::error::tracked entries that are not regular files:"; echo "$links"; exit 1; fi
+          filtered="$(git ls-files -z | git check-attr --stdin -z filter | tr '\0' '\n' | paste - - - | awk -F'\t' '$3 != "unspecified"')"
+          if [ -n "$filtered" ]; then echo "::error::files with a git filter:"; echo "$filtered"; exit 1; fi
 
       - name: Check formatting
         run: ./mill __.checkFormat

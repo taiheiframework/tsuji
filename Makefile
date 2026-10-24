@@ -4,6 +4,29 @@ SHELL = /bin/bash
 # released. Central is immutable: a version that is there cannot be published again.
 CENTRAL_PATH = dev/taihei/taihei-i18n_3
 
+# The folders whose files go into the published jars (build.mill names no other: its published
+# modules read shared/, jvm/, js/ and their default resource folders under i18n/). Mill packs
+# whatever is there, also files git does not track or ignores (an IDE's or scala-cli's working
+# files), so a release refuses when any such file is present, whatever git's settings for
+# untracked files, and when a tracked file is marked assume-unchanged or skip-worktree, which
+# hides its edits from git status: what is published is what the tag holds. Git keeps a symlink
+# and a submodule as tracked, clean entries, but Mill follows a symlink to whatever it points at
+# (a file outside the repository, such as the release credentials) and a submodule's files are
+# not in the reviewed diff: the guard refuses any tracked entry anywhere in the repository that
+# is not a regular file. A filter attribute (Git LFS, a clean/smudge filter) makes the checkout
+# differ from the reviewed blob, so the guard refuses any file that has one.
+SOURCE_DIRS = shared jvm js i18n
+# The build definition decides what is published: a stray .mill file anywhere in the tree adds a
+# module, so the guard covers the files Mill reads for its build too.
+BUILD_FILES = '*.mill' '*.mill.yaml' '*.mill.scala' '*.sc' mill-build .mill-version .mill-jvm-opts .mill-opts .config ':(exclude)out'
+STRAY_GUARD = STRAY=$$(git status --porcelain --ignored --untracked-files=all -- $(SOURCE_DIRS) $(BUILD_FILES)); \
+	HIDDEN=$$(git ls-files -v | grep -E '^[a-zS]' || true); \
+	LINKS=$$(git ls-files -s | awk '$$1 != "100644" && $$1 != "100755"'); \
+	FILTERED=$$(git ls-files -z | git check-attr --stdin -z filter | tr '\0' '\n' | paste - - - | awk -F'\t' '$$3 != "unspecified"'); \
+	if [ -n "$$STRAY$$HIDDEN" ]; then echo "[ERROR] files git does not track, or hides changes of, would be published:"; echo "$$STRAY$$HIDDEN"; exit 1; fi; \
+	if [ -n "$$LINKS" ]; then echo "[ERROR] tracked symlinks or submodules, which Mill would follow into a published jar:"; echo "$$LINKS"; exit 1; fi; \
+	if [ -n "$$FILTERED" ]; then echo "[ERROR] files with a git filter, whose checkout differs from the reviewed content:"; echo "$$FILTERED"; exit 1; fi
+
 # The release credentials (MILL_SONATYPE_USERNAME / MILL_SONATYPE_PASSWORD for the Central Portal
 # user token, MILL_PGP_SECRET_BASE64 / MILL_PGP_PASSPHRASE for the release key). Read from this
 # file when it exists, otherwise from the environment (CI). Never passed as arguments: a
@@ -80,6 +103,7 @@ publishLocal:
 # Central snapshot repository is not enabled for the namespace.
 publish:
 	@set -e; \
+	$(STRAY_GUARD); \
 	if [ -f "$(RELEASE_ENV)" ]; then . "$(RELEASE_ENV)"; fi; \
 	for V in MILL_SONATYPE_USERNAME MILL_SONATYPE_PASSWORD MILL_PGP_SECRET_BASE64 MILL_PGP_PASSPHRASE; do \
 	  if [ -z "$${!V}" ]; then echo "[publish] $$V is not set ($(RELEASE_ENV) or the environment)"; exit 1; fi; \
@@ -92,6 +116,7 @@ publish:
 # The same bundle, signed, written to out/ instead of uploaded: what Central would receive.
 publish-dry-run:
 	@set -e; \
+	$(STRAY_GUARD); \
 	if [ -f "$(RELEASE_ENV)" ]; then . "$(RELEASE_ENV)"; fi; \
 	MILL_TESTS_PUBLISH_DRY_RUN=1 ./mill mill.javalib.SonatypeCentralPublishModule/; \
 	echo "[publish-dry-run] bundle in out/mill.javalib.SonatypeCentralPublishModule/publishAll.dest/repository"
@@ -101,6 +126,7 @@ release-preflight:
 	@set -e; \
 	VERSION=$$(./mill show release.gitVersion | tr -d '"'); \
 	case "$$VERSION" in *-SNAPSHOT) echo "[preflight] $$VERSION is not a release"; exit 1;; esac; \
+	$(STRAY_GUARD); \
 	CODE=$$(curl -s -o /dev/null -w '%{http_code}' "https://repo1.maven.org/maven2/$(CENTRAL_PATH)/$$VERSION/"); \
 	if [ "$$CODE" = "200" ]; then echo "[preflight] $$VERSION is already on Maven Central"; exit 1; fi; \
 	echo "[preflight] $$VERSION is not on Maven Central yet"
@@ -290,6 +316,7 @@ release-finalize:
 		echo "[ERROR] Uncommitted changes besides the notes: v$$NEW would publish as a SNAPSHOT"; \
 		git status --short | grep -v '^??'; exit 1; \
 	fi; \
+	$(STRAY_GUARD); \
 	git tag -a "v$$NEW" -m "Release $$NEW"; \
 	echo "[OK] Created local tag v$$NEW (not pushed)"; \
 	$(MAKE) release-preflight; \

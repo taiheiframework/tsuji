@@ -18,6 +18,10 @@ CENTRAL_PATH = dev/taihei/taihei-i18n_3
 # Without -z, git quotes a path that holds a tab or a newline, so a crafted file name cannot pose
 # as another line of check-attr's output; pipefail makes a failing git refuse instead of finding
 # nothing.
+# Line endings, working-tree-encoding and ident also convert a checkout without git status
+# showing it, and .lfsconfig and .gitmodules steer what a checkout fetches. This repository needs
+# none of them, so the guard refuses a tracked .gitattributes at any depth, and a tracked
+# .lfsconfig or .gitmodules, whatever their case: the filter check above stays as a second line.
 SOURCE_DIRS = shared jvm js i18n
 # The build definition decides what is published: a stray .mill file anywhere in the tree adds a
 # module, so the guard covers the files Mill reads for its build too.
@@ -26,9 +30,11 @@ STRAY_GUARD = STRAY=$$(git status --porcelain --ignored --untracked-files=all --
 	HIDDEN=$$(set -o pipefail; git ls-files -v | awk '/^[a-zS]/'); \
 	LINKS=$$(set -o pipefail; git ls-files -s | awk '$$1 != "100644" && $$1 != "100755"'); \
 	FILTERED=$$(set -o pipefail; git ls-files | git check-attr --stdin filter | awk '!/: filter: unspecified$$/'); \
+	ATTRS=$$(set -o pipefail; git ls-files | awk '{ p = tolower($$0) } p ~ /(^|\/)\.(gitattributes|lfsconfig|gitmodules)"?$$/'); \
 	if [ -n "$$STRAY$$HIDDEN" ]; then echo "[ERROR] files git does not track, or hides changes of, would be published:"; echo "$$STRAY$$HIDDEN"; exit 1; fi; \
 	if [ -n "$$LINKS" ]; then echo "[ERROR] tracked symlinks or submodules, which Mill would follow into a published jar:"; echo "$$LINKS"; exit 1; fi; \
-	if [ -n "$$FILTERED" ]; then echo "[ERROR] files with a git filter, whose checkout differs from the reviewed content:"; echo "$$FILTERED"; exit 1; fi
+	if [ -n "$$FILTERED" ]; then echo "[ERROR] files with a git filter, whose checkout differs from the reviewed content:"; echo "$$FILTERED"; exit 1; fi; \
+	if [ -n "$$ATTRS" ]; then echo "[ERROR] tracked .gitattributes, .lfsconfig or .gitmodules, which change what a checkout holds:"; echo "$$ATTRS"; exit 1; fi
 
 # The release credentials (MILL_SONATYPE_USERNAME / MILL_SONATYPE_PASSWORD for the Central Portal
 # user token, MILL_PGP_SECRET_BASE64 / MILL_PGP_PASSPHRASE for the release key). Read from this

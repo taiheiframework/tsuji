@@ -54,8 +54,9 @@ jobs:
       # A symlink or a submodule is a tracked, clean entry to git, but Mill follows a symlink into
       # the published jars, wherever it points, and a filter (Git LFS) checks out other bytes than
       # the reviewed ones. The release refuses them (make's STRAY_GUARD); a pull request that adds
-      # one fails here, visibly. bash with pipefail, so a failing git cannot pass as "none found".
-      - name: Refuse symlinks, submodules and filtered files
+      # one fails here, visibly. This repository needs no .gitattributes, .lfsconfig or .gitmodules,
+      # so any of them fails too. bash with pipefail, so a failing git cannot pass as "none found".
+      - name: Refuse symlinks, submodules, filters and git attribute files
         shell: bash
         run: |
           git ls-files -s > "$RUNNER_TEMP/entries"
@@ -63,6 +64,8 @@ jobs:
           if [ -n "$links" ]; then echo "::error::tracked entries that are not regular files:"; echo "$links"; exit 1; fi
           filtered="$(git ls-files | git check-attr --stdin filter | awk '!/: filter: unspecified$/')"
           if [ -n "$filtered" ]; then echo "::error::files with a git filter:"; echo "$filtered"; exit 1; fi
+          attrs="$(git ls-files | awk '{ p = tolower($0) } p ~ /(^|\/)\.(gitattributes|lfsconfig|gitmodules)"?$/')"
+          if [ -n "$attrs" ]; then echo "::error::tracked .gitattributes, .lfsconfig or .gitmodules:"; echo "$attrs"; exit 1; fi
 
       - name: Check formatting
         run: ./mill __.checkFormat

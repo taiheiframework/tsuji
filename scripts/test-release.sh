@@ -291,6 +291,10 @@ expect "resolved: a key file that is not the pinned key is refused" 1 "is not th
   --key "$W/release-key.asc" --fingerprint "$OTHER" "$W/c6.json"
 CACHE2="$W/cache2/v1/https/localhost:$PORT/central/org/y/y/1.0"; mkdir -p "$CACHE2"; printf 'y' > "$CACHE2/y-1.0.jar"
 cp_json "$(ref "$CENTC/org/x/x/1.0/x-1.0.jar")" "$(ref "$CACHE2/y-1.0.jar")" > "$W/c9.json"
+mkdir -p "$CENTC/dev/taihei/$DA/$DV"; cp "$SITEC/dev/taihei/$DA/$DV/$DA-$DV.jar" "$CENTC/dev/taihei/$DA/$DV/"; printf 'x' >> "$CENTC/dev/taihei/$DA/$DV/$DA-$DV.jar"
+cp_json "$(ref "$SITEC/dev/taihei/$DA/$DV/$DA-$DV.jar")" "$(ref "$CENTC/dev/taihei/$DA/$DV/$DA-$DV.jar")" > "$W/c10.json"
+expect "resolved: the same file from Central and from the site is checked in each" 1 "$CENTC/dev/taihei/$DA/$DV/$DA-$DV.jar: differs" resolved "$W/c10.json"
+rm -rf "$CENTC/dev/taihei/$DA/$DV"
 expect "resolved: files from two Coursier caches are refused" 1 "more than one Coursier cache" resolved "$W/c9.json"
 
 # released: the MiMa baseline's check; a release tag on neither Central nor the site fails.
@@ -500,7 +504,7 @@ git -C "$G" -c user.name=Test -c user.email=test@example.invalid -c tag.gpgsign=
 use_bundle "$SRC"
 git -C "$G" push -q origin "refs/tags/v$V" 2>/dev/null
 gh_reset
-expect "release-github refuses while main is not on origin" 1 "push main first" "${M[@]}" release-github
+expect "release-github refuses while main is not on origin" 1 "main is not on origin" "${M[@]}" release-github
 ! gh_called "release create" && pass "and creates nothing" || fail "it created a release without main on origin"
 git -C "$G" push -q origin HEAD:refs/heads/main 2>/dev/null
 printf '{"currentVersion":"0.0.0","newVersion":"%s","releaseType":"patch","branch":"main","head":"x","embargo":false}\n' "$V" > "$G/.release-state.json"

@@ -645,9 +645,9 @@ verify-repo:
 #        make publish-repo       (the site's deploy, then verify-repo reads every file back)
 #        Maven Central follows in the next release train (make release-train in nakama).
 #
-# Until the tag is pushed nothing has left the machine: make release-abort, fix the cause, then
-# release-prepare the same version again. From the push of its tag the version is final, and from
-# its GitHub Release it is public; it goes to Central in the next train.
+# Until main and the tag are pushed nothing has left the machine: make release-abort, fix the
+# cause, then release-prepare the same version again. From the push of its tag the version is
+# final, and from its GitHub Release it is public; it goes to Central in the next train.
 # A security fix (EMBARGO=1) goes the other way: Maven Central first, with publish, and its GitHub
 # Release, built from Central's files (central-bundle), only after its advisory is published
 # (ADR 0004, section 8).
@@ -918,9 +918,12 @@ release-abort:
 			if [ -n "$$MAIN" ]; then \
 				git cat-file -e "$$MAIN^{commit}" 2>/dev/null || git fetch -q origin main || { \
 					echo "[ERROR] cannot fetch main from origin, so cannot tell whether the notes commit is pushed: nothing was undone"; exit 1; }; \
-				if git merge-base --is-ancestor HEAD "$$MAIN"; then \
+				RC=0; git merge-base --is-ancestor HEAD "$$MAIN" || RC=$$?; \
+				if [ "$$RC" = 0 ]; then \
 					echo "[ERROR] main on origin holds the notes commit of v$$NEW: undoing it would need a force push. Nothing was undone."; \
 					echo "        Push the tag (git push origin v$$NEW), then make release-github, or bring it to the CTO."; exit 1; \
+				elif [ "$$RC" != 1 ]; then \
+					echo "[ERROR] cannot tell whether main on origin holds the notes commit of v$$NEW: nothing was undone"; exit 1; \
 				fi; \
 			fi; \
 		fi; \

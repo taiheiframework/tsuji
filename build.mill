@@ -140,10 +140,67 @@ trait TaiheiMima extends Mima with PublishModule {
 // Shared publishing settings for JVM and JS modules: what Maven Central
 // validates (name, description, url, licence, developer, scm, sources, docs).
 // ---------------------------------------------------------------------------
+// The family's repository, asked only for group dev.taihei: for any other module it answers "not
+// found" without a request, so nothing but dev.taihei can ever come from it, also when Maven
+// Central fails to answer for a module (a timeout, a 5xx) and Coursier asks the next repository.
+// Artifacts are fetched from the source find0 returns, the underlying repository, and only for a
+// module found here.
+final case class TaiheiOnly(underlying: coursier.maven.MavenRepository) extends coursier.core.Repository {
+  import coursier.core.{ArtifactSource, Classifier, Dependency, Module, Project, Publication, Repository, Versions}
+  import coursier.util.{Artifact, EitherT, Monad}
+
+  private def ours(module: Module) = module.organization.value == "dev.taihei"
+  private def notHere[F[_], A](module: Module)(implicit F: Monad[F]): EitherT[F, String, A] =
+    EitherT[F, String, A](F.point(Left(s"${module.repr}: ${underlying.root} serves dev.taihei only")))
+
+  override def repr: String = s"${underlying.root} (dev.taihei only)"
+
+  override def find0[F[_]](module: Module, version: coursier.version.Version, fetch: Repository.Fetch[F])(implicit
+      F: Monad[F],
+  ): EitherT[F, String, (ArtifactSource, Project)] =
+    if (ours(module)) underlying.find0(module, version, fetch) else notHere(module)
+
+  def find[F[_]](module: Module, version: String, fetch: Repository.Fetch[F])(implicit
+      F: Monad[F],
+  ): EitherT[F, String, (ArtifactSource, Project)] =
+    find0(module, coursier.version.Version(version), fetch)
+
+  override def findFromVersionConstraint[F[_]](
+      module: Module,
+      versionConstraint: coursier.version.VersionConstraint,
+      fetch: Repository.Fetch[F],
+  )(implicit F: Monad[F]): EitherT[F, String, (ArtifactSource, Project)] =
+    if (ours(module)) underlying.findFromVersionConstraint(module, versionConstraint, fetch) else notHere(module)
+
+  override def versions[F[_]](module: Module, fetch: Repository.Fetch[F], versionsCheckHasModule: Boolean)(implicit
+      F: Monad[F],
+  ): EitherT[F, String, (Versions, String)] =
+    if (ours(module)) underlying.versions(module, fetch, versionsCheckHasModule) else notHere(module)
+
+  def artifacts(
+      dependency: Dependency,
+      project: Project,
+      overrideClassifiers: Option[Seq[Classifier]],
+  ): Seq[(Publication, Artifact)] =
+    if (ours(dependency.module)) underlying.artifacts(dependency, project, overrideClassifiers) else Nil
+}
+
+// Scalafix takes the repositories through its own API, which knows Maven and Ivy repositories
+// only. It needs nothing from the family's repository, so it gets the others.
+trait TaiheiScalafix extends ScalafixModule {
+  override def scalafixRepositories: Task[Seq[coursier.Repository]] = Task.Anon {
+    super.scalafixRepositories().filter {
+      case _: TaiheiOnly => false
+      case _             => true
+    }
+  }
+}
+
 // The repositories a module resolves from, in order, as repo-guard reads them.
 trait TaiheiResolverOrder extends CoursierModule {
   def resolverOrder: T[Seq[String]] = Task {
     repositoriesTask().map {
+      case t: TaiheiOnly                     => t.repr
       case m: coursier.maven.MavenRepository => m.root
       case i: coursier.ivy.IvyRepository     => s"ivy:${i.pattern.string}"
       case other                             => other.toString
@@ -154,12 +211,12 @@ trait TaiheiResolverOrder extends CoursierModule {
 trait TaiheiPublishSettings extends PublishModule with TaiheiResolverOrder {
   def publishVersion = release.gitVersion()
 
-  // Coursier's defaults (Maven Central), then the family's repository, and nothing else. Mill's
-  // own `repositories` would put an added repository before Central, where it could stand in for
-  // anything Central has; appended, it is asked only for what Central does not have. The test
-  // modules use their module's repositories. repo-guard reads resolverOrder.
+  // Coursier's defaults (Maven Central), then the family's repository for dev.taihei alone, and
+  // nothing else. Mill's own `repositories` would put an added repository before Central, where it
+  // could stand in for anything Central has; appended, it is asked only for what Central does not
+  // have. The test modules use their module's repositories. repo-guard reads resolverOrder.
   override def repositoriesTask: Task[Seq[coursier.Repository]] = Task.Anon {
-    coursierConfigModule().defaultRepositories() :+ coursier.maven.MavenRepository(release.repoUrl)
+    coursierConfigModule().defaultRepositories() :+ TaiheiOnly(coursier.maven.MavenRepository(release.repoUrl))
   }
 
 
@@ -188,7 +245,7 @@ val LegacyInTests = Seq("-Wconf:cat=deprecation&origin=dev\\.taihei\\.tsuji\\.le
 // ---------------------------------------------------------------------------
 // Base trait for JVM modules
 // ---------------------------------------------------------------------------
-trait TaiheiModule extends ScalaModule with ScalafmtModule with ScalafixModule with TaiheiPublishSettings with TaiheiMima {
+trait TaiheiModule extends ScalaModule with ScalafmtModule with TaiheiScalafix with TaiheiPublishSettings with TaiheiMima {
   def scalaVersion = V.scala
 
   def scalacOptions = Seq(
@@ -206,7 +263,7 @@ trait TaiheiModule extends ScalaModule with ScalafmtModule with ScalafixModule w
     "-java-output-version:17",
   )
 
-  trait TaiheiTests extends ScalaTests with ScalafmtModule with ScalafixModule with TaiheiResolverOrder {
+  trait TaiheiTests extends ScalaTests with ScalafmtModule with TaiheiScalafix with TaiheiResolverOrder {
     def testFramework = "zio.test.sbt.ZTestFramework"
 
     // The JDK the tests run on: the module's (Mill's own) unless TAIHEI_TEST_JAVA_HOME names
@@ -238,7 +295,7 @@ trait TaiheiModule extends ScalaModule with ScalafmtModule with ScalafixModule w
 // ---------------------------------------------------------------------------
 // Base trait for Scala.js modules
 // ---------------------------------------------------------------------------
-trait TaiheiJSModule extends ScalaJSModule with ScalafmtModule with ScalafixModule with TaiheiPublishSettings with TaiheiMima {
+trait TaiheiJSModule extends ScalaJSModule with ScalafmtModule with TaiheiScalafix with TaiheiPublishSettings with TaiheiMima {
   def scalaVersion   = V.scala
   def scalaJSVersion = V.scalaJS
 
@@ -259,7 +316,7 @@ trait TaiheiJSModule extends ScalaJSModule with ScalafmtModule with ScalafixModu
     mvn"io.github.cquiroz::scala-java-time-tzdb::${V.scalaJavaTime}",
   )
 
-  trait TaiheiJSTests extends ScalaJSTests with ScalafmtModule with ScalafixModule with TaiheiResolverOrder {
+  trait TaiheiJSTests extends ScalaJSTests with ScalafmtModule with TaiheiScalafix with TaiheiResolverOrder {
     def testFramework = "zio.test.sbt.ZTestFramework"
 
     // The tests of legacy.Message use it on purpose.

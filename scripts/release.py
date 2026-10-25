@@ -329,30 +329,45 @@ def resolvers(args):
         shown = json.load(f)
     if not isinstance(shown, dict) or not shown:
         fail([f"{args.json}: no modules shown"])
-    want = [MAVEN_CENTRAL, args.url.rstrip("/")]
+    # The family's repository is asked for dev.taihei only (build.mill's TaiheiOnly).
+    want = [MAVEN_CENTRAL, f"{args.url.rstrip('/')} (dev.taihei only)"]
     problems = [f"{m} does not report its repositories (resolverOrder)" for m in args.modules.split() if f"{m}.resolverOrder" not in shown]
     for module, repos in sorted(shown.items()):
-        if not isinstance(repos, list) or len(repos) != 3 or not IVY_LOCAL.match(str(repos[0])) or [r.rstrip("/") for r in repos[1:]] != want:
-            problems.append(f"{module} resolves from {repos}, not Coursier's defaults followed by {args.url}")
+        if not isinstance(repos, list) or len(repos) != 3 or not IVY_LOCAL.match(str(repos[0])) or [str(r) for r in repos[1:]] != want:
+            problems.append(f"{module} resolves from {repos}, not Coursier's defaults followed by {args.url} for dev.taihei only")
     if problems:
         fail(problems)
 
 
-# A line of a build file that names, adds or configures a repository. Only the two lines of the
-# override in build.mill may; every other match is refused.
+# A line of a build file that names, adds or configures a repository, or where Coursier keeps
+# its cache or reads its configuration. Only the lines of the override in build.mill may; every
+# other match is refused, also in a build header (`//| mill-repositories:`) or a YAML build file.
 REPO_WORDS = re.compile(
     r"maven\.pkg\.github\.com|http://|MavenRepository|IvyRepository|reposFromStrings|"
-    r"def\s+repositories\b|repositoriesTask|defaultRepositories|COURSIER_(REPOSITORIES|MIRRORS|CREDENTIALS)|"
-    r"millRepositories|mill-repositories|resolvers",
+    r"def\s+repositories\b|repositoriesTask|defaultRepositories|COURSIER_|coursier\.(repositories|mirrors|cache|config)|"
+    r"millRepositories|mill-repositories|resolvers|(^|\s)repositories\s*:",
     re.IGNORECASE,
 )
 REPO_LINES = (
+    "final case class TaiheiOnly(underlying: coursier.maven.MavenRepository) extends coursier.core.Repository {",
     "override def repositoriesTask: Task[Seq[coursier.Repository]] = Task.Anon {",
-    "coursierConfigModule().defaultRepositories() :+ coursier.maven.MavenRepository(release.repoUrl)",
+    "coursierConfigModule().defaultRepositories() :+ TaiheiOnly(coursier.maven.MavenRepository(release.repoUrl))",
     "repositoriesTask().map {",
     "case m: coursier.maven.MavenRepository => m.root",
     "case i: coursier.ivy.IvyRepository     => s\"ivy:${i.pattern.string}\"",
 )
+
+
+def comment_only(code):
+    """Whether a stripped line is a comment and nothing else. A build header line (`//|`) is
+    configuration Mill reads, not a comment, and code after a closed block comment is code."""
+    if code.startswith("//|"):
+        return False
+    if code.startswith(("//", "#")):
+        return True
+    if code.startswith(("/*", "*")):
+        return "*/" not in code or not code.split("*/", 1)[1].strip()
+    return False
 
 
 def build_repos(args):
@@ -372,7 +387,7 @@ def build_repos(args):
             elif code.startswith("val repoUrl") or code.startswith("def repoUrl"):
                 problems.append(f"{path}:{n}: repoUrl is not '{args.url}', the Makefile's REPO_URL")
             # A comment adds no repository; code that names one must be the override itself.
-            if REPO_WORDS.search(line) and not code.startswith(("//", "#", "*", "/*")):
+            if REPO_WORDS.search(line) and not comment_only(code):
                 if not (path == "build.mill" and code in REPO_LINES):
                     problems.append(f"{path}:{n}: names a repository: {code}")
     if declared != 1 or mentions != 1:
@@ -560,7 +575,7 @@ class Releases:
 def resolved(args):
     for url in (args.url, args.central.rstrip("/") + "/", args.api.rstrip("/") + "/"):
         check_url(url)
-    workspace = os.path.realpath(args.workspace)
+    out = os.path.join(os.path.realpath(args.workspace), "out")
     paths = set()
     for j in args.json:
         with open(j) as f:
@@ -570,10 +585,9 @@ def resolved(args):
     roots = {"central": cache_key(args.central), "repo": cache_key(args.url)}
     problems, taihei, central, cache_roots = [], [], 0, set()
     for path in sorted(paths):
-        real = os.path.realpath(path)
-        if real == workspace or real.startswith(workspace + os.sep):
-            continue  # this build's own output (a module another module depends on)
         hits = [(name, path.index(k)) for name, k in roots.items() if k in path]
+        if not hits and "/https/" not in path and os.path.realpath(path).startswith(out + os.sep):
+            continue  # this build's own output in out/ (a module another module depends on)
         if len(hits) != 1:
             problems.append(f"{path}: not in the Coursier cache of Maven Central or {args.url}")
             continue
@@ -591,6 +605,15 @@ def resolved(args):
             central += 1
     if len(cache_roots) > 1:
         problems.append(f"files from more than one Coursier cache: {sorted(cache_roots)}")
+    # Whatever the family's repository ever served into this cache is dev.taihei: anything else
+    # there came from it outside the resolutions shown here.
+    for root in cache_roots:
+        site = root + roots["repo"]
+        for dirpath, _, filenames in os.walk(site):
+            for name in filenames:
+                rel = os.path.relpath(os.path.join(dirpath, name), site).replace(os.sep, "/")
+                if not rel.startswith("dev/taihei/"):
+                    problems.append(f"{os.path.join(dirpath, name)}: only dev.taihei comes from {args.url}")
     if problems:
         fail(problems)
 
@@ -627,12 +650,32 @@ def resolved(args):
                 if os.path.islink(p) or not os.path.isfile(p):
                     problems.append(f"{p}: not a regular file")
                 elif sums is not None:
+                    where = f"{args.owner}/{library} v{version}"
                     if r not in sums:
-                        problems.append(f"{p}: not in the SHA256SUMS of {args.owner}/{library} v{version}")
+                        problems.append(f"{p}: not in the SHA256SUMS of {where}")
                     elif digest(p, "sha256") != sums[r]:
-                        problems.append(f"{p}: differs from the SHA256SUMS of {args.owner}/{library} v{version}")
+                        problems.append(f"{p}: differs from the SHA256SUMS of {where}")
+                    elif f"{r}.asc" not in sums:
+                        problems.append(f"{p}: the SHA256SUMS of {where} lists no signature for it")
                     else:
-                        by_sums += 1
+                        # The release's own list, and the release key's signature too: GitHub
+                        # write access alone does not make a file pass.
+                        base = args.url if name == "repo" else args.central.rstrip("/") + "/"
+                        try:
+                            code, asc = http_get(f"{base}{r}.asc", MAX_ASC, follow=False)
+                        except Refused as e:
+                            problems.append(str(e))
+                            continue
+                        if code != 200 or hashlib.sha256(asc).hexdigest() != sums[f"{r}.asc"]:
+                            problems.append(f"{p}: its signature is not served as the SHA256SUMS of {where} lists it (HTTP {code})")
+                            continue
+                        if keyring is None:
+                            keyring = Keyring(args.key, args.fingerprint)
+                        reason = keyring.verify(asc, p, p)
+                        if reason:
+                            problems.append(reason)
+                        else:
+                            by_sums += 1
                 elif name != "central":
                     problems.append(f"{p}: served by {args.url}, but {args.owner}/{library} has no immutable release v{version}")
                 else:
@@ -660,7 +703,9 @@ def resolved(args):
             keyring.close()
     if problems:
         fail(problems)
-    print(f"{central} files from Maven Central; {by_sums} dev.taihei files match their release's SHA256SUMS, {by_signature} verified by signature")
+    if central + by_sums + by_signature == 0:
+        fail(["no resolved file was checked: nothing came from a Coursier cache of Maven Central or the repository"])
+    print(f"{central} files from Maven Central; {by_sums} dev.taihei files match their release's SHA256SUMS and signature, {by_signature} verified by signature alone")
 
 
 # ---------------------------------------------------------------- a security fix's files from Central

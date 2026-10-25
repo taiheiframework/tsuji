@@ -26,6 +26,8 @@ LEGACY_CENTRAL_PATH = dev/taihei/taihei-i18n_3
 # so does a MAKEFLAGS in the environment: these are guards against mistakes, not against someone
 # who controls the shell that runs make. Credentials never go on make's command line.
 GITHUB_REPO = taiheiframework/tsuji
+# Where "is it pushed" is asked: the repository gh publishes in, never whatever origin names.
+GITHUB_GIT = https://github.com/$(GITHUB_REPO).git
 # The family's Maven repository: the one repository the build adds after Maven Central, the same
 # string as release.repoUrl in build.mill (repo-guard checks that they agree). It answers 404
 # for a directory, so every check asks for a file. SITE_REPO builds it with SITE_WORKFLOW.
@@ -82,7 +84,7 @@ SOURCE_DIRS = shared jvm js tools tsuji
 # The build definition decides which modules are published: a stray .mill file anywhere in the
 # tree adds one. So the guard covers it too, and every publishing step checks that exactly the
 # modules below are published.
-BUILD_FILES = '*.mill' '*.mill.yaml' '*.mill.scala' '*.sc' mill-build .mill-version .mill-jvm-opts .mill-opts .config ':(exclude)out'
+BUILD_FILES = '*.mill' '*.mill.yaml' '*.mill.scala' '*.sc' mill-build .mill-version .mill-jvm-opts .mill-opts .mill-repositories .config ':(exclude)out'
 STRAY_GUARD = STRAY=$$(git status --porcelain --ignored --untracked-files=all -- $(SOURCE_DIRS) $(BUILD_FILES)); \
 	HIDDEN=$$(set -o pipefail; git ls-files -v | awk '/^[a-zS]/'); \
 	LINKS=$$(set -o pipefail; git ls-files -s | awk '$$1 != "100644" && $$1 != "100755"'); \
@@ -142,8 +144,10 @@ TAG_VERSION = VERSION=$$(git describe --exact-match --tags --match 'v[0-9]*' HEA
 	if [ -n "$$TRACKED" ]; then echo "[ERROR] files under $(BUNDLES) are tracked: a bundle is built here, never committed"; exit 1; fi; \
 	B="$(BUNDLES)/$(BUNDLE_PREFIX)-$$VERSION"
 
-# Needs VERSION. Refuses a version under embargo, and any upload while an embargoed release is
-# being prepared.
+# Needs VERSION and B. Refuses a version under embargo, anything while an embargoed release is
+# being prepared, and a version that went to Central first (make publish, central-bundle) until
+# embargo-lift has recorded the lift next to its bundle: the lift needs positive proof, so a lost
+# $(EMBARGO_FILE) (a git clean, another machine) does not open the way.
 EMBARGO_GUARD = if [ -L "$(EMBARGO_FILE)" ] || git ls-files --error-unmatch "$(EMBARGO_FILE)" >/dev/null 2>&1; then \
 		echo "[ERROR] $(EMBARGO_FILE) is tracked or a symlink: refusing to use it"; exit 1; fi; \
 	if [ -f "$(EMBARGO_FILE)" ] && grep -qxF "$$VERSION" "$(EMBARGO_FILE)"; then \
@@ -157,6 +161,11 @@ EMBARGO_GUARD = if [ -L "$(EMBARGO_FILE)" ] || git ls-files --error-unmatch "$(E
 			yes) echo "[ERROR] the release in progress is under embargo: no GitHub Release, nothing on $(REPO_URL)"; exit 1;; \
 			*) echo "[ERROR] $(RELEASE_STATE) cannot be read: refusing, it may hold an embargo"; exit 1;; \
 		esac; \
+	fi; \
+	if [ -e "$$B.CENTRAL_UPLOAD_STARTED" ] || [ -L "$$B.CENTRAL_UPLOAD_STARTED" ] || [ -e "$$B/FROM_CENTRAL" ]; then \
+		if [ ! -f "$$B.EMBARGO_LIFTED" ] || [ -L "$$B.EMBARGO_LIFTED" ]; then \
+			echo "[ERROR] $$VERSION went to Maven Central first, as a security fix: nothing more is published until"; \
+			echo "        make embargo-lift VERSION=$$VERSION records that its advisory is published"; exit 1; fi; \
 	fi
 
 # Needs URL. The HTTP status of a GET of $$URL without credentials, without following a redirect
@@ -257,15 +266,17 @@ mima:
 #    once, as build.mill's release.repoUrl, add it once, after Coursier's defaults, and name no
 #    other repository (release.py build-repos);
 # 2. Mill's own `repositories`, which would come before Central, is empty, and every module
-#    resolves from exactly Coursier's defaults followed by REPO_URL;
+#    resolves from exactly Coursier's defaults followed by REPO_URL, which build.mill asks for
+#    dev.taihei alone;
 # 3. every dev.taihei dependency of a published module is on Maven Central or on REPO_URL. A
 #    dependency on another module of this library is the same release, and needs the same
 #    version;
-# 4. every file the build resolved came from Maven Central or REPO_URL, only dev.taihei from
-#    REPO_URL, and every dev.taihei file, with its POM, is in the SHA256SUMS of its version's
-#    immutable GitHub Release, or, for a version without one (before this route, or a security
-#    fix before its advisory), comes from Central with a good signature by the release key
-#    (release.py resolved, CISO condition C12). The GitHub API is asked without a token.
+# 4. every file the build resolved came from Maven Central or REPO_URL, nothing but dev.taihei is
+#    in the Coursier cache of REPO_URL, and every dev.taihei file, with its POM, is in the
+#    SHA256SUMS of its version's immutable GitHub Release and signed by the release key, or, for
+#    a version without a release (before this route, or a security fix before its advisory),
+#    comes from Central with a good signature by the release key (release.py resolved, CISO
+#    condition C12). The GitHub API is asked without a token.
 # Each check asks for a file, never a directory, and a redirect stops it. The text scan reads
 # tracked build files; an untracked build file is STRAY_GUARD's to refuse at a release, and a
 # Coursier mirror file in the user's home is outside this repository. CI on a clean runner, with
@@ -274,7 +285,7 @@ mima:
 RESOLVED = resolvedMvnDeps,resolvedRunMvnDeps,scalaCompilerClasspath,scalacPluginClasspath,scalaDocClasspath
 RESOLVED := $(RESOLVED),scalaDocPluginClasspath,semanticDbPluginClasspath,resolvedMimaPreviousArtifacts
 RESOLVED := $(RESOLVED),scalaJSToolsClasspath,scalaJSWorkerClasspath,scalaJSLinkerClasspath,scalaJSJsEnvMvnDeps
-RESOLVED := $(RESOLVED),scalafixToolClasspath,pgpWorkerClasspath
+RESOLVED := $(RESOLVED),scalafixToolClasspath,pgpWorkerClasspath,scalaCompilerBridge
 repo-guard:
 	@set -euo pipefail; \
 	if [ -n "$${COURSIER_REPOSITORIES:-}$${COURSIER_MIRRORS:-}$${COURSIER_CREDENTIALS:-}" ]; then \
@@ -440,10 +451,10 @@ release-preflight:
 	done; \
 	if [ -n "$$FOUND" ]; then echo "[preflight] $$VERSION is released already, and final:"; printf '  %s\n' $$FOUND; exit 1; fi; \
 	echo "[preflight] $$VERSION is neither on Maven Central nor on $(REPO_URL)"; \
-	REMOTE=$$(git ls-remote --tags origin "refs/tags/v$$VERSION") || { echo "[preflight] cannot read the tags on origin"; exit 1; }; \
-	if [ -n "$$REMOTE" ]; then echo "[preflight] v$$VERSION is on origin already: the version is final"; exit 1; fi; \
+	REMOTE=$$(git ls-remote --tags "$(GITHUB_GIT)" "refs/tags/v$$VERSION") || { echo "[preflight] cannot read the tags of $(GITHUB_REPO)"; exit 1; }; \
+	if [ -n "$$REMOTE" ]; then echo "[preflight] v$$VERSION is on $(GITHUB_REPO) already: the version is final"; exit 1; fi; \
 	$(RELEASE_ABSENT); \
-	echo "[preflight] v$$VERSION is not on origin, and $(GITHUB_REPO) has no GitHub Release for it"
+	echo "[preflight] v$$VERSION is not tagged on $(GITHUB_REPO), which has no GitHub Release for it"
 
 # ---------------------------------------------------------------------------
 # The release (ADR 0004): one signed bundle, kept on an immutable GitHub Release, from which the
@@ -487,6 +498,8 @@ central-bundle:
 	@set -eo pipefail; \
 	$(TAG_VERSION); \
 	if [ -e "$$B" ] || [ -L "$$B" ]; then echo "[central-bundle] $$B exists already: a bundle is built once"; exit 1; fi; \
+	if [ ! -f "$$B.EMBARGO_LIFTED" ] || [ -L "$$B.EMBARGO_LIFTED" ]; then \
+	  echo "[central-bundle] $$VERSION is a security fix: make embargo-lift VERSION=$$VERSION first, once its advisory is published"; exit 1; fi; \
 	P=$(firstword $(CENTRAL_PATHS)); A=$${P##*/}; URL="$(CENTRAL)/$$P/$$VERSION/$$A-$$VERSION.pom"; CODE=$$($(HTTP_CODE)); \
 	if [ "$$CODE" != 200 ]; then echo "[central-bundle] $$VERSION is not on Maven Central (HTTP $$CODE): its bundle is release-finalize's"; exit 1; fi; \
 	mkdir -p "$(BUNDLES)"; rm -rf -- "$$B.download" "$$B.partial"; \
@@ -503,6 +516,7 @@ central-bundle:
 	else echo "[central-bundle] no local publish directory to compare with"; fi; \
 	rm -rf -- "$$B.download"; \
 	if [ -e "$$B" ] || [ -L "$$B" ]; then echo "[central-bundle] $$B appeared while it was built"; exit 1; fi; \
+	date -u +%Y-%m-%dT%H:%M:%SZ > "$$B.partial/FROM_CENTRAL"; \
 	mv -- "$$B.partial" "$$B"; \
 	echo "[central-bundle] $$B, from Maven Central's files; nothing was signed again"; \
 	echo "[central-bundle] $$(cat "$$B/$(BUNDLE_PREFIX)-$$VERSION.zip.sha256")"
@@ -528,11 +542,11 @@ release-github:
 	NOTES="RELEASE_$${VERSION//./_}.md"; \
 	if [ ! -f "$$NOTES" ] || [ -L "$$NOTES" ] || ! git ls-files --error-unmatch "$$NOTES" >/dev/null 2>&1; then \
 	  echo "[release-github] $$NOTES is not a committed file"; exit 1; fi; \
-	REMOTE_TAG=$$(git ls-remote origin "refs/tags/v$$VERSION^{}" | cut -f1) || { echo "[release-github] cannot read the tags on origin"; exit 1; }; \
+	REMOTE_TAG=$$(git ls-remote "$(GITHUB_GIT)" "refs/tags/v$$VERSION^{}" | cut -f1) || { echo "[release-github] cannot read the tags of $(GITHUB_REPO)"; exit 1; }; \
 	if [ "$$REMOTE_TAG" != "$$(git rev-parse "v$$VERSION^{commit}")" ]; then \
-	  echo "[release-github] v$$VERSION on origin is not the local tag: push main and the tag first"; exit 1; fi; \
-	git fetch -q origin main 2>/dev/null || { echo "[release-github] main is not on origin: push main first"; exit 1; }; \
-	if ! git merge-base --is-ancestor HEAD origin/main; then echo "[release-github] main on origin does not hold the release commit: push main first"; exit 1; fi; \
+	  echo "[release-github] v$$VERSION on $(GITHUB_REPO) is not the local tag: push main and the tag first"; exit 1; fi; \
+	git fetch -q "$(GITHUB_GIT)" main 2>/dev/null || { echo "[release-github] main is not on $(GITHUB_REPO): push main first"; exit 1; }; \
+	if ! git merge-base --is-ancestor HEAD FETCH_HEAD; then echo "[release-github] main on $(GITHUB_REPO) does not hold the release commit: push main first"; exit 1; fi; \
 	$(RELEASE_ABSENT); \
 	T=$$(mktemp -d "$$B/.release.XXXXXX"); trap 'rm -rf "$$T"' EXIT; \
 	{ cat "$$NOTES"; printf '\n## The signed bundle\n\n'; \
@@ -905,25 +919,25 @@ release-abort:
 			echo "        Its tag stays and nothing was undone. Check the Central Portal's deployments and"; \
 			echo "        https://repo1.maven.org/maven2/$(firstword $(CENTRAL_PATHS))/$$NEW/; the CTO and the CISO decide what follows."; exit 1; \
 		fi; \
-		REMOTE=$$(git ls-remote --tags origin "refs/tags/v$$NEW") || { \
-			echo "[ERROR] cannot read the tags on origin, so cannot tell whether v$$NEW is final: nothing was undone"; exit 1; }; \
+		REMOTE=$$(git ls-remote --tags "$(GITHUB_GIT)" "refs/tags/v$$NEW") || { \
+			echo "[ERROR] cannot read the tags of $(GITHUB_REPO), so cannot tell whether v$$NEW is final: nothing was undone"; exit 1; }; \
 		if [ -n "$$REMOTE" ]; then \
-			echo "[ERROR] v$$NEW is on origin: from the push of its tag the version is final. It is never deleted or replaced,"; \
+			echo "[ERROR] v$$NEW is on $(GITHUB_REPO): from the push of its tag the version is final. It is never deleted or replaced,"; \
 			echo "        and its tag and bundle stay. Nothing was undone. If its GitHub Release is missing, make release-github;"; \
 			echo "        otherwise the CTO and the CISO decide what follows, normally the next patch version."; exit 1; \
 		fi; \
 		if [ "$$(git log -1 --pretty=%s)" = "Add release notes for version $$NEW" ]; then \
-			MAIN=$$(git ls-remote origin refs/heads/main | cut -f1) || { \
-				echo "[ERROR] cannot read main on origin, so cannot tell whether the notes commit is pushed: nothing was undone"; exit 1; }; \
+			MAIN=$$(git ls-remote "$(GITHUB_GIT)" refs/heads/main | cut -f1) || { \
+				echo "[ERROR] cannot read main on $(GITHUB_REPO), so cannot tell whether the notes commit is pushed: nothing was undone"; exit 1; }; \
 			if [ -n "$$MAIN" ]; then \
-				git cat-file -e "$$MAIN^{commit}" 2>/dev/null || git fetch -q origin main || { \
-					echo "[ERROR] cannot fetch main from origin, so cannot tell whether the notes commit is pushed: nothing was undone"; exit 1; }; \
+				git cat-file -e "$$MAIN^{commit}" 2>/dev/null || git fetch -q "$(GITHUB_GIT)" main || { \
+					echo "[ERROR] cannot fetch main from $(GITHUB_REPO), so cannot tell whether the notes commit is pushed: nothing was undone"; exit 1; }; \
 				RC=0; git merge-base --is-ancestor HEAD "$$MAIN" || RC=$$?; \
 				if [ "$$RC" = 0 ]; then \
-					echo "[ERROR] main on origin holds the notes commit of v$$NEW: undoing it would need a force push. Nothing was undone."; \
+					echo "[ERROR] main on $(GITHUB_REPO) holds the notes commit of v$$NEW: undoing it would need a force push. Nothing was undone."; \
 					echo "        Push the tag (git push origin v$$NEW), then make release-github, or bring it to the CTO."; exit 1; \
 				elif [ "$$RC" != 1 ]; then \
-					echo "[ERROR] cannot tell whether main on origin holds the notes commit of v$$NEW: nothing was undone"; exit 1; \
+					echo "[ERROR] cannot tell whether main on $(GITHUB_REPO) holds the notes commit of v$$NEW: nothing was undone"; exit 1; \
 				fi; \
 			fi; \
 		fi; \
@@ -947,16 +961,23 @@ release-abort:
 		echo "No release in progress"; \
 	fi
 
-# After a security fix's advisory is published, its version may get its GitHub Release, and so
-# reach the family's repository, as well.
+# After a security fix's advisory is published: records the lift next to the version's bundle,
+# the positive proof central-bundle, release-github and publish-repo want for a version that went
+# to Central first, and takes the version off $(EMBARGO_FILE). Then its GitHub Release, and so the
+# family's repository, may follow.
 embargo-lift:
 	@set -eo pipefail; \
 	if ! [[ "$(VERSION)" =~ ^[0-9]+\.[0-9]+\.[0-9]+$$ ]]; then echo "[ERROR] Usage: make embargo-lift VERSION=x.y.z, once its advisory is published"; exit 1; fi; \
 	if [ -L "$(EMBARGO_FILE)" ]; then echo "[ERROR] $(EMBARGO_FILE) is a symlink"; exit 1; fi; \
-	if [ ! -f "$(EMBARGO_FILE)" ] || ! grep -qxF "$(VERSION)" "$(EMBARGO_FILE)"; then echo "[ERROR] $(VERSION) is not under embargo"; exit 1; fi; \
-	REST=$$(grep -vxF "$(VERSION)" "$(EMBARGO_FILE)" || true); \
-	if [ -n "$$REST" ]; then printf '%s\n' "$$REST" > "$(EMBARGO_FILE)"; else rm -f "$(EMBARGO_FILE)"; fi; \
-	echo "[OK] $(VERSION) is no longer under embargo"
+	L="$(BUNDLES)/$(BUNDLE_PREFIX)-$(VERSION).EMBARGO_LIFTED"; \
+	if [ -L "$$L" ] || [ -L "$(BUNDLES)" ]; then echo "[ERROR] $$L or $(BUNDLES) is a symlink"; exit 1; fi; \
+	mkdir -p "$(BUNDLES)"; \
+	echo "$$(date -u +%Y-%m-%dT%H:%M:%SZ) advisory published, lifted by make embargo-lift" > "$$L"; \
+	if [ -f "$(EMBARGO_FILE)" ] && grep -qxF "$(VERSION)" "$(EMBARGO_FILE)"; then \
+	  REST=$$(grep -vxF "$(VERSION)" "$(EMBARGO_FILE)" || true); \
+	  if [ -n "$$REST" ]; then printf '%s\n' "$$REST" > "$(EMBARGO_FILE)"; else rm -f "$(EMBARGO_FILE)"; fi; \
+	  echo "[OK] $(VERSION) is no longer under embargo"; \
+	else echo "[OK] $(VERSION) was not listed under embargo here; its lift is recorded all the same"; fi
 
 release-status:
 	@$(STATE_GUARD); \

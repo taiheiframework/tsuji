@@ -86,8 +86,9 @@ make publish-dry-run                           # the signed bundle, written to o
 
 A security fix (`make release-prepare … EMBARGO=1`) goes the other way: `release-finalize`
 publishes it to Maven Central with `make publish`; once its advisory is published,
-`make embargo-lift VERSION=x.y.z`, `make central-bundle` (the bundle from Central's own files),
-`make release-github` and `make publish-repo`.
+`make embargo-lift VERSION=x.y.z` records the lift, which nothing after it does without, then
+`make central-bundle` (the bundle from Central's own files), `make release-github` and
+`make publish-repo`.
 
 One release publishes `taihei-tsuji` (JVM and Scala.js) and `taihei-tsuji-tools` with the same
 version, as one signed bundle, built and signed once. Its zip and `SHA256SUMS`, the SHA-256 of
@@ -99,10 +100,11 @@ gets its GitHub Release, from Central's own files (`make central-bundle`), only 
 advisory is published.
 
 `make validate` checks the build's repositories (`repo-guard`): Maven Central first, then
-`REPO_URL`, and nothing else; every `dev.taihei` pin on one of them; every file the build
-resolved from one of them, only `dev.taihei` from `REPO_URL`; and every resolved `dev.taihei`
-file in the `SHA256SUMS` of its version's immutable GitHub Release, or, for a version without
-one, on Central with a good signature by the release key (`keys/release-key.asc`). A release
+`REPO_URL`, which the build asks for `dev.taihei` alone, and nothing else; every `dev.taihei`
+pin on one of them; every file the build resolved from one of them; and every resolved
+`dev.taihei` file in the `SHA256SUMS` of its version's immutable GitHub Release and signed by
+the release key (`keys/release-key.asc`), or, for a version without a release, on Central with a
+good signature by that key. A release
 publishes only the commit `release-prepare` validated, and refuses when a file git does not track
 is in a source or resource folder, or a stray build file is in the tree. Credentials never go on
 make's command line.

@@ -346,9 +346,11 @@ repo-guard:
 
 # The release machinery's own tests: scripts/release.py, and the release targets against stand-ins
 # for Maven Central, the family's repository, the GitHub API, gh and Mill on localhost. No real
-# registry, no token and no signing key is involved.
+# registry, no token and no signing key is involved. Then the mill launcher's pinned SHA-256: a
+# tampered or unpinned Mill, downloaded or already cached, is refused.
 release-test:
 	@bash scripts/test-release.sh
+	@bash scripts/test-mill-launcher
 
 validate: repo-guard release-test fix fmt compile test mima
 

@@ -8,7 +8,7 @@
 # signed by throwaway keys (no Mill, never the release key): what is tested is what the targets do
 # with a bundle, its signatures and the answers they get. Where a target starts Mill or gh, a
 # stand-in answers and records what it was asked (and which credential variables reached Mill).
-# The mill launcher's download check runs against a stand-in curl. Nothing leaves localhost. One
+# Nothing leaves localhost. The mill launcher has its own tests, scripts/test-mill-launcher. One
 # line per check; exits non-zero when any check fails.
 set -uo pipefail
 # make hands its command-line variables to every make below it, through MAKEFLAGS and as
@@ -348,26 +348,6 @@ expect "released: a version on Central" 0 "on Maven Central" R released --centra
 expect "released: a version on the site" 0 "on $SITE" R released --central "$CENTRAL" --url "$SITE" --artifact "$DA" 6.6.7
 expect "released: a version on neither fails, naming it" 1 "v6.6.8 is neither on Maven Central nor on" R released --central "$CENTRAL" --url "$SITE" --artifact "$DA" 6.6.8
 expect "released: a redirect fails" 1 "HTTP 301" R released --central "$CENTRAL" --url "$BASE/moved/" --artifact "$DA" 6.6.7
-
-# --- the mill launcher ----------------------------------------------------------------------
-# A stand-in curl records its arguments and writes a file that is not Mill where -o points.
-L="$W/launcher"; mkdir -p "$L/bin" "$L/cwd"
-cat > "$L/bin/curl" <<EOF
-#!/usr/bin/env bash
-printf '%s\n' "\$*" >> "$L/curl-args"
-out=""; while [ \$# -gt 0 ]; do [ "\$1" = -o ] && out="\$2"; shift; done
-[ -n "\$out" ] && printf 'not mill' > "\$out"
-EOF
-chmod +x "$L/bin/curl"
-launch() { (cd "$L/cwd" && env PATH="$L/bin:$PATH" MILL_FINAL_DOWNLOAD_FOLDER="$L/dl" MILL_OUTPUT_DIR="$L/out" "$@" sh "$REPO/mill" --version); }
-expect "launcher: a download that does not match the pinned SHA-256 is refused" 1 "not the pinned" launch MILL_VERSION=1.3.1
-[ -s "$L/curl-args" ] && [ ! -e "$L/dl" ] && [ ! -e "$L/out/mill-temp-download" ] \
-  && pass "launcher: and it is neither kept nor made executable" || fail "launcher: the refused download was kept"
-grep -qF -- "--proto =https --proto-redir =https" "$L/curl-args" \
-  && pass "launcher: curl may use HTTPS only, also after a redirect" || fail "launcher: curl's protocols are not limited: $(cat "$L/curl-args")"
-: > "$L/curl-args"
-expect "launcher: a version without a pinned SHA-256 is refused" 1 "No SHA-256 is pinned" launch MILL_VERSION=1.3.0
-[ ! -s "$L/curl-args" ] && pass "launcher: and nothing is downloaded for it" || fail "launcher: curl ran for an unpinned version"
 
 # --- the Makefile targets, with stand-ins for Mill and gh --------------------------------------
 G="$W/repo"; mkdir -p "$G/scripts" "$G/keys"

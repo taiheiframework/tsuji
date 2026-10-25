@@ -1,0 +1,179 @@
+#!/usr/bin/env bash
+# Tests of the mill launcher's pinned SHA-256 (make release-test, part of make validate). This file
+# is the same in every repository that carries the launcher, as the launcher is.
+#
+# The launcher may run only a Mill whose SHA-256 is pinned in it: a download that does not match is
+# neither kept nor run, a copy already in the download cache is checked before every run, and a
+# version without a pin is refused before anything is downloaded or run, wherever the version came
+# from. The cases run against a scratch download folder with planted files, a stand-in curl that
+# writes something that is not Mill, and stand-ins for uname and ldd that select each platform's
+# binary. Nothing is downloaded. Every planted file is a script that leaves a mark when it runs, so
+# a refusal that still ran the file fails. Each case runs under every POSIX shell found: sh (dash
+# on Debian and Ubuntu), dash, and bash --posix (what /bin/sh is on macOS). The last case runs the
+# real, pinned Mill from the user's download cache. One line per check; exits non-zero when any
+# check fails.
+set -uo pipefail
+unset MILL_VERSION DEFAULT_MILL_VERSION MILL_FINAL_DOWNLOAD_FOLDER MILL_OUTPUT_DIR MILL_MAIN_CLI \
+  MILL_TEST_DRY_RUN_LAUNCHER_SCRIPT GITHUB_RELEASE_CDN
+
+REPO=$(cd "$(dirname "$0")/.." && pwd)
+LAUNCHER="$REPO/mill"
+W=$(mktemp -d "${TMPDIR:-/tmp}/taihei-launcher-test.XXXXXX")
+trap 'rm -rf "$W"' EXIT
+
+FAILED=0
+pass() { echo "ok   launcher: $1"; }
+fail() { echo "FAIL launcher: $1"; FAILED=1; }
+# expect NAME 0|1 PATTERN cmd...: the command succeeds (0) or fails (1), and prints PATTERN.
+expect() {
+  local name="$1" want="$2" pattern="$3" out rc; shift 3
+  out=$("$@" 2>&1); rc=$?
+  if { [ "$want" = 0 ] && [ "$rc" = 0 ]; } || { [ "$want" != 0 ] && [ "$rc" != 0 ]; }; then
+    if [ -z "$pattern" ] || grep -qF -- "$pattern" <<<"$out"; then pass "$name"; return; fi
+    fail "$name: the output lacks '$pattern'"
+  else
+    fail "$name: exit $rc"
+  fi
+  printf '%s\n' "$out" | tail -n 4 | sed 's/^/     /'
+}
+# The hash of a file, computed without any tool the launcher uses.
+sha() { python3 -I -B -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$1"; }
+
+PIN=$(tr -d '\r\n' < "$REPO/.mill-version")
+# The value pinned for a version and platform suffix, read from the launcher's table.
+pinned() { sed -n "s/^ *$1) echo \"\([0-9a-f]\{64\}\)\" ;;\$/\1/p" "$LAUNCHER"; }
+
+grep -qx "if \[ -z \"\${DEFAULT_MILL_VERSION}\" \] ; then DEFAULT_MILL_VERSION=\"$PIN\"; fi" "$LAUNCHER" \
+  && pass "its default version is .mill-version's $PIN" || fail "its default version is not .mill-version's $PIN"
+for suffix in "" -native-linux-amd64 -native-linux-aarch64 -native-mac-aarch64 -native-mac-amd64; do
+  [ -n "$(pinned "$PIN$suffix")" ] && pass "mill $PIN$suffix has a pinned SHA-256" \
+    || fail "mill $PIN$suffix has no pinned SHA-256"
+done
+
+mkdir -p "$W/bin" "$W/cwd" "$W/plat"
+cat > "$W/bin/curl" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$W/curl-args"
+out=""; while [ \$# -gt 0 ]; do [ "\$1" = -o ] && out="\$2"; shift; done
+[ -n "\$out" ] && printf 'not mill' > "\$out"
+EOF
+# uname and ldd as a given platform reports them (FAKE_S, FAKE_M, FAKE_GLIBC).
+cat > "$W/plat/uname" <<'EOF'
+#!/bin/sh
+if [ "$1" = -m ]; then echo "$FAKE_M"; else echo "$FAKE_S"; fi
+EOF
+cat > "$W/plat/ldd" <<'EOF'
+#!/bin/sh
+echo "ldd (GNU libc) $FAKE_GLIBC"
+EOF
+chmod +x "$W/bin/curl" "$W/plat/uname" "$W/plat/ldd"
+
+reset() { rm -rf "$W/dl" "$W/out" "$W/ran" "$W/cwd"; mkdir -p "$W/cwd"; : > "$W/curl-args"; }
+# plant NAME: a file in the download folder that is not the pinned Mill and marks it ran.
+plant() {
+  mkdir -p "$W/dl"
+  printf '#!/bin/sh\ntouch "%s/ran"\necho "Mill Build Tool version %s"\n' "$W" "$PIN" > "$W/dl/$1"
+  chmod +x "$W/dl/$1"
+}
+not_run() {
+  [ ! -e "$W/ran" ] && pass "$1: and it did not run" || fail "$1: the refused file ran"
+  [ ! -s "$W/curl-args" ] && pass "$1: and nothing was downloaded" || fail "$1: curl ran: $(cat "$W/curl-args")"
+}
+
+# This machine's file name for the pinned version, from the launcher's own dry-run hook.
+CACHED=$(cd "$W/cwd" && MILL_TEST_DRY_RUN_LAUNCHER_SCRIPT=1 MILL_FINAL_DOWNLOAD_FOLDER="$W/dl" sh "$LAUNCHER" | tail -n 1)
+NAME=$(basename "$CACHED")
+case "$NAME" in
+  "$PIN" | "$PIN"-native-*) pass "this platform runs mill $NAME" ;;
+  *) fail "the launcher names an unexpected file for this platform: $CACHED"; NAME="$PIN" ;;
+esac
+
+SHELLS=(sh)
+command -v dash >/dev/null 2>&1 && SHELLS+=(dash)
+command -v bash >/dev/null 2>&1 && SHELLS+=("bash --posix")
+
+for SH in "${SHELLS[@]}"; do
+  # $SH is word-split on purpose: "bash --posix" is a command and an option.
+  # shellcheck disable=SC2086
+  launch() { (cd "$W/cwd" && env PATH="$W/bin:$PATH" MILL_FINAL_DOWNLOAD_FOLDER="$W/dl" MILL_OUTPUT_DIR="$W/out" "$@" $SH "$LAUNCHER" --version); }
+  T="[$SH]"
+
+  reset
+  expect "$T a download that does not match the pinned SHA-256 is refused" 1 "not the pinned" launch MILL_VERSION="$PIN"
+  [ -s "$W/curl-args" ] && [ ! -e "$W/dl" ] && [ ! -e "$W/out/mill-temp-download" ] \
+    && pass "$T and it is neither kept nor made executable" || fail "$T the refused download was kept"
+  grep -qF -- "--proto =https --proto-redir =https" "$W/curl-args" \
+    && pass "$T curl may use HTTPS only, also after a redirect" || fail "$T curl's protocols are not limited: $(cat "$W/curl-args")"
+
+  reset; plant "$NAME"
+  expect "$T a tampered copy of $NAME in the cache is refused" 1 "not the pinned $(pinned "$NAME")" launch
+  not_run "$T the tampered copy"
+  expect "$T the refusal names the cached file's actual SHA-256" 1 "is $(sha "$W/dl/$NAME"), not" launch
+
+  reset; plant "$PIN"
+  expect "$T a tampered copy of the JVM launcher ($PIN-jvm) is refused" 1 "not the pinned $(pinned "$PIN")" launch MILL_VERSION="$PIN-jvm"
+  not_run "$T the tampered JVM launcher"
+
+  # 0.0.1 has no pin in any launcher; with its own suffix it is the file this platform would run.
+  UNPINNED="0.0.1${NAME#"$PIN"}"
+  reset; plant "$UNPINNED"; plant 0.0.1
+  expect "$T MILL_VERSION naming a cached, unpinned version is refused" 1 "No SHA-256 is pinned for mill 0.0.1" launch MILL_VERSION=0.0.1
+  not_run "$T the unpinned version from MILL_VERSION"
+  reset; plant "$UNPINNED"; plant 0.0.1
+  expect "$T DEFAULT_MILL_VERSION naming a cached, unpinned version is refused" 1 "No SHA-256 is pinned for mill 0.0.1" launch DEFAULT_MILL_VERSION=0.0.1
+  not_run "$T the unpinned version from DEFAULT_MILL_VERSION"
+  reset; plant "$UNPINNED"; plant 0.0.1; echo 0.0.1 > "$W/cwd/.mill-version"
+  expect "$T .mill-version naming a cached, unpinned version is refused" 1 "No SHA-256 is pinned for mill 0.0.1" launch
+  not_run "$T the unpinned version from .mill-version"
+  reset
+  expect "$T an unpinned version that is not cached is refused" 1 "No SHA-256 is pinned for mill 0.0.2" launch MILL_VERSION=0.0.2
+  not_run "$T the unpinned, uncached version"
+
+  # Every platform's binary is checked against its own pin: Linux and macOS on both
+  # architectures, and the JVM launcher a Linux with an older glibc than 2.39 falls back to.
+  for P in "Linux x86_64 2.43 -native-linux-amd64" "Linux aarch64 2.43 -native-linux-aarch64" \
+    "Darwin arm64 - -native-mac-aarch64" "Darwin x86_64 - -native-mac-amd64" "Linux x86_64 2.31 -"; do
+    set -- $P; suffix="${4#-}"; [ -n "$suffix" ] && suffix="-$suffix"
+    reset; plant "$PIN$suffix"
+    expect "$T on $1 $2 (glibc $3) a tampered cached mill $PIN$suffix is refused" 1 "not the pinned $(pinned "$PIN$suffix")" \
+      env PATH="$W/plat:$W/bin:$PATH" FAKE_S="$1" FAKE_M="$2" FAKE_GLIBC="$3" \
+      MILL_FINAL_DOWNLOAD_FOLDER="$W/dl" MILL_OUTPUT_DIR="$W/out" sh -c 'cd "$1" && shift && exec "$@"' - "$W/cwd" $SH "$LAUNCHER" --version
+    not_run "$T $1 $2 (glibc $3)"
+  done
+done
+
+# The hash without sha256sum, as on a macOS without coreutils: openssl first, then shasum. Each
+# runs on a PATH that holds only the tools the launcher needs, and must compute the right hash.
+TOOLS="uname ldd grep head cut tr sed dirname mkdir rm chmod mv"
+for H in openssl shasum; do
+  D="$W/only-$H"; mkdir -p "$D"
+  for t in $TOOLS $H $([ "$H" = shasum ] && echo perl); do
+    p=$(command -v "$t" 2>/dev/null) && ln -s "$p" "$D/$t"
+  done
+  if [ ! -e "$D/$H" ]; then echo "skip launcher: $H is not installed here"; continue; fi
+  SHBIN=$(command -v sh)
+  env PATH="$D" "$SHBIN" -c 'command -v sha256sum' >/dev/null 2>&1 && fail "the $H PATH still has sha256sum"
+  [ "$H" = shasum ] && env PATH="$D" "$SHBIN" -c 'command -v openssl' >/dev/null 2>&1 && fail "the shasum PATH still has openssl"
+  reset; plant "$NAME"
+  expect "with $H for the hash, a tampered cached copy is refused with its right SHA-256" 1 \
+    "is $(sha "$W/dl/$NAME"), not the pinned $(pinned "$NAME")" \
+    env PATH="$D" MILL_FINAL_DOWNLOAD_FOLDER="$W/dl" MILL_OUTPUT_DIR="$W/out" "$SHBIN" -c 'cd "$1" && exec "$2" "$3" --version' - "$W/cwd" "$SHBIN" "$LAUNCHER"
+  [ ! -e "$W/ran" ] && pass "with $H for the hash, the tampered copy did not run" || fail "with $H, the tampered copy ran"
+done
+
+# The real Mill: the pinned binary in the user's download cache runs, without a download. make
+# validate has run ./mill before this; a fresh clone gets it here, as its first build would.
+REAL=$(cd "$W/cwd" && MILL_TEST_DRY_RUN_LAUNCHER_SCRIPT=1 sh "$LAUNCHER" | tail -n 1)
+[ -s "$REAL" ] || (cd "$REPO" && ./mill --version >/dev/null 2>&1) || true
+if [ -s "$REAL" ]; then
+  reset
+  expect "the pinned mill $NAME from the cache runs" 0 "Mill Build Tool version $PIN" \
+    env PATH="$W/bin:$PATH" MILL_FINAL_DOWNLOAD_FOLDER="$(dirname "$REAL")" MILL_OUTPUT_DIR="$W/out" \
+    sh -c 'cd "$1" && exec sh "$2" --version' - "$W/cwd" "$LAUNCHER"
+  [ ! -s "$W/curl-args" ] && pass "and nothing was downloaded for it" || fail "curl ran for the cached, pinned mill"
+else
+  fail "the pinned mill is not in the download cache at $REAL and could not be downloaded"
+fi
+
+if [ "$FAILED" != 0 ]; then echo "launcher: some checks FAILED"; exit 1; fi
+echo "launcher: all checks passed"

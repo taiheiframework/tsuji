@@ -5,12 +5,16 @@
 # Documentation: https://mill-build.org/mill/cli/installation-ide.html#_bootstrap_scripts
 # Script Version: 1.3.1
 #
-# Changed for the Taihei Framework: the launcher checks the SHA-256 of the Mill it downloads
-# against the values pinned in mill_pinned_sha256 below, before the file is made executable, and
-# curl may use HTTPS only, also after a redirect. A version without a pinned hash is refused, so a
-# Mill upgrade replaces this script and pins the new version's hashes in the same commit. The
-# hashes were taken from repo1.maven.org, checked against Central's .sha1 and against the PGP
-# signature of each file by Mill's release key (8F0D 3BA7 045A A84F 4FCC A818 66DB 4638 D2A8 A7E9).
+# Changed for the Taihei Framework: the launcher runs only a Mill whose SHA-256 equals the value
+# pinned in mill_pinned_sha256 below. It checks a download before the file is made executable,
+# and it checks the file it is about to run before every run, so a copy already in Mill's download
+# cache (planted, corrupted, or left there by another launcher) is refused too. A version without
+# a pinned hash is refused before anything is downloaded or run, wherever the version came from
+# (MILL_VERSION, DEFAULT_MILL_VERSION, .mill-version or the build file), so a Mill upgrade replaces
+# this script and pins the new version's hashes in the same commit. curl may use HTTPS only, also
+# after a redirect. The hashes were taken from repo1.maven.org, checked against Central's .sha1
+# and against the PGP signature of each file by Mill's release key
+# (8F0D 3BA7 045A A84F 4FCC A818 66DB 4638 D2A8 A7E9).
 
 set -e
 
@@ -25,9 +29,13 @@ mill_pinned_sha256() {
   esac
 }
 
+# The hash runs before every run, so the fastest tool there is comes first: sha256sum (coreutils),
+# then openssl (macOS has it, and its digest is several times faster than shasum's), then shasum.
+# Whatever goes wrong here prints something that is not the pinned hash, so the run is refused.
 mill_sha256() {
-  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d ' ' -f 1
-  else shasum -a 256 "$1" | cut -d ' ' -f 1; fi
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum < "$1" | cut -d ' ' -f 1
+  elif command -v openssl >/dev/null 2>&1; then openssl dgst -sha256 < "$1" | sed 's/^.*= *//'
+  else shasum -a 256 < "$1" | cut -d ' ' -f 1; fi
 }
 
 if [ -z "${DEFAULT_MILL_VERSION}" ] ; then DEFAULT_MILL_VERSION="1.3.1"; fi
@@ -147,6 +155,12 @@ esac
 
 MILL="${MILL_FINAL_DOWNLOAD_FOLDER}/$MILL_VERSION$ARTIFACT_SUFFIX"
 
+MILL_EXPECTED_SHA256="$(mill_pinned_sha256 "$MILL_VERSION$ARTIFACT_SUFFIX")"
+if [ -z "${MILL_EXPECTED_SHA256}" ] ; then
+  echo "No SHA-256 is pinned for mill ${MILL_VERSION}${ARTIFACT_SUFFIX} in this launcher: refusing to download or run it." 1>&2
+  exit 1
+fi
+
 # If not already downloaded, download it
 if [ ! -s "${MILL}" ] || [ "$MILL_TEST_DRY_RUN_LAUNCHER_SCRIPT" = "1" ] ; then
   case $MILL_VERSION in
@@ -196,12 +210,6 @@ if [ ! -s "${MILL}" ] || [ "$MILL_TEST_DRY_RUN_LAUNCHER_SCRIPT" = "1" ] ; then
     exit 0
   fi
 
-  MILL_EXPECTED_SHA256="$(mill_pinned_sha256 "$MILL_VERSION$ARTIFACT_SUFFIX")"
-  if [ -z "${MILL_EXPECTED_SHA256}" ] ; then
-    echo "No SHA-256 is pinned for mill ${MILL_VERSION}${ARTIFACT_SUFFIX} in this launcher: refusing to download it." 1>&2
-    exit 1
-  fi
-
   echo "Downloading mill ${MILL_VERSION} from ${MILL_DOWNLOAD_URL} ..." 1>&2
   rm -f "${MILL_TEMP_DOWNLOAD_FILE}"
   curl -f -L --proto '=https' --proto-redir '=https' -o "${MILL_TEMP_DOWNLOAD_FILE}" "${MILL_DOWNLOAD_URL}"
@@ -212,7 +220,7 @@ if [ ! -s "${MILL}" ] || [ "$MILL_TEST_DRY_RUN_LAUNCHER_SCRIPT" = "1" ] ; then
     echo "The SHA-256 of ${MILL_DOWNLOAD_URL} is ${MILL_ACTUAL_SHA256}, not the pinned ${MILL_EXPECTED_SHA256}: refusing to run it." 1>&2
     exit 1
   fi
-  unset MILL_EXPECTED_SHA256 MILL_ACTUAL_SHA256
+  unset MILL_ACTUAL_SHA256
 
   chmod +x "${MILL_TEMP_DOWNLOAD_FILE}"
 
@@ -222,6 +230,14 @@ if [ ! -s "${MILL}" ] || [ "$MILL_TEST_DRY_RUN_LAUNCHER_SCRIPT" = "1" ] ; then
   unset MILL_TEMP_DOWNLOAD_FILE
   unset MILL_DOWNLOAD_SUFFIX
 fi
+
+# The file about to run is checked every time, not only when it was downloaded above.
+MILL_ACTUAL_SHA256="$(mill_sha256 "${MILL}")"
+if [ "${MILL_ACTUAL_SHA256}" != "${MILL_EXPECTED_SHA256}" ] ; then
+  echo "The SHA-256 of ${MILL} is ${MILL_ACTUAL_SHA256}, not the pinned ${MILL_EXPECTED_SHA256}: refusing to run it. Find out how it changed, then delete it to download Mill again." 1>&2
+  exit 1
+fi
+unset MILL_EXPECTED_SHA256 MILL_ACTUAL_SHA256
 
 MILL_FIRST_ARG=""
 if [ "$1" = "--bsp" ] || [ "${1#"-i"}" != "$1" ] || [ "$1" = "--interactive" ] || [ "$1" = "--no-server" ] || [ "$1" = "--no-daemon" ] || [ "$1" = "--help" ] ; then

@@ -135,10 +135,11 @@ the make command line points elsewhere, and the file must be yours, mode 600, no
 environment (`MILL_SONATYPE_USERNAME`, `MILL_SONATYPE_PASSWORD`, `MILL_PGP_SECRET_BASE64`,
 `MILL_PGP_PASSPHRASE`). The dry run that builds the release bundle gets the release key but never
 the Central token, neither from that file nor from the shell. The `mill` launcher downloads Mill
-over HTTPS only and keeps a download only when its SHA-256 matches the one pinned in the launcher;
-a copy already in Mill's cache is not checked again. `release-preflight` (inside `release-finalize`),
-`release-github` and `publish-repo` use the maintainer's `gh` login; nothing else in a release
-needs a token.
+over HTTPS only, and runs Mill only when its SHA-256 matches the one pinned in the launcher: it
+checks a download before keeping it, and the file it is about to run before every run, so a
+tampered copy in Mill's cache is refused, as is a version without a pin. `release-preflight`
+(inside `release-finalize`), `release-github` and `publish-repo` use the maintainer's `gh` login;
+nothing else in a release needs a token.
 Releases are signed by the Taihei Framework release key, fingerprint
 `5026 B299 6DDB 697E C463  0BCF 14A7 33E2 A507 702F`, with the user ids
 `Taihei Framework Releases <releases@taihei.dev>` and, from before the family was renamed,

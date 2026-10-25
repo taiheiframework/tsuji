@@ -289,9 +289,12 @@ language:
 - The 4.x shape (`args`, `namedArgs`, `translationTemplates`) is still read, as a legacy message
   under the key `legacy`, so stored 4.x JSON and a 4.x peer keep working.
 - Input is bounded: the JSON of a message or a text is read at most 64 levels of arrays and
-  objects deep, without recursion (a nested message takes two levels, a list around it one more,
-  so the 8 levels of messages below fit with room to spare); messages nest at most 8 deep, the kept arguments of a message
-  with an unknown key at most 16 levels and 100000 values, a list holds at most 10000 elements, a 4.x
+  objects deep (a catalogue 16), without recursion (a nested message takes two levels, a list
+  around it one more, so the 8 levels of messages below fit with room to spare), and a number in
+  a message, a text or a catalogue is at most 1100 characters long with an exponent of at most 9
+  digits (leading zeros not counted);
+  messages nest at most 8 deep, the kept arguments of a message with an unknown key at most 16
+  levels and 100000 values, a list holds at most 10000 elements, a 4.x
   message brings at most 1000 templates and 1000 arguments of at most 64K characters, a
   catalogue is at most 4M characters, 100000 messages and 16 levels of JSON nesting, and one
   template formats to at most a million characters (past that it falls back). A catalogue, or an

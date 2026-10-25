@@ -1,6 +1,7 @@
 package dev.taihei.tsuji
 
 import scala.collection.mutable
+import scala.util.control.NonFatal
 
 import zio.json.*
 import zio.json.ast.Json
@@ -15,12 +16,12 @@ import zio.{
 }
 
 // Reads a JSON value into zio-json's AST without recursion, refusing arrays and objects nested
-// deeper than MaxDepth. Messages and texts are input the application did not compile, and
-// zio-json's own Json decoder calls itself once per level, so its stack use grows with the input.
-// Here the open arrays and objects are kept on a heap stack instead, and the depth is bounded so
-// that whatever reads or writes the result afterwards, recursively, stays shallow too. A message
-// needs far less: nested messages stop at MessageArg's depth of 8, the kept arguments of an
-// unknown key at 16 levels, each message two levels of JSON.
+// deeper than MaxDepth and numbers longer than MaxNumberLength. Messages and texts are input the
+// application did not compile, and zio-json's own Json decoder calls itself once per level, so
+// its stack use grows with the input. Here the open arrays and objects are kept on a heap stack
+// instead, and the depth is bounded so that whatever reads or writes the result afterwards,
+// recursively, stays shallow too. A message needs far less: nested messages stop at MessageArg's
+// depth of 8, the kept arguments of an unknown key at 16 levels, each message two levels of JSON.
 private[tsuji] object BoundedJson:
 
   val MaxDepth = 64
@@ -37,8 +38,9 @@ private[tsuji] object BoundedJson:
     val fields = ChunkBuilder.make[(String, Json)]()
     var name   = ""
 
-  private def tooDeep(trace: List[JsonError]): Nothing =
-    Lexer.error(s"nests arrays and objects deeper than $MaxDepth", trace)
+  private val TooDeep = s"nests arrays and objects deeper than $MaxDepth"
+
+  private def tooDeep(trace: List[JsonError]): Nothing = Lexer.error(TooDeep, trace)
 
   /** zio-json's Json decoder, with the same values and errors, bounded to MaxDepth levels. */
   val decoder: JsonDecoder[Json] = new JsonDecoder[Json]:
@@ -105,9 +107,12 @@ private[tsuji] object BoundedJson:
     end unsafeDecode
 
     // An AST that is already built is taken as it is, as zio-json's decoder does, once it is
-    // known to be no deeper than a value this decoder reads.
+    // known to hold nothing this decoder would not read: no deeper nesting, and no number of a
+    // scale that a number within this reader's bounds cannot have.
     override def unsafeFromJsonAST(trace: List[JsonError], json: Json): Json =
-      if exceeds(json) then tooDeep(trace) else json
+      problem(json) match
+        case Some(p) => Lexer.error(p, trace)
+        case None    => json
 
   // A field's name and the colon after it, as zio-json reads them.
   private def readName(trace: List[JsonError], in: RetractReader): String =
@@ -124,24 +129,89 @@ private[tsuji] object BoundedJson:
     case 'n'       => Json.Null.decoder.unsafeDecode(trace, in)
     case 'f' | 't' => Json.Bool.decoder.unsafeDecode(trace, in)
     case '"'       => Json.Str.decoder.unsafeDecode(trace, in)
-    case '-' | '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' =>
-      Json.Num.decoder.unsafeDecode(trace, in)
+    case '-' | '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' => number(trace, in)
     case other => Lexer.error(s"unexpected '$other'", trace)
 
-  // Whether a built AST nests deeper than MaxDepth, found without recursion.
-  private[tsuji] def exceeds(json: Json): Boolean =
+  // The longest number token read: room for a mantissa of 256 bits (about 77 digits) with an
+  // exponent and hundreds of leading or trailing zeros. A message has no use for more, and a
+  // bound on each token keeps the work of reading numbers in step with the input's length.
+  val MaxNumberLength = 1100
+
+  // A number: its characters are collected first, at most MaxNumberLength of them, and then read
+  // by zio-json as the one element of an array, so that zio-json itself checks that the number is
+  // the whole token. In valid JSON a number is followed by a character that cannot be part of
+  // one, so the token is exactly the number zio-json reads in place; where the number ends before
+  // the token does, zio-json refuses the character after it in place too.
+  private def number(trace: List[JsonError], in: RetractReader): Json =
+    val token = new java.lang.StringBuilder("[")
+    var c     = in.read()
+    while c != -1 && isNumberChar(c.toChar) do
+      if token.length > MaxNumberLength then
+        Lexer.error(s"a number longer than $MaxNumberLength characters", trace)
+      token.append(c.toChar)
+      c = in.read()
+    if c != -1 then in.retract()
+    if exponentDigits(token) > MaxExponentDigits then
+      Lexer.error(s"a number with an exponent of more than $MaxExponentDigits digits", trace)
+    token.append(']')
+    // Whatever goes wrong while the number is read is a decoding error.
+    val read  =
+      try oneNumber.decodeJson(token)
+      catch case NonFatal(_) => Left("(not a number)")
+    read match
+      case Right(n)    => Json.Num(n.head)
+      case Left(error) =>
+        Lexer.error(error.substring(error.indexOf('(') + 1).stripSuffix(")"), trace)
+
+  end number
+
+  // The digits of a number's exponent, without its sign and leading zeros: 0 for a number
+  // without one. A decimal number's scale is an Int; nine digits of exponent keep every scale far
+  // inside it, whatever the token's other characters.
+  private val MaxExponentDigits = 9
+
+  private def exponentDigits(token: java.lang.StringBuilder): Int =
+    var i      = 0
+    while i < token.length && token.charAt(i) != 'e' && token.charAt(i) != 'E' do i += 1
+    i += 1
+    if i < token.length && (token.charAt(i) == '+' || token.charAt(i) == '-') then i += 1
+    while i < token.length && token.charAt(i) == '0' do i += 1
+    var digits = 0
+    while i < token.length && token.charAt(i) >= '0' && token.charAt(i) <= '9' do
+      digits += 1
+      i += 1
+    digits
+
+  private def isNumberChar(c: Char): Boolean =
+    (c >= '0' && c <= '9') || c == '-' || c == '+' || c == '.' || c == 'e' || c == 'E'
+
+  private val oneNumber = JsonDecoder.chunk[java.math.BigDecimal]
+
+  // The largest scale, either way, of a number this reader takes from text: an exponent of nine
+  // digits, moved by at most the token's other digits.
+  val MaxScale = 1000001100
+
+  private val ScaleBeyond = s"a number with a scale beyond $MaxScale"
+
+  // What in a built AST this reader would not have read, found without recursion: nesting deeper
+  // than MaxDepth, or a number of a scale beyond MaxScale.
+  private[tsuji] def problem(json: Json): Option[String] =
     val pending = mutable.Stack[(Json, Int)](json -> 0)
-    var deeper  = false
-    while pending.nonEmpty && !deeper do
+    var found   = Option.empty[String]
+    while pending.nonEmpty && found.isEmpty do
       val (value, depth) = pending.pop()
       value match
         case Json.Obj(fields)   =>
-          if depth >= MaxDepth then deeper = true
+          if depth >= MaxDepth then found = Some(TooDeep)
           else fields.foreach((_, v) => pending.push(v -> (depth + 1)))
         case Json.Arr(elements) =>
-          if depth >= MaxDepth then deeper = true
+          if depth >= MaxDepth then found = Some(TooDeep)
           else elements.foreach(v => pending.push(v -> (depth + 1)))
+        case Json.Num(n)        =>
+          if math.abs(n.scale.toLong) > MaxScale then found = Some(ScaleBeyond)
         case _                  => ()
-    deeper
+    found
+
+  end problem
 
 end BoundedJson

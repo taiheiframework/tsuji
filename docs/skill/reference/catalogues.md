@@ -12,8 +12,9 @@ One JSON file per language, MF2 templates by key:
 
 - `Catalogue(language, messages: Map[MessageKey, String])`, `catalogue.toJson`.
 - `Catalogue.parse(json): Either[CatalogueProblem, Catalogue]` never throws. It refuses a file
-  over 4M characters, nested deeper than 16, with more than 100000 messages, with more than 16
-  keys that share one hash code, not JSON, not format 1, or without a valid `language`. Entries
+  over 4M characters, nested deeper than 16, with a number longer than 1100 characters or with
+  an exponent of more than 9 digits, with more than 100000 messages, with more than 16 keys that
+  share one hash code, not JSON, not format 1, or without a valid `language`. Entries
   that are not a key and a string template of at most 64K characters are left out and listed in
   `catalogue.problems`.
 - `CatalogueProblem` is read, not built: `message`, `language: Option[Language]`,

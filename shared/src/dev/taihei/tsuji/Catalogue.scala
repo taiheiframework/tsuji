@@ -77,7 +77,10 @@ object Catalogue:
     else if JsonDepth.exceeds(json, MaxDepth) then
       Left(problem(s"a catalogue nests deeper than $MaxDepth"))
     else
-      json.fromJson[Json] match
+      // The reader of messages: its bounds on numbers hold for a catalogue too.
+      json.fromJson[Json](
+        using BoundedJson.decoder
+      ) match
         case Left(error)          => Left(problem(s"not JSON: ${Printable(error)}"))
         case Right(obj: Json.Obj) => fromAst(obj)
         case Right(_)             => Left(problem("a catalogue is a JSON object"))

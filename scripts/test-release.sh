@@ -66,7 +66,7 @@ MODULES=${PUBLISHED//.publishArtifacts/}
 
 # --- a synthetic tree in the layout Mill writes -----------------------------------------------
 SRC="$W/src"
-python3 -I - "$SRC" "$GROUP" "$V" $ARTIFACTS <<'EOF'
+python3 -I -B - "$SRC" "$GROUP" "$V" $ARTIFACTS <<'EOF'
 import hashlib, os, sys
 src, group, v, artifacts = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4:]
 pom = """<?xml version="1.0" encoding="UTF-8"?>
@@ -104,15 +104,15 @@ gpg --batch --quiet --armor --export "$KEY" > "$W/release-key.asc" 2>/dev/null
 sign() { rm -f "$2.asc"; gpg --batch --quiet --pinentry-mode loopback --passphrase '' --local-user "$1" --armor --detach-sign -o "$2.asc" "$2" 2>/dev/null; }
 while IFS= read -r f; do sign "$KEY" "$f"; done < <(find "$SRC" -type f \( -name '*.jar' -o -name '*.pom' \) | sort)
 
-R() { python3 -I "$REPO/scripts/release.py" "$@"; }
-sha() { python3 -I -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$1"; }
+R() { python3 -I -B "$REPO/scripts/release.py" "$@"; }
+sha() { python3 -I -B -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$1"; }
 
 # --- the stand-in servers, on one port ---------------------------------------------------------
 openssl req -x509 -newkey rsa:2048 -nodes -keyout "$W/key.pem" -out "$W/cert.pem" -days 1 -subj "/CN=localhost" \
   -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" >/dev/null 2>&1 || { echo "openssl cannot make a test certificate"; exit 1; }
-PORT=$(python3 -I -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
+PORT=$(python3 -I -B -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
 S="$W/served"; mkdir -p "$S/central" "$S/site" "$S/api" "$S/download"
-python3 -I "$HERE/fake_servers.py" "$S" "$PORT" "$W/cert.pem" "$W/key.pem" "$W/log" & SERVER=$!
+python3 -I -B "$HERE/fake_servers.py" "$S" "$PORT" "$W/cert.pem" "$W/key.pem" "$W/log" & SERVER=$!
 export CURL_CA_BUNDLE="$W/cert.pem" SSL_CERT_FILE="$W/cert.pem"
 for _ in $(seq 50); do curl -s -o /dev/null "https://localhost:$PORT/" && break; sleep 0.1; done
 : > "$W/log"
@@ -130,7 +130,7 @@ expect "verify: an untouched bundle passes" 0 "" R verify --dest "$W/b1"
 [ "$(R verify --dest "$W/b1" | tail -n 1)" = "$(R verify --dest "$W/b1" | grep '\.pom$' | tail -n 1)" ] && pass "verify: POMs come last in the upload order" || fail "verify: upload order"
 first_jar() { find "$1" -name "*-$V.jar" | sort | head -n 1; }
 first_pom() { find "$1" -name "*-$V.pom" | sort | head -n 1; }
-rehash() { python3 -I -c 'import hashlib,sys; d=open(sys.argv[1],"rb").read(); open(sys.argv[1]+".md5","w").write(hashlib.md5(d).hexdigest()); open(sys.argv[1]+".sha1","w").write(hashlib.sha1(d).hexdigest())' "$1"; }
+rehash() { python3 -I -B -c 'import hashlib,sys; d=open(sys.argv[1],"rb").read(); open(sys.argv[1]+".md5","w").write(hashlib.md5(d).hexdigest()); open(sys.argv[1]+".sha1","w").write(hashlib.sha1(d).hexdigest())' "$1"; }
 cp -r "$SRC" "$W/s3"; rm "$(first_jar "$W/s3").asc"
 expect "bundle: a missing signature is refused" 1 "missing from the bundle" R bundle --source "$W/s3" --dest "$W/b3" --group $GROUP --version $V --artifacts "$ARTIFACTS" --name n
 cp -r "$SRC" "$W/s4"; echo 00 > "$(first_jar "$W/s4").md5"
@@ -182,21 +182,29 @@ deps_pom "$W/p4.pom" "$(dep dev.zio zio_3 2.1.27)"
 
 # resolvers: every module, exactly Coursier's defaults (local Ivy, Central) and then the site.
 IVY='ivy:file:/home/u/.ivy2/local/[organisation]/[module]/(scala_[scalaVersion]/)[revision]/[type]s/[artifact](-[classifier]).[ext]'
-resolvers_json() { python3 -I -c 'import json, sys; print(json.dumps({m + ".resolverOrder": sys.argv[2:] for m in sys.argv[1].split()}))' "$@"; }
+resolvers_json() { python3 -I -B -c 'import json, sys; print(json.dumps({m + ".resolverOrder": sys.argv[2:] for m in sys.argv[1].split()}))' "$@"; }
 ONLY="${SITE%/} (dev.taihei only)"
+resolving() { printf '%s.resolvedMvnDeps\n' "$@"; }
+resolving a > "$W/rs-a"
 resolvers_json "a b" "$IVY" https://repo1.maven.org/maven2 "$ONLY" > "$W/r1.json"
-expect "resolvers: the defaults followed by the site pass" 0 "" R resolvers --url "$SITE" --modules "a b" "$W/r1.json"
-expect "resolvers: a module that does not report is refused" 1 "does not report" R resolvers --url "$SITE" --modules "a b c" "$W/r1.json"
+expect "resolvers: the defaults followed by the site pass" 0 "" R resolvers --resolving "$W/rs-a" --url "$SITE" --modules "a b" "$W/r1.json"
+expect "resolvers: a module that does not report is refused" 1 "does not report" R resolvers --resolving "$W/rs-a" --url "$SITE" --modules "a b c" "$W/r1.json"
+resolving a b fixture > "$W/rs-abf"
+expect "resolvers: a module that resolves but does not report is refused" 1 "fixture resolves dependencies but does not report" R resolvers --resolving "$W/rs-abf" --url "$SITE" "$W/r1.json"
+: > "$W/rs-none"
+expect "resolvers: a list of resolving modules that is empty is refused" 1 "no module resolves" R resolvers --resolving "$W/rs-none" --url "$SITE" "$W/r1.json"
+printf 'a.compile\n' > "$W/rs-bad"
+expect "resolvers: a list that is not of resolvedMvnDeps tasks is refused" 1 "not a resolvedMvnDeps task" R resolvers --resolving "$W/rs-bad" --url "$SITE" "$W/r1.json"
 resolvers_json "a" "$IVY" "$ONLY" https://repo1.maven.org/maven2 > "$W/r2.json"
-expect "resolvers: the site before Central is refused" 1 "not Coursier's defaults followed by" R resolvers --url "$SITE" "$W/r2.json"
+expect "resolvers: the site before Central is refused" 1 "not Coursier's defaults followed by" R resolvers --resolving "$W/rs-a" --url "$SITE" "$W/r2.json"
 resolvers_json "a" "$IVY" https://repo1.maven.org/maven2 "$ONLY" https://example.invalid/maven > "$W/r3.json"
-expect "resolvers: one more repository is refused" 1 "not Coursier's defaults followed by" R resolvers --url "$SITE" "$W/r3.json"
+expect "resolvers: one more repository is refused" 1 "not Coursier's defaults followed by" R resolvers --resolving "$W/rs-a" --url "$SITE" "$W/r3.json"
 resolvers_json "a" "$IVY" https://repo1.maven.org/maven2 > "$W/r4.json"
-expect "resolvers: without the site is refused" 1 "not Coursier's defaults followed by" R resolvers --url "$SITE" "$W/r4.json"
+expect "resolvers: without the site is refused" 1 "not Coursier's defaults followed by" R resolvers --resolving "$W/rs-a" --url "$SITE" "$W/r4.json"
 resolvers_json "a" "$IVY" https://repo1.maven.org/maven2 "${SITE%/}" > "$W/r5.json"
-expect "resolvers: the site for every group, not dev.taihei only, is refused" 1 "for dev.taihei only" R resolvers --url "$SITE" "$W/r5.json"
-expect "resolvers: an http URL is refused" 1 "not an https URL" R resolvers --url "http://localhost/site/" "$W/r1.json"
-expect "resolvers: GitHub Packages is refused" 1 "GitHub Packages" R resolvers --url "https://maven.pkg.github.com/x/y/" "$W/r1.json"
+expect "resolvers: the site for every group, not dev.taihei only, is refused" 1 "for dev.taihei only" R resolvers --resolving "$W/rs-a" --url "$SITE" "$W/r5.json"
+expect "resolvers: an http URL is refused" 1 "not an https URL" R resolvers --resolving "$W/rs-a" --url "http://localhost/site/" "$W/r1.json"
+expect "resolvers: GitHub Packages is refused" 1 "GitHub Packages" R resolvers --resolving "$W/rs-a" --url "https://maven.pkg.github.com/x/y/" "$W/r1.json"
 
 # build-repos: the build files name the site once, as build.mill's val repoUrl, add it once
 # after the defaults, and name no other repository.
@@ -207,7 +215,7 @@ override() { printf '%s\n' \
   '  override def repositoriesTask: Task[Seq[coursier.Repository]] = Task.Anon {' \
   '    coursierConfigModule().defaultRepositories() :+ TaiheiOnly(coursier.maven.MavenRepository(release.repoUrl))' \
   '  }'; }
-build_repos() { (cd "$BR" && python3 -I "$REPO/scripts/release.py" build-repos --url "$SITE" build.mill "$@"); }
+build_repos() { (cd "$BR" && python3 -I -B "$REPO/scripts/release.py" build-repos --url "$SITE" build.mill "$@"); }
 override "$SITE" > "$BR/build.mill"
 expect "build-repos: the one override passes" 0 "" build_repos
 override "https://example.invalid/repo/" > "$BR/build.mill"
@@ -372,18 +380,27 @@ MLOG="$W/mill-env"; GLOG="$W/gh-log"; GHS="$W/gh"; mkdir -p "$GHS" "$W/bin"
 # The stand-in Mill answers the guards and repo-guard's questions, and records which Central token
 # variables reached each Mill call before the publishing one (in $MLOG.pre), and for the
 # publishing command which credential variables reached it (their names, never their values), its
-# arguments, and whether the Central marker was there when it started. STANDIN_VERSION, when set,
-# is the version it reports. Mill 1.3.1 signs in its own JVM; only an added --useGpgCli would hand
-# the passphrase to a gpg command line, so the arguments must be exactly these.
-POMS_JSON="$W/poms.json"; RESOLVERS_JSON="$W/resolvers.json"; RESOLVED_JSON="$W/rg.json"
+# arguments, and whether the Central marker was there when it started. Every call is also logged
+# in $MLOG.calls: its arguments, the names of the credential variables it saw, and whether any
+# environment variable held the marker value cmdline-secret, which a check puts on make's command
+# line (make hands it on in MAKEFLAGS). STANDIN_VERSION, when set, is the version it reports.
+# Mill 1.3.1 signs in its own JVM; only an added --useGpgCli would hand the passphrase to a gpg
+# command line, so the arguments must be exactly these.
+POMS_JSON="$W/poms.json"; RESOLVERS_JSON="$W/resolvers.json"; RESOLVED_JSON="$W/rg.json"; RESOLVING="$W/resolving"
 cat > "$G/mill" <<EOF
 #!/usr/bin/env bash
+SEEN=""; for v in MILL_SONATYPE_USERNAME MILL_SONATYPE_PASSWORD MILL_PGP_SECRET_BASE64 MILL_PGP_PASSPHRASE; do
+  [ -n "\${!v+x}" ] && SEEN="\$SEEN \$v"
+done
+LEAK=no; env | grep -qF cmdline-secret && LEAK=yes
+echo "\$* |\${SEEN:- none} | leak \$LEAK" >> "$MLOG.calls"
 case "\$*" in
-  shutdown|"resolve __.publishArtifacts")
+  shutdown|"resolve __.publishArtifacts"|"--no-daemon resolve __.publishArtifacts")
+    N=shutdown; [ "\$1" = shutdown ] || N=resolve
     for v in MILL_SONATYPE_USERNAME MILL_SONATYPE_PASSWORD; do
-      if [ -n "\${!v+x}" ]; then echo "\$1 \$v set"; else echo "\$1 \$v unset"; fi
+      if [ -n "\${!v+x}" ]; then echo "\$N \$v set"; else echo "\$N \$v unset"; fi
     done >> "$MLOG.pre"
-    [ "\$1" = shutdown ] || printf '%s\n' $PUBLISHED;;
+    [ "\$N" = shutdown ] || printf '%s\n' $PUBLISHED;;
   "--no-daemon show release.gitVersion")
     for v in MILL_SONATYPE_USERNAME MILL_SONATYPE_PASSWORD; do
       if [ -n "\${!v+x}" ]; then echo "show \$v set"; else echo "show \$v unset"; fi
@@ -392,6 +409,7 @@ case "\$*" in
   "show release.gitVersion") echo "\"\${STANDIN_VERSION:-$V}\"";;
   "show "*".repositories") echo '{"m.repositories": []}';;
   "show __.resolverOrder") cat "$RESOLVERS_JSON";;
+  "resolve __.resolvedMvnDeps") cat "$RESOLVING";;
   "show "*".pom") cat "$POMS_JSON";;
   "show __."*) cat "$RESOLVED_JSON";;
   "--no-daemon mill.javalib.SonatypeCentralPublishModule/"*)
@@ -464,12 +482,26 @@ gh_called() { grep -q -- "$1" "$GLOG"; }
 # repo-guard, end to end with the stand-in Mill: the pin check and the C12 check of what was
 # resolved. One published POM pins the stand-in library's version on the site.
 resolvers_json "$MODULES" "$IVY" https://repo1.maven.org/maven2 "$ONLY" > "$RESOLVERS_JSON"
+resolving $MODULES > "$RESOLVING"
 PIN="$W/pin.pom"; deps_pom "$PIN" "$(dep dev.taihei "$DA" "$DV")"
 printf '{"m.pom": "qref:v1:0123abcd:%s"}\n' "$PIN" > "$POMS_JSON"
 mkdir -p "$S/site/dev/taihei/$DA/$DV"; cp "$SITEC/dev/taihei/$DA/$DV/$DA-$DV.pom" "$S/site/dev/taihei/$DA/$DV/"
 printf '{"m.resolvedRunMvnDeps": [%s, %s]}\n' "$(ref "$SITEC/dev/taihei/$DA/$DV/$DA-$DV.jar")" "$(ref "$CENTC/org/x/x/1.0/x-1.0.jar")" > "$RESOLVED_JSON"
 release_api "$LIB" "$DV" true
 expect "repo-guard passes a pin on the site and files that match their release" 0 "and nothing else" "${M[@]}" repo-guard
+# Every Mill call of a step that needs no credential, with a Central token and the release key
+# exported in the shell and a value on make's command line: none of them may see either.
+TOKENS=(MILL_SONATYPE_USERNAME=env-user MILL_SONATYPE_PASSWORD=env-token MILL_PGP_SECRET_BASE64=env-key MILL_PGP_PASSPHRASE=env-pass)
+no_credential_reached_mill() {
+  [ -s "$MLOG.calls" ] && ! grep -v '| none | leak no$' "$MLOG.calls" >/dev/null
+}
+rm -f "$MLOG.calls"
+expect "repo-guard passes with credentials in the shell and on make's command line" 0 "and nothing else" env "${TOKENS[@]}" "${M[@]}" repo-guard MILL_PGP_PASSPHRASE=cmdline-secret
+no_credential_reached_mill && pass "repo-guard: no Mill call sees a credential, neither from the shell nor from make's command line" \
+  || fail "repo-guard: a Mill call saw a credential: $(grep -v '| none | leak no$' "$MLOG.calls" 2>/dev/null | tr '\n' ';')"
+resolving $MODULES lib.fixture > "$RESOLVING"
+expect "repo-guard refuses a module that resolves without reporting its repositories" 1 "lib.fixture resolves dependencies but does not report" "${M[@]}" repo-guard
+resolving $MODULES > "$RESOLVING"
 override "$BASE/moved/" > "$G/build.mill"; resolvers_json "$MODULES" "$IVY" https://repo1.maven.org/maven2 "$BASE/moved (dev.taihei only)" > "$RESOLVERS_JSON"
 expect "repo-guard refuses a pin answered with a redirect" 1 "HTTP 301" "${M[@]}" repo-guard "REPO_URL=$BASE/moved/"
 override "$SITE" > "$G/build.mill"; resolvers_json "$MODULES" "$IVY" https://repo1.maven.org/maven2 "$ONLY" > "$RESOLVERS_JSON"
@@ -500,6 +532,14 @@ printf 'v%s\n%s\n' "$V" "$V" > "$GHS/releases"
 expect "preflight refuses a version that has a GitHub Release, or a draft" 1 "exists already" "${M[@]}" release-preflight
 gh_reset; touch "$GHS/list-fails"
 expect "preflight stops when it cannot list the releases" 1 "cannot list" "${M[@]}" release-preflight
+gh_reset
+rm -f "$MLOG.calls"
+expect "preflight passes with credentials in the shell and on make's command line" 0 "has no GitHub Release for it" \
+  env "${TOKENS[@]}" "${M[@]}" release-preflight MILL_PGP_PASSPHRASE=cmdline-secret
+no_credential_reached_mill && pass "preflight: no Mill call sees a credential, neither from the shell nor from make's command line" \
+  || fail "preflight: a Mill call saw a credential: $(grep -v '| none | leak no$' "$MLOG.calls" 2>/dev/null | tr '\n' ';')"
+! grep -v '^--no-daemon ' "$MLOG.calls" >/dev/null && pass "preflight: every Mill call runs without a daemon" \
+  || fail "preflight: a Mill call may start a daemon: $(grep -v '^--no-daemon ' "$MLOG.calls" | tr '\n' ';')"
 gh_reset
 
 # The signatures, checked by release-github before anything is created (as by release-bundle).
@@ -661,6 +701,13 @@ saw "MILL_SONATYPE_USERNAME placeholder" && saw "MILL_SONATYPE_PASSWORD placehol
 grep -q "^shutdown " "$MLOG.pre" 2>/dev/null && grep -q "^resolve " "$MLOG.pre" && ! grep -q " set$" "$MLOG.pre" \
   && pass "publish-dry-run: no Mill call, shutdown and the module guard included, sees a Central token from the environment" \
   || fail "publish-dry-run: a Mill call before the dry run saw the Central token from the environment: $(grep ' set$' "$MLOG.pre" 2>/dev/null | tr '\n' ' ')"
+rm -f "$MLOG" "$MLOG.calls"
+"${M[@]}" publish-dry-run "RELEASE_ENV=$W/release.env" MILL_SONATYPE_PASSWORD=cmdline-secret >/dev/null 2>&1
+saw "MILL_SONATYPE_PASSWORD placeholder" && ! grep -q 'leak yes$' "$MLOG.calls" \
+  && pass "publish-dry-run: a value on make's command line reaches no Mill call" \
+  || fail "publish-dry-run: a Mill call saw a value from make's command line: $(grep 'leak yes$' "$MLOG.calls" 2>/dev/null | tr '\n' ';')"
+! grep -v -e '^--no-daemon ' -e '^shutdown ' "$MLOG.calls" >/dev/null && pass "publish-dry-run: no Mill call but shutdown runs on a daemon" \
+  || fail "publish-dry-run: a Mill call may start a daemon: $(grep -v -e '^--no-daemon ' -e '^shutdown ' "$MLOG.calls" | tr '\n' ';')"
 rm -f "$MLOG"; chmod 640 "$W/release.env"
 expect "publish-dry-run refuses a release env others can read" 1 "mode 600" "${M[@]}" publish-dry-run "RELEASE_ENV=$W/release.env"
 chmod 600 "$W/release.env"; ln -s "$W/release.env" "$W/link.env"
@@ -679,7 +726,11 @@ echo "$V" > "$G/.release-embargo"; rm -f "$MLOG"
 expect "publish refuses when Mill would publish another version than the tag's" 1 "not the tag's" env STANDIN_VERSION=9.9.8 "${M[@]}" publish "RELEASE_ENV=$W/release.env"
 [ ! -e "$B.CENTRAL_UPLOAD_STARTED" ] && [ ! -e "$MLOG" ] \
   && pass "and it wrote no Central marker and started no upload" || fail "publish marked or started a Central upload for another version than the tag's"
-expect "publish uploads an embargoed version to Central" 0 "to Maven Central" env MILL_TESTS_PUBLISH_DRY_RUN=1 "${M[@]}" publish "RELEASE_ENV=$W/release.env"
+rm -f "$MLOG.calls"
+expect "publish uploads an embargoed version to Central" 0 "to Maven Central" env MILL_TESTS_PUBLISH_DRY_RUN=1 "${TOKENS[@]}" "${M[@]}" publish "RELEASE_ENV=$W/release.env"
+grep -q '^--no-daemon resolve __.publishArtifacts ' "$MLOG.calls" && ! grep -v -e '^--no-daemon ' -e '^shutdown ' "$MLOG.calls" >/dev/null \
+  && pass "publish: with a token in the environment (CI), no Mill call but shutdown runs on a daemon, the module guard included" \
+  || fail "publish: a Mill call may start a daemon that keeps the token: $(grep -v -e '^--no-daemon ' -e '^shutdown ' "$MLOG.calls" 2>/dev/null | tr '\n' ';')"
 [ -s "$B.CENTRAL_UPLOAD_STARTED" ] && saw "marker before mill" \
   && pass "publish marked the Central upload before Mill started" || fail "publish did not mark the Central upload before Mill"
 saw "$ARGS" && pass "publish: Mill gets the bundle name and no other argument" || fail "publish: Mill's arguments: $(grep '^args' "$MLOG")"

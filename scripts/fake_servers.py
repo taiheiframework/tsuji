@@ -9,7 +9,7 @@ scripts/test-release.sh, over HTTPS on localhost only. Everything is served read
 
 Every request is logged as "<method> <path> auth=<none|present>", never a credential itself.
 
-  python3 -I fake_servers.py ROOT PORT CERT KEY LOG
+  python3 -I -B fake_servers.py ROOT PORT CERT KEY LOG
 """
 
 import http.server

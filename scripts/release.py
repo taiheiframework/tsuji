@@ -2,8 +2,9 @@
 """Release helpers for the Makefile: one signed bundle, kept on an immutable GitHub Release, served
 by the family's Maven repository and taken unchanged to Maven Central by the release train.
 
-Run as `python3 -I scripts/release.py <command> ...`, so that nothing from the current
-directory or the environment is imported. Every command exits non-zero, with one line per
+Run as `python3 -I -B scripts/release.py <command> ...`, so that nothing from the current
+directory or the environment is imported, and no bytecode is written next to the scripts (-I
+does not stop that). Every command exits non-zero, with one line per
 problem on stderr, when anything is not exactly as expected.
 
   bundle   --source DIR --dest DIR --group G --version V --artifacts "A B" --name NAME [--pom-only "A"]
@@ -20,9 +21,10 @@ problem on stderr, when anything is not exactly as expected.
            bundle) is not listed; it must have the depending POM's own version.
   no-repos JSON
            Check that Mill's `show {modules}.repositories` output names no repository.
-  resolvers --url URL [--modules "M N"] JSON
+  resolvers --url URL --resolving FILE [--modules "M N"] JSON
            Check that Mill's `show __.resolverOrder` output lists, for every module, exactly
-           Coursier's defaults (the local Ivy repository, then Maven Central) followed by URL.
+           Coursier's defaults (the local Ivy repository, then Maven Central) followed by URL,
+           and that every module in FILE, Mill's `resolve __.resolvedMvnDeps` output, reports it.
   build-repos --url URL FILE...
            Check that the build files name URL exactly once, as build.mill's `val repoUrl`, add it
            exactly once with MavenRepository(release.repoUrl), and name no other repository.
@@ -332,6 +334,19 @@ def resolvers(args):
     # The family's repository is asked for dev.taihei only (build.mill's TaiheiOnly).
     want = [MAVEN_CENTRAL, f"{args.url.rstrip('/')} (dev.taihei only)"]
     problems = [f"{m} does not report its repositories (resolverOrder)" for m in args.modules.split() if f"{m}.resolverOrder" not in shown]
+    # Every module that resolves dependencies must report where from, published or not: a module
+    # without resolverOrder (one that does not mix in build.mill's TaiheiRepositories) is refused,
+    # so a new one cannot drop out of this check unseen.
+    with open(args.resolving) as f:
+        tasks = [line.strip() for line in f if line.strip()]
+    if not tasks:
+        problems.append(f"{args.resolving}: no module resolves dependencies, so nothing was checked")
+    suffix = ".resolvedMvnDeps"
+    for task in tasks:
+        if not task.endswith(suffix) or len(task) == len(suffix):
+            problems.append(f"{args.resolving}: '{task}' is not a resolvedMvnDeps task")
+        elif f"{task[: -len(suffix)]}.resolverOrder" not in shown:
+            problems.append(f"{task[: -len(suffix)]} resolves dependencies but does not report its repositories (resolverOrder)")
     for module, repos in sorted(shown.items()):
         if not isinstance(repos, list) or len(repos) != 3 or not IVY_LOCAL.match(str(repos[0])) or [str(r) for r in repos[1:]] != want:
             problems.append(f"{module} resolves from {repos}, not Coursier's defaults followed by {args.url} for dev.taihei only")
@@ -773,6 +788,7 @@ def main():
     n.add_argument("json")
     r = sub.add_parser("resolvers")
     r.add_argument("--url", required=True)
+    r.add_argument("--resolving", required=True)
     r.add_argument("--modules", default="")
     r.add_argument("json")
     br = sub.add_parser("build-repos")

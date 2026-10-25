@@ -96,8 +96,19 @@ STRAY_GUARD = STRAY=$$(git status --porcelain --ignored --untracked-files=all --
 	if [ -n "$$ATTRS" ]; then echo "[ERROR] tracked .gitattributes, .lfsconfig or .gitmodules, which change what a checkout holds:"; echo "$$ATTRS"; exit 1; fi
 
 PUBLISHED = tsuji.js.publishArtifacts tsuji.jvm.publishArtifacts tsuji.tools.publishArtifacts
-MODULE_GUARD = MODULES=$$(./mill resolve __.publishArtifacts | sort | tr '\n' ' ' | sed 's/ $$//'); \
+# Without a daemon: in publish the environment may hold the Central token (CI), and a daemon this
+# started would keep it for as long as it lives.
+MODULE_GUARD = MODULES=$$(./mill --no-daemon resolve __.publishArtifacts | sort | tr '\n' ' ' | sed 's/ $$//'); \
 	if [ "$$MODULES" != "$(PUBLISHED)" ]; then echo "[ERROR] the build would publish '$$MODULES', not '$(PUBLISHED)'"; exit 1; fi
+
+# The first command of every recipe that starts Mill and needs no credential (repo-guard,
+# release-preflight; publish-dry-run unsets the Central token alone, since it hands Mill the key):
+# a credential exported in the calling shell then never reaches a Mill daemon. A variable given on
+# make's command line also survives an unset in MAKEFLAGS, which every Mill call would see, so
+# those go too; none of these recipes calls $(MAKE). Not in validate as a whole, nor as a global
+# unexport: CI hands the publishing steps their credentials through the environment.
+NO_CREDENTIALS = unset MILL_SONATYPE_USERNAME MILL_SONATYPE_PASSWORD MILL_PGP_SECRET_BASE64 MILL_PGP_PASSPHRASE \
+	MAKEFLAGS MFLAGS MAKEOVERRIDES
 
 # A release version is three numbers and nothing else.
 VERSION_GUARD = if ! [[ "$$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$$ ]]; then echo "[ERROR] not a release version: '$$VERSION'"; exit 1; fi
@@ -114,7 +125,7 @@ RELEASE_ENV = $(HOME)/.edo-release.env
 # a regular file of ours, not a link, that nobody else can read or write. A missing file leaves the environment (CI) to provide the variables.
 SOURCE_RELEASE_ENV = F="$(RELEASE_ENV)"; \
 	if [ -e "$$F" ] || [ -L "$$F" ]; then \
-		if [ ! -f "$$F" ] || [ -L "$$F" ] || [ ! -O "$$F" ] || ! python3 -I -c 'import os, sys; sys.exit(os.stat(sys.argv[1]).st_mode & 0o077)' "$$F"; then \
+		if [ ! -f "$$F" ] || [ -L "$$F" ] || [ ! -O "$$F" ] || ! python3 -I -B -c 'import os, sys; sys.exit(os.stat(sys.argv[1]).st_mode & 0o077)' "$$F"; then \
 			echo "[ERROR] $$F must be a file of yours with mode 600, not a link (the dotfiles write it)"; exit 1; fi; \
 		. "$$F"; \
 	fi
@@ -155,7 +166,7 @@ EMBARGO_GUARD = if [ -L "$(EMBARGO_FILE)" ] || git ls-files --error-unmatch "$(E
 		echo "        only after its advisory is published (then make embargo-lift VERSION=$$VERSION)"; exit 1; fi; \
 	if [ -L "$(RELEASE_STATE)" ]; then echo "[ERROR] $(RELEASE_STATE) is a symlink"; exit 1; fi; \
 	if [ -e "$(RELEASE_STATE)" ]; then \
-		EMB=$$(python3 -I -c 'import json, sys; print("yes" if json.load(open(sys.argv[1])).get("embargo") is not False else "no")' "$(RELEASE_STATE)" 2>/dev/null) || EMB=unreadable; \
+		EMB=$$(python3 -I -B -c 'import json, sys; print("yes" if json.load(open(sys.argv[1])).get("embargo") is not False else "no")' "$(RELEASE_STATE)" 2>/dev/null) || EMB=unreadable; \
 		case "$$EMB" in \
 			no) ;; \
 			yes) echo "[ERROR] the release in progress is under embargo: no GitHub Release, nothing on $(REPO_URL)"; exit 1;; \
@@ -267,7 +278,8 @@ mima:
 #    other repository (release.py build-repos);
 # 2. Mill's own `repositories`, which would come before Central, is empty, and every module
 #    resolves from exactly Coursier's defaults followed by REPO_URL, which build.mill asks for
-#    dev.taihei alone;
+#    dev.taihei alone; a module that resolves dependencies without reporting its repositories
+#    (build.mill's TaiheiRepositories) is refused, published or not;
 # 3. every dev.taihei dependency of a published module is on Maven Central or on REPO_URL. A
 #    dependency on another module of this library is the same release, and needs the same
 #    version;
@@ -286,22 +298,25 @@ RESOLVED = resolvedMvnDeps,resolvedRunMvnDeps,scalaCompilerClasspath,scalacPlugi
 RESOLVED := $(RESOLVED),scalaDocPluginClasspath,semanticDbPluginClasspath,resolvedMimaPreviousArtifacts
 RESOLVED := $(RESOLVED),scalaJSToolsClasspath,scalaJSWorkerClasspath,scalaJSLinkerClasspath,scalaJSJsEnvMvnDeps
 RESOLVED := $(RESOLVED),scalafixToolClasspath,pgpWorkerClasspath,scalaCompilerBridge
+RESOLVED := $(RESOLVED),resolvedSemanticDbJavaPluginMvnDeps,annotationProcessorsResolvedMvnDeps
 repo-guard:
 	@set -euo pipefail; \
+	$(NO_CREDENTIALS); \
 	if [ -n "$${COURSIER_REPOSITORIES:-}$${COURSIER_MIRRORS:-}$${COURSIER_CREDENTIALS:-}" ]; then \
 		echo "[repo-guard] COURSIER_REPOSITORIES, COURSIER_MIRRORS or COURSIER_CREDENTIALS is set: this build resolves from Maven Central and $(REPO_URL) only, unset them"; exit 1; fi; \
 	LIST=$$(git ls-files -- $(BUILD_FILES) .github); mapfile -t FILES <<< "$$LIST"; \
-	python3 -I scripts/release.py build-repos --url "$(REPO_URL)" "$${FILES[@]}"; \
+	python3 -I -B scripts/release.py build-repos --url "$(REPO_URL)" "$${FILES[@]}"; \
 	MODULES="$(PUBLISHED)"; MODULES="$${MODULES//.publishArtifacts/}"; \
 	T=$$(mktemp -d "$(CURDIR)/.repo-guard.XXXXXX"); trap 'rm -rf "$$T"' EXIT; \
 	./mill show "{$${MODULES// /,}}.repositories" > "$$T/repositories.json"; \
-	python3 -I scripts/release.py no-repos "$$T/repositories.json"; \
+	python3 -I -B scripts/release.py no-repos "$$T/repositories.json"; \
 	./mill show '__.resolverOrder' > "$$T/resolvers.json"; \
-	python3 -I scripts/release.py resolvers --url "$(REPO_URL)" --modules "$$MODULES" "$$T/resolvers.json"; \
+	./mill resolve '__.resolvedMvnDeps' > "$$T/resolving"; \
+	python3 -I -B scripts/release.py resolvers --url "$(REPO_URL)" --resolving "$$T/resolving" --modules "$$MODULES" "$$T/resolvers.json"; \
 	./mill show "{$${MODULES// /,}}.pom" > "$$T/poms.json"; \
-	python3 -I -c 'import json, sys; [print(v.split(":", 3)[3]) for v in json.load(open(sys.argv[1])).values()]' "$$T/poms.json" > "$$T/poms"; \
+	python3 -I -B -c 'import json, sys; [print(v.split(":", 3)[3]) for v in json.load(open(sys.argv[1])).values()]' "$$T/poms.json" > "$$T/poms"; \
 	mapfile -t POMS < "$$T/poms"; \
-	python3 -I scripts/release.py pins --own "$(ARTIFACTS)" "$${POMS[@]}" | sort -u > "$$T/pins"; \
+	python3 -I -B scripts/release.py pins --own "$(ARTIFACTS)" "$${POMS[@]}" | sort -u > "$$T/pins"; \
 	while read -r A V; do \
 		URL="$(CENTRAL)/dev/taihei/$$A/$$V/$$A-$$V.pom"; CODE=$$($(HTTP_CODE)); \
 		case "$$CODE" in \
@@ -317,7 +332,7 @@ repo-guard:
 		esac; \
 	done < "$$T/pins"; \
 	./mill show '__.{$(RESOLVED)}' > "$$T/resolved.json"; \
-	python3 -I scripts/release.py resolved --workspace "$(CURDIR)" --url "$(REPO_URL)" --central "$(CENTRAL)" --api "$(GITHUB_API)" \
+	python3 -I -B scripts/release.py resolved --workspace "$(CURDIR)" --url "$(REPO_URL)" --central "$(CENTRAL)" --api "$(GITHUB_API)" \
 		--owner "$(OWNER)" --family "$(FAMILY)" --key "$(RELEASE_KEY_FILE)" --fingerprint "$(RELEASE_KEY)" "$$T/resolved.json" | sed 's/^/[repo-guard] /'; \
 	echo "[repo-guard] Maven Central, then $(REPO_URL), and nothing else"
 
@@ -352,12 +367,13 @@ publishLocal:
 # snapshot repository is not enabled for the namespace. Mill hands the client's environment to a
 # daemon that is already running, credentials included, and that daemon may have been started
 # before the guard ran (by a stray build file, an IDE, another make): so the daemon is shut down
-# right after the guard, the Mill commands that see the credentials run with --no-daemon (so no
-# client that starts a daemon in between can hand them one), and the daemon is shut down again at
-# the end, so that no process keeps the credentials. On the route of ADR 0004 this is only the
-# direct Central upload of a security release under embargo: Mill signs again here, so a version
-# that has a GitHub Release must never come through it (the release train takes that one to
-# Central, as the same files). It refuses a version that is not in $(EMBARGO_FILE), and one of
+# right after the guard, every Mill command after it runs with --no-daemon, the module guard
+# included (so no client that starts a daemon in between can hand it a token the environment
+# holds, as in CI), and the daemon is shut down again at the end, so that no process keeps the
+# credentials. The tokens are not unset here: in CI they come from the environment. On the route
+# of ADR 0004 this is only the direct Central upload of a security release under embargo: Mill
+# signs again here, so a version that has a GitHub Release must never come through it (the
+# release train takes that one to Central, as the same files). It refuses a version that is not in $(EMBARGO_FILE), and one of
 # whose files the family's repository already serves. Before Mill starts it writes a marker next
 # to where the version's bundle would be: from then on the version may be on Central, so it is
 # never published again from here, and its GitHub Release takes Central's files (central-bundle).
@@ -405,10 +421,11 @@ publish:
 # release-finalize builds its bundle here: the Central token is unset before Mill starts, and Mill,
 # which wants credentials before it looks at the hook, gets a placeholder that is no token. A Mill
 # that no longer honours the hook fails to authenticate instead of publishing to Central. A token
-# exported in the calling shell is unset first, before any Mill call or daemon can see it.
+# exported in the calling shell is unset first, before any Mill call or daemon can see it, and so
+# are MAKEFLAGS and its kin, which would carry a variable given on make's command line to Mill.
 publish-dry-run:
 	@set -e; \
-	unset MILL_SONATYPE_USERNAME MILL_SONATYPE_PASSWORD; \
+	unset MILL_SONATYPE_USERNAME MILL_SONATYPE_PASSWORD MAKEFLAGS MFLAGS MAKEOVERRIDES; \
 	$(STRAY_GUARD); \
 	./mill shutdown >/dev/null 2>&1 || true; \
 	trap './mill shutdown >/dev/null 2>&1 || true' EXIT; \
@@ -427,11 +444,14 @@ publish-dry-run:
 # of its tag a version is final, from its GitHub Release it is public; CISO condition C17). Each
 # file must answer 404 on both: 200 is a release that exists, and any other answer (a redirect,
 # 401, 403, 5xx) stops, because then we cannot tell. Nothing is asked with a credential but the
-# GitHub Releases, which gh lists as the maintainer, so that a draft is seen too.
+# GitHub Releases, which gh lists as the maintainer, so that a draft is seen too. It needs no
+# credential, so none reaches its Mill calls, which run without a daemon: a refusal here leaves no
+# process behind that holds one.
 release-preflight:
 	@set -eo pipefail; \
+	$(NO_CREDENTIALS); \
 	$(STRAY_GUARD); \
-	VERSION=$$(./mill show release.gitVersion | tr -d '"'); \
+	VERSION=$$(./mill --no-daemon show release.gitVersion | tr -d '"'); \
 	case "$$VERSION" in *-SNAPSHOT) echo "[preflight] $$VERSION is not a release"; exit 1;; esac; \
 	$(VERSION_GUARD); \
 	$(MODULE_GUARD); \
@@ -478,7 +498,7 @@ release-bundle:
 	$(MAKE) --no-print-directory publish-dry-run; \
 	mkdir -p "$(BUNDLES)"; \
 	rm -rf -- "$$B.partial"; \
-	python3 -I scripts/release.py bundle --source "$(DRY_RUN_DIR)/$(BUNDLE_PREFIX)-$$VERSION" --dest "$$B.partial" --group "$(ARTIFACT_GROUP)" \
+	python3 -I -B scripts/release.py bundle --source "$(DRY_RUN_DIR)/$(BUNDLE_PREFIX)-$$VERSION" --dest "$$B.partial" --group "$(ARTIFACT_GROUP)" \
 		--version "$$VERSION" --artifacts "$(ARTIFACTS)" --pom-only "$(POM_ONLY)" --name "$(BUNDLE_PREFIX)-$$VERSION" || { \
 		echo "[bundle] refused; nothing left the machine. Fix the cause, then make release-abort and prepare again"; exit 1; }; \
 	DIR="$$B.partial/repository"; \
@@ -503,14 +523,14 @@ central-bundle:
 	P=$(firstword $(CENTRAL_PATHS)); A=$${P##*/}; URL="$(CENTRAL)/$$P/$$VERSION/$$A-$$VERSION.pom"; CODE=$$($(HTTP_CODE)); \
 	if [ "$$CODE" != 200 ]; then echo "[central-bundle] $$VERSION is not on Maven Central (HTTP $$CODE): its bundle is release-finalize's"; exit 1; fi; \
 	mkdir -p "$(BUNDLES)"; rm -rf -- "$$B.download" "$$B.partial"; \
-	python3 -I scripts/release.py fetch --base "$(CENTRAL)" --group "$(ARTIFACT_GROUP)" --version "$$VERSION" \
+	python3 -I -B scripts/release.py fetch --base "$(CENTRAL)" --group "$(ARTIFACT_GROUP)" --version "$$VERSION" \
 		--artifacts "$(ARTIFACTS)" --pom-only "$(POM_ONLY)" --dest "$$B.download"; \
-	python3 -I scripts/release.py bundle --source "$$B.download" --dest "$$B.partial" --group "$(ARTIFACT_GROUP)" \
+	python3 -I -B scripts/release.py bundle --source "$$B.download" --dest "$$B.partial" --group "$(ARTIFACT_GROUP)" \
 		--version "$$VERSION" --artifacts "$(ARTIFACTS)" --pom-only "$(POM_ONLY)" --name "$(BUNDLE_PREFIX)-$$VERSION"; \
 	DIR="$$B.partial/repository"; $(SIGNATURE_CHECK); \
 	LOCAL="$(DRY_RUN_DIR)/$(BUNDLE_PREFIX)-$$VERSION"; \
 	if [ -d "$$LOCAL" ]; then \
-	  python3 -I scripts/release.py same "$$LOCAL" "$$B.partial/repository" || { \
+	  python3 -I -B scripts/release.py same "$$LOCAL" "$$B.partial/repository" || { \
 	    echo "[central-bundle] Maven Central's files differ from the local publish directory $$LOCAL: stop, and bring it to the CISO"; exit 1; }; \
 	  echo "[central-bundle] byte-equal to the local publish directory"; \
 	else echo "[central-bundle] no local publish directory to compare with"; fi; \
@@ -536,7 +556,7 @@ release-github:
 	if [ ! -d "$$B" ] || [ -L "$$B" ]; then \
 	  if [ -e "$$B.CENTRAL_UPLOAD_STARTED" ]; then echo "[release-github] no bundle for $$VERSION: it went to Maven Central first, so make central-bundle takes Central's files"; \
 	  else echo "[release-github] no bundle for $$VERSION: release-finalize builds it"; fi; exit 1; fi; \
-	python3 -I scripts/release.py verify --dest "$$B" > /dev/null; \
+	python3 -I -B scripts/release.py verify --dest "$$B" > /dev/null; \
 	DIR="$$B/repository"; $(SIGNATURE_CHECK); \
 	ZIP="$(BUNDLE_PREFIX)-$$VERSION.zip"; ZIPSUM=$$(cut -c1-64 "$$B/$$ZIP.sha256"); \
 	NOTES="RELEASE_$${VERSION//./_}.md"; \
@@ -560,7 +580,7 @@ release-github:
 	echo "[release-github] draft v$$VERSION created; reading its assets back"; \
 	gh release download "v$$VERSION" --repo "$(GITHUB_REPO)" --dir "$$T/draft" --pattern "$$ZIP" --pattern SHA256SUMS || { \
 	  echo "[release-github] the draft's assets cannot be downloaded: $$UNPUBLISHED"; exit 1; }; \
-	GOT=$$(python3 -I -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$$T/draft/$$ZIP"); \
+	GOT=$$(python3 -I -B -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$$T/draft/$$ZIP"); \
 	if [ "$$GOT" != "$$ZIPSUM" ] || ! cmp -s "$$T/draft/$$ZIP" "$$B/$$ZIP" || ! cmp -s "$$T/draft/SHA256SUMS" "$$B/SHA256SUMS"; then \
 	  echo "[release-github] the draft's assets differ from the bundle: $$UNPUBLISHED"; exit 1; fi; \
 	gh release edit "v$$VERSION" --repo "$(GITHUB_REPO)" --draft=false > /dev/null; \
@@ -573,7 +593,7 @@ release-github:
 	  echo "[release-github] the release's assets differ from the bundle: stop, and bring it to the CISO"; exit 1; fi; \
 	echo "[release-github] v$$VERSION is an immutable release holding the bundle"; \
 	if [ -f "$(RELEASE_STATE)" ] && [ ! -L "$(RELEASE_STATE)" ] && \
-	   [ "$$(python3 -I -c 'import json, sys; print(json.load(open(sys.argv[1])).get("newVersion", ""))' "$(RELEASE_STATE)" 2>/dev/null)" = "$$VERSION" ]; then \
+	   [ "$$(python3 -I -B -c 'import json, sys; print(json.load(open(sys.argv[1])).get("newVersion", ""))' "$(RELEASE_STATE)" 2>/dev/null)" = "$$VERSION" ]; then \
 	  rm -f "$(RELEASE_STATE)"; fi; \
 	echo "[release-github] record on the release ticket: $$ZIP SHA-256 $$ZIPSUM"; \
 	echo "[release-github] next: make publish-repo"
@@ -588,7 +608,7 @@ publish-repo:
 	$(TAG_VERSION); \
 	$(EMBARGO_GUARD); \
 	if [ ! -d "$$B" ] || [ -L "$$B" ]; then echo "[publish-repo] no bundle for $$VERSION"; exit 1; fi; \
-	python3 -I scripts/release.py verify --dest "$$B" > /dev/null; \
+	python3 -I -B scripts/release.py verify --dest "$$B" > /dev/null; \
 	STATE=$$(gh api "repos/$(GITHUB_REPO)/releases/tags/v$$VERSION" --jq '[.immutable, .draft, .prerelease] | map(tostring) | join(" ")') || { \
 	  echo "[publish-repo] $(GITHUB_REPO) has no published release v$$VERSION: make release-github first"; exit 1; }; \
 	if [ "$$STATE" != "true false false" ]; then \
@@ -620,19 +640,19 @@ verify-repo:
 	@set -eo pipefail; \
 	$(TAG_VERSION); \
 	if [ ! -d "$$B" ] || [ -L "$$B" ]; then echo "[verify-repo] no bundle for $$VERSION"; exit 1; fi; \
-	python3 -I scripts/release.py verify --dest "$$B" > /dev/null; \
+	python3 -I -B scripts/release.py verify --dest "$$B" > /dev/null; \
 	T=$$(mktemp -d "$$B/.verify.XXXXXX"); trap 'rm -rf "$$T"' EXIT; \
 	for TRY in $$(seq $(VERIFY_TRIES)); do \
 	  MISSING=0; N=0; \
 	  rm -f "$$T/sums"; \
 	  CODE=$$(curl -q -sS --proto '=https' --max-time 60 -o "$$T/sums" -w '%{http_code}' "$(REPO_URL)SHA256SUMS") || CODE="$${CODE:-000}"; \
-	  if [ "$$CODE" != 200 ] || ! python3 -I -c 'import sys; a = open(sys.argv[1]).read().splitlines(); b = set(open(sys.argv[2], errors="replace").read().splitlines()); sys.exit(0 if set(a) <= b else 1)' "$$B/SHA256SUMS" "$$T/sums"; then \
+	  if [ "$$CODE" != 200 ] || ! python3 -I -B -c 'import sys; a = open(sys.argv[1]).read().splitlines(); b = set(open(sys.argv[2], errors="replace").read().splitlines()); sys.exit(0 if set(a) <= b else 1)' "$$B/SHA256SUMS" "$$T/sums"; then \
 	    echo "  MISSING  lines of the ledger in $(REPO_URL)SHA256SUMS (HTTP $$CODE)"; MISSING=1; fi; \
 	  while read -r SUM P; do \
 	    rm -f "$$T/file"; \
 	    CODE=$$(curl -q -sS --proto '=https' --max-time 300 -o "$$T/file" -w '%{http_code}' "$(REPO_URL)$$P") || CODE="$${CODE:-000}"; \
 	    if [ "$$CODE" != 200 ] || [ ! -f "$$T/file" ]; then echo "  MISSING  $$P (HTTP $$CODE)"; MISSING=1; continue; fi; \
-	    GOT=$$(python3 -I -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$$T/file"); \
+	    GOT=$$(python3 -I -B -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$$T/file"); \
 	    if [ "$$GOT" != "$$SUM" ]; then \
 	      echo "  CHANGED  $$P"; \
 	      echo "[verify-repo] SECURITY INCIDENT: $(REPO_URL) serves other bytes than the signed bundle of $$VERSION."; \
@@ -659,6 +679,7 @@ verify-repo:
 #        make publish-repo       (the site's deploy, then verify-repo reads every file back)
 #        Maven Central follows in the next release train (make release-train in nakama).
 #
+# Credentials never go on make's command line: they come from $(RELEASE_ENV) or the environment.
 # Until main and the tag are pushed nothing has left the machine: make release-abort, fix the
 # cause, then release-prepare the same version again. From the push of its tag the version is
 # final, and from its GitHub Release it is public; it goes to Central in the next train.
@@ -842,9 +863,9 @@ release-finalize:
 		echo "[ERROR] No release in progress. Run 'make release-prepare TYPE=...' first."; exit 1; \
 	fi; \
 	$(STATE_GUARD); \
-	NEW=$$(python3 -I -c 'import json, sys; print(json.load(open(sys.argv[1]))["newVersion"])' "$(RELEASE_STATE)"); \
-	PREPARED=$$(python3 -I -c 'import json, sys; print(json.load(open(sys.argv[1])).get("head", ""))' "$(RELEASE_STATE)"); \
-	EMBARGOED=$$(python3 -I -c 'import json, sys; e = json.load(open(sys.argv[1])).get("embargo"); print({True: "yes", False: "no"}[e]) if isinstance(e, bool) else sys.exit(1)' "$(RELEASE_STATE)") || { \
+	NEW=$$(python3 -I -B -c 'import json, sys; print(json.load(open(sys.argv[1]))["newVersion"])' "$(RELEASE_STATE)"); \
+	PREPARED=$$(python3 -I -B -c 'import json, sys; print(json.load(open(sys.argv[1])).get("head", ""))' "$(RELEASE_STATE)"); \
+	EMBARGOED=$$(python3 -I -B -c 'import json, sys; e = json.load(open(sys.argv[1])).get("embargo"); print({True: "yes", False: "no"}[e]) if isinstance(e, bool) else sys.exit(1)' "$(RELEASE_STATE)") || { \
 		echo "[ERROR] the release state does not say embargo true or false (prepared before this machinery?): make release-abort, then release-prepare again"; exit 1; }; \
 	if [ "$$PREPARED" != "$$(git rev-parse HEAD)" ]; then \
 		echo "[ERROR] HEAD is not the commit release-prepare validated ($${PREPARED:-none recorded}): make release-abort, then release-prepare again"; exit 1; \
@@ -911,7 +932,7 @@ release-abort:
 	@set -e; \
 	if [ -f $(RELEASE_STATE) ]; then \
 		$(STATE_GUARD); \
-		NEW=$$(python3 -I -c 'import json, sys; print(json.load(open(sys.argv[1]))["newVersion"])' "$(RELEASE_STATE)"); \
+		NEW=$$(python3 -I -B -c 'import json, sys; print(json.load(open(sys.argv[1]))["newVersion"])' "$(RELEASE_STATE)"); \
 		if ! [[ "$$NEW" =~ ^[0-9]+\.[0-9]+\.[0-9]+$$ ]]; then echo "[ERROR] Not a version: $$NEW"; exit 1; fi; \
 		B="$(BUNDLES)/$(BUNDLE_PREFIX)-$$NEW"; \
 		if [ -e "$$B.CENTRAL_UPLOAD_STARTED" ] || [ -L "$$B.CENTRAL_UPLOAD_STARTED" ]; then \
@@ -983,7 +1004,7 @@ release-status:
 	@$(STATE_GUARD); \
 	if [ -f $(RELEASE_STATE) ]; then \
 		echo "Release in progress:"; \
-		python3 -I -c 'import json, sys; [print(f"  {k}: {v}") for k, v in json.load(open(sys.argv[1])).items()]' "$(RELEASE_STATE)"; \
+		python3 -I -B -c 'import json, sys; [print(f"  {k}: {v}") for k, v in json.load(open(sys.argv[1])).items()]' "$(RELEASE_STATE)"; \
 	else \
 		echo "No release in progress"; \
 	fi

@@ -16,7 +16,8 @@ permissions:
 env:
   JAVA_VERSION: '25'
   NODE_VERSION: '24'
-  # Everything resolves from Maven Central: the build needs no credentials.
+  # Everything resolves from Maven Central, then the family's repository: the build needs no
+  # credentials.
 
 jobs:
   validate:
@@ -72,14 +73,14 @@ jobs:
           bundles="$(git ls-files -- .release-bundles .release-embargo .release-state.json)"
           if [ -n "$bundles" ]; then echo "::error::tracked release bundles or release state:"; echo "$bundles"; exit 1; fi
 
-      # The build resolves from Maven Central only: no build file names another repository, no
-      # published module adds one, and every dev.taihei pin is a version on Central, not one that
-      # waits for the release train on GitHub Packages (ADR 0003). This runner holds no
-      # credentials, which is the proof that the build needs none.
-      - name: Maven Central only (repo-guard)
+      # The build resolves from Maven Central first, then the family's repository (REPO_URL), and
+      # from nothing else; every dev.taihei pin is a released version on one of them, and every
+      # resolved dev.taihei file matches its immutable GitHub Release or its signature (ADR 0004).
+      # This runner holds no credentials, which is the proof that the build needs none.
+      - name: Maven Central and the family's repository only (repo-guard)
         run: make repo-guard
 
-      # The release machinery against a fake registry on localhost: no token, no key, no upload.
+      # The release machinery against stand-ins on localhost: no token, no key, no upload.
       - name: Release machinery tests
         run: make release-test
 

@@ -31,7 +31,9 @@ jobs:
           missing=0
           for c in $(git rev-list --no-merges "$BASE..$HEAD"); do
             author="$(git log -1 --format='%an <%ae>' "$c")"
-            if ! git log -1 --format='%B' "$c" | grep -qiF "Signed-off-by: $author"; then
+            # The whole line, exactly as git commit --signoff writes it: a match anywhere in
+            # the body would let "Not-Signed-off-by: ..." or a quoted line pass.
+            if ! git log -1 --format='%B' "$c" | grep -qxF "Signed-off-by: $author"; then
               echo "::error::$(git log -1 --format='%h %s' "$c") has no 'Signed-off-by: $author'"
               missing=1
             fi

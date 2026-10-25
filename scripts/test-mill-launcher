@@ -125,6 +125,12 @@ for SH in "${SHELLS[@]}"; do
   reset; plant "$UNPINNED"; plant 0.0.1; echo 0.0.1 > "$W/cwd/.mill-version"
   expect "$T .mill-version naming a cached, unpinned version is refused" 1 "No SHA-256 is pinned for mill 0.0.1" launch
   not_run "$T the unpinned version from .mill-version"
+  reset; plant "$UNPINNED"; plant 0.0.1; mkdir -p "$W/cwd/.config"; echo 0.0.1 > "$W/cwd/.config/mill-version"
+  expect "$T .config/mill-version naming a cached, unpinned version is refused" 1 "No SHA-256 is pinned for mill 0.0.1" launch
+  not_run "$T the unpinned version from .config/mill-version"
+  reset; plant "$UNPINNED"; plant 0.0.1; printf '//| mill-version: 0.0.1\n' > "$W/cwd/build.mill"
+  expect "$T the build file's header naming a cached, unpinned version is refused" 1 "No SHA-256 is pinned for mill 0.0.1" launch
+  not_run "$T the unpinned version from the build file's header"
   reset
   expect "$T an unpinned version that is not cached is refused" 1 "No SHA-256 is pinned for mill 0.0.2" launch MILL_VERSION=0.0.2
   not_run "$T the unpinned, uncached version"
@@ -144,7 +150,8 @@ done
 
 # The hash without sha256sum, as on a macOS without coreutils: openssl first, then shasum. Each
 # runs on a PATH that holds only the tools the launcher needs, and must compute the right hash.
-TOOLS="uname ldd grep head cut tr sed dirname mkdir rm chmod mv"
+# touch is there so that a planted file that does run leaves its mark.
+TOOLS="uname ldd grep head cut tr sed dirname mkdir rm chmod mv touch"
 for H in openssl shasum; do
   D="$W/only-$H"; mkdir -p "$D"
   for t in $TOOLS $H $([ "$H" = shasum ] && echo perl); do
@@ -162,7 +169,8 @@ for H in openssl shasum; do
 done
 
 # The real Mill: the pinned binary in the user's download cache runs, without a download. make
-# validate has run ./mill before this; a fresh clone gets it here, as its first build would.
+# validate has run ./mill before this (repo-guard or the release tests do); otherwise the next line
+# downloads it, as a fresh clone's first build would.
 REAL=$(cd "$W/cwd" && MILL_TEST_DRY_RUN_LAUNCHER_SCRIPT=1 sh "$LAUNCHER" | tail -n 1)
 [ -s "$REAL" ] || (cd "$REPO" && ./mill --version >/dev/null 2>&1) || true
 if [ -s "$REAL" ]; then
@@ -171,6 +179,25 @@ if [ -s "$REAL" ]; then
     env PATH="$W/bin:$PATH" MILL_FINAL_DOWNLOAD_FOLDER="$(dirname "$REAL")" MILL_OUTPUT_DIR="$W/out" \
     sh -c 'cd "$1" && exec sh "$2" --version' - "$W/cwd" "$LAUNCHER"
   [ ! -s "$W/curl-args" ] && pass "and nothing was downloaded for it" || fail "curl ran for the cached, pinned mill"
+
+  # A download that matches the pin: a stand-in curl that delivers the real binary. It is kept in
+  # the download folder, checked again before it runs, and runs.
+  mkdir -p "$W/okbin"
+  cat > "$W/okbin/curl" <<OKCURL
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$W/curl-args"
+out=""; while [ \$# -gt 0 ]; do [ "\$1" = -o ] && out="\$2"; shift; done
+[ -n "\$out" ] && cp "$REAL" "\$out"
+OKCURL
+  chmod +x "$W/okbin/curl"
+  reset
+  expect "a download that matches the pin is kept and runs" 0 "Mill Build Tool version $PIN" \
+    env PATH="$W/okbin:$PATH" MILL_FINAL_DOWNLOAD_FOLDER="$W/dl" MILL_OUTPUT_DIR="$W/out" \
+    sh -c 'cd "$1" && exec sh "$2" --version' - "$W/cwd" "$LAUNCHER"
+  [ -s "$W/curl-args" ] && [ -x "$W/dl/$NAME" ] && [ "$(sha "$W/dl/$NAME")" = "$(pinned "$NAME")" ] \
+    && pass "and it is in the download folder, executable, with the pinned SHA-256" \
+    || fail "the matching download was not kept as $W/dl/$NAME"
+  rm -rf "$W/dl" "$W/out"
 else
   fail "the pinned mill is not in the download cache at $REAL and could not be downloaded"
 fi

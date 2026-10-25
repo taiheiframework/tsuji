@@ -46,7 +46,7 @@ object Displayable:
   given (
     using catalogues: Catalogues
   ): JsonDecoder[Displayable] =
-    Json.decoder.mapOrFail(decode(_, MessageArg.Context(catalogues, 0)))
+    BoundedJson.decoder.mapOrFail(decode(_, MessageArg.Context(catalogues, 0)))
 
 end Displayable
 
@@ -95,7 +95,7 @@ object Text:
   given JsonEncoder[Text] = Json.encoder.contramap(toJsonAst)
 
   /** Reads `{"text":...,"language":...}`; needs no registry. */
-  given JsonDecoder[Text] = Json.decoder.mapOrFail(decode)
+  given JsonDecoder[Text] = BoundedJson.decoder.mapOrFail(decode)
 
   /** The encoder and decoder of a text together. */
   given JsonCodec[Text] = JsonCodec(summon[JsonEncoder[Text]], summon[JsonDecoder[Text]])
@@ -283,7 +283,7 @@ object Message:
   given (
     using catalogues: Catalogues
   ): JsonDecoder[Message] =
-    Json.decoder.mapOrFail(decode(_, MessageArg.Context(catalogues, 0)))
+    BoundedJson.decoder.mapOrFail(decode(_, MessageArg.Context(catalogues, 0)))
 
   /** The encoder and the decoder together; like the decoder, it needs a `Catalogues` in scope. */
   given (

@@ -22,11 +22,15 @@ object UnknownKeySpec extends ZIOSpecDefault:
       given Catalogues = Catalogues()
       def nested(n: Int) =
         s"""{"key":"newer.message","args":{"a":${"[" * n}1${"]" * n}},"text":"From a newer server"}"""
-      val deep           = nested(5000).fromJson[Message]
+      // Deeper than the kept arguments' bound of 16, within the reader's bound of 64.
+      val deep           = nested(20).fromJson[Message]
+      // Deeper than any JSON the reader takes.
+      val deeper         = nested(5000).fromJson[Message]
       val kept           = nested(14).fromJson[Message]
       val used           = onSmallStack(kept.map(m => (m.toJson, m.hashCode)))
       assertTrue(
         deep.left.exists(_.contains("nest deeper than 16")),
+        deeper.left.exists(_.contains("deeper than 64")),
         kept.isRight,
         used.exists(_.isRight),
       )

@@ -389,7 +389,7 @@ MLOG="$W/mill-env"; GLOG="$W/gh-log"; GHS="$W/gh"; mkdir -p "$GHS" "$W/bin"
 POMS_JSON="$W/poms.json"; RESOLVERS_JSON="$W/resolvers.json"; RESOLVED_JSON="$W/rg.json"; RESOLVING="$W/resolving"
 cat > "$G/mill" <<EOF
 #!/usr/bin/env bash
-SEEN=""; for v in MILL_SONATYPE_USERNAME MILL_SONATYPE_PASSWORD MILL_PGP_SECRET_BASE64 MILL_PGP_PASSPHRASE; do
+SEEN=""; for v in MILL_SONATYPE_USERNAME MILL_SONATYPE_PASSWORD MILL_PGP_SECRET_BASE64 MILL_PGP_PASSPHRASE SONATYPE_USERNAME SONATYPE_PASSWORD GH_TOKEN GITHUB_TOKEN; do
   [ -n "\${!v+x}" ] && SEEN="\$SEEN \$v"
 done
 LEAK=no; env | grep -qF cmdline-secret && LEAK=yes
@@ -490,7 +490,10 @@ release_api "$LIB" "$DV" true
 expect "repo-guard passes a pin on the site and files that match their release" 0 "and nothing else" "${M[@]}" repo-guard
 # Every Mill call of a step that needs no credential, with a Central token and the release key
 # exported in the shell and a value on make's command line: none of them may see either.
-TOKENS=(MILL_SONATYPE_USERNAME=env-user MILL_SONATYPE_PASSWORD=env-token MILL_PGP_SECRET_BASE64=env-key MILL_PGP_PASSPHRASE=env-pass)
+TOKENS=(MILL_SONATYPE_USERNAME=env-user MILL_SONATYPE_PASSWORD=env-token MILL_PGP_SECRET_BASE64=env-key MILL_PGP_PASSPHRASE=env-pass
+        SONATYPE_USERNAME=legacy-user SONATYPE_PASSWORD=legacy-token GH_TOKEN=gh-token GITHUB_TOKEN=gh-token)
+# A ./mill shutdown starts a daemon when none runs, so it must see no credential at all.
+clean_shutdowns() { grep -q '^shutdown ' "$MLOG.calls" && ! grep '^shutdown ' "$MLOG.calls" | grep -v '| none | leak no$' >/dev/null; }
 no_credential_reached_mill() {
   [ -s "$MLOG.calls" ] && ! grep -v '| none | leak no$' "$MLOG.calls" >/dev/null
 }
@@ -700,6 +703,14 @@ saw "MILL_SONATYPE_USERNAME placeholder" && saw "MILL_SONATYPE_PASSWORD placehol
 grep -q "^shutdown " "$MLOG.pre" 2>/dev/null && grep -q "^resolve " "$MLOG.pre" && ! grep -q " set$" "$MLOG.pre" \
   && pass "publish-dry-run: no Mill call, shutdown and the module guard included, sees a Central token from the environment" \
   || fail "publish-dry-run: a Mill call before the dry run saw the Central token from the environment: $(grep ' set$' "$MLOG.pre" 2>/dev/null | tr '\n' ' ')"
+rm -f "$MLOG.calls"
+env "${TOKENS[@]}" "${M[@]}" publish-dry-run "RELEASE_ENV=$W/release.env" >/dev/null 2>&1
+clean_shutdowns && ! grep '^--no-daemon resolve ' "$MLOG.calls" | grep -v '| none | leak no$' >/dev/null \
+  && pass "publish-dry-run: shutdown and the module guard see no credential, from the shell or the release env" \
+  || fail "publish-dry-run: shutdown or the module guard saw a credential: $(grep -e '^shutdown ' -e 'resolve ' "$MLOG.calls" | tr '\n' ';')"
+grep '^--no-daemon mill.javalib' "$MLOG.calls" | grep -q -e ' SONATYPE_USERNAME' -e ' SONATYPE_PASSWORD' -e ' GH_TOKEN' -e ' GITHUB_TOKEN' \
+  && fail "publish-dry-run: the publishing call saw a legacy Central name or a gh token" \
+  || pass "publish-dry-run: the publishing call sees no legacy Central name and no gh token"
 rm -f "$MLOG" "$MLOG.calls"
 "${M[@]}" publish-dry-run "RELEASE_ENV=$W/release.env" MILL_SONATYPE_PASSWORD=cmdline-secret >/dev/null 2>&1
 saw "MILL_SONATYPE_PASSWORD placeholder" && ! grep -q 'leak yes$' "$MLOG.calls" \
@@ -745,7 +756,8 @@ expect "publish takes the credentials from the environment when there is no rele
   env MILL_TESTS_PUBLISH_DRY_RUN=1 "${TOKENS[@]}" "${M[@]}" publish
 saw "MILL_SONATYPE_USERNAME set" && saw "MILL_SONATYPE_PASSWORD set" && saw "MILL_PGP_SECRET_BASE64 set" && saw "MILL_PGP_PASSPHRASE set" \
   && ! grep -v -e '^--no-daemon ' -e '^shutdown ' "$MLOG.calls" >/dev/null \
-  && pass "publish: the publishing call gets all four from the environment, and no daemon sees them" \
+  && clean_shutdowns \
+  && pass "publish: the publishing call gets all four from the environment, and no daemon, shutdown's included, sees them" \
   || fail "publish: on the CI route, Mill's environment or a daemon: $(cat "$MLOG" "$MLOG.calls" 2>/dev/null | tr '\n' ';')"
 rm -f "$G/.release-embargo"
 expect "release-bundle never signs again a version signed for Central" 1 "never signed again" "${M[@]}" release-bundle

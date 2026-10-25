@@ -97,8 +97,8 @@ STRAY_GUARD = STRAY=$$(git status --porcelain --ignored --untracked-files=all --
 
 PUBLISHED = tsuji.js.publishArtifacts tsuji.jvm.publishArtifacts tsuji.tools.publishArtifacts
 # Without a daemon: in publish the environment may hold the Central token (CI), and a daemon this
-# started would keep it for as long as it lives.
-MODULE_GUARD = MODULES=$$(./mill --no-daemon resolve __.publishArtifacts | sort | tr '\n' ' ' | sed 's/ $$//'); \
+# started would keep it for as long as it lives. And without any credential (MILL_BARE).
+MODULE_GUARD = MODULES=$$($(MILL_BARE) --no-daemon resolve __.publishArtifacts | sort | tr '\n' ' ' | sed 's/ $$//'); \
 	if [ "$$MODULES" != "$(PUBLISHED)" ]; then echo "[ERROR] the build would publish '$$MODULES', not '$(PUBLISHED)'"; exit 1; fi
 
 # The first command of every recipe that starts Mill and needs no credential (repo-guard,
@@ -106,9 +106,16 @@ MODULE_GUARD = MODULES=$$(./mill --no-daemon resolve __.publishArtifacts | sort 
 # a credential exported in the calling shell then never reaches a Mill daemon. A variable given on
 # make's command line also survives an unset in MAKEFLAGS, which every Mill call would see, so
 # those go too; none of these recipes calls $(MAKE). Not in validate as a whole, nor as a global
-# unexport: CI hands the publishing steps their credentials through the environment.
-NO_CREDENTIALS = unset MILL_SONATYPE_USERNAME MILL_SONATYPE_PASSWORD MILL_PGP_SECRET_BASE64 MILL_PGP_PASSPHRASE \
-	MAKEFLAGS MFLAGS MAKEOVERRIDES
+# unexport: CI hands the publishing steps their credentials through the environment. Mill also
+# reads the Central token under its older names, SONATYPE_USERNAME and SONATYPE_PASSWORD.
+CREDENTIALS = MILL_SONATYPE_USERNAME MILL_SONATYPE_PASSWORD MILL_PGP_SECRET_BASE64 MILL_PGP_PASSPHRASE \
+	SONATYPE_USERNAME SONATYPE_PASSWORD
+NO_CREDENTIALS = unset $(CREDENTIALS) MAKEFLAGS MFLAGS MAKEOVERRIDES
+# Mill with none of them, no gh token and none of make's variables, for a Mill call that needs no
+# credential in a recipe that keeps some: gh in release-preflight may need GH_TOKEN, and publish
+# and the dry run hold their credentials. ./mill shutdown starts a daemon when none runs, and that
+# daemon, however briefly, holds whatever environment the call has.
+MILL_BARE = env $(foreach v,$(CREDENTIALS) GH_TOKEN GITHUB_TOKEN MAKEFLAGS MFLAGS MAKEOVERRIDES,-u $(v)) ./mill
 
 # A release version is three numbers and nothing else.
 VERSION_GUARD = if ! [[ "$$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$$ ]]; then echo "[ERROR] not a release version: '$$VERSION'"; exit 1; fi
@@ -302,7 +309,7 @@ RESOLVED := $(RESOLVED),scalafixToolClasspath,pgpWorkerClasspath,scalaCompilerBr
 RESOLVED := $(RESOLVED),resolvedSemanticDbJavaPluginMvnDeps,annotationProcessorsResolvedMvnDeps
 repo-guard:
 	@set -euo pipefail; \
-	$(NO_CREDENTIALS); \
+	$(NO_CREDENTIALS) GH_TOKEN GITHUB_TOKEN; \
 	if [ -n "$${COURSIER_REPOSITORIES:-}$${COURSIER_MIRRORS:-}$${COURSIER_CREDENTIALS:-}" ]; then \
 		echo "[repo-guard] COURSIER_REPOSITORIES, COURSIER_MIRRORS or COURSIER_CREDENTIALS is set: this build resolves from Maven Central and $(REPO_URL) only, unset them"; exit 1; fi; \
 	LIST=$$(git ls-files -- $(BUILD_FILES) .github); mapfile -t FILES <<< "$$LIST"; \
@@ -371,11 +378,12 @@ publishLocal:
 # right after the guard, every Mill command after it runs with --no-daemon, the module guard
 # included (so no client that starts a daemon in between can hand it a token the environment
 # holds, as in CI), and the daemon is shut down again at the end, so that no process keeps the
-# credentials. The tokens are not unset here: in CI they come from the environment. On the route
-# of ADR 0004 this is only the direct Central upload of a security release under embargo: Mill
-# signs again here, so a version that has a GitHub Release must never come through it (the
-# release train takes that one to Central, as the same files). It refuses a version that is not in $(EMBARGO_FILE), and one of
-# whose files the family's repository already serves. Before Mill starts it writes a marker next
+# credentials; shutdown, which starts a daemon when none runs, gets none (MILL_BARE). The tokens
+# are not unset here: in CI they come from the environment. On the route of ADR 0004 this is only
+# the direct Central upload of a security release under embargo: Mill signs again here, so a
+# version that has a GitHub Release must never come through it (the release train takes that one
+# to Central, as the same files). It refuses a version that is not in $(EMBARGO_FILE), and one
+# of whose files the family's repository already serves. Before Mill starts it writes a marker next
 # to where the version's bundle would be: from then on the version may be on Central, so it is
 # never published again from here, and its GitHub Release takes Central's files (central-bundle).
 # The marker is written under the tag's version and Mill uploads under its own: they must agree.
@@ -399,8 +407,8 @@ publish:
 	  done; \
 	done; \
 	$(STRAY_GUARD); \
-	./mill shutdown >/dev/null 2>&1 || true; \
-	trap './mill shutdown >/dev/null 2>&1 || true' EXIT; \
+	$(MILL_BARE) shutdown >/dev/null 2>&1 || true; \
+	trap '$(MILL_BARE) shutdown >/dev/null 2>&1 || true' EXIT; \
 	$(MODULE_GUARD); \
 	$(SOURCE_RELEASE_ENV); \
 	unset MILL_TESTS_PUBLISH_DRY_RUN; \
@@ -422,17 +430,19 @@ publish:
 # release-finalize builds its bundle here: the Central token is unset before Mill starts, and Mill,
 # which wants credentials before it looks at the hook, gets a placeholder that is no token. A Mill
 # that no longer honours the hook fails to authenticate instead of publishing to Central. A token
-# exported in the calling shell is unset first, before any Mill call or daemon can see it, and so
-# are MAKEFLAGS and its kin, which would carry a variable given on make's command line to Mill.
+# exported in the calling shell, under its current or older names, is unset first, before any Mill
+# call or daemon can see it, and so are the gh tokens, which the dry run does not use, and MAKEFLAGS
+# and its kin, which would carry a variable given on make's command line to Mill. Both shutdowns
+# run without the release key (MILL_BARE).
 publish-dry-run:
 	@set -e; \
-	unset MILL_SONATYPE_USERNAME MILL_SONATYPE_PASSWORD MAKEFLAGS MFLAGS MAKEOVERRIDES; \
+	unset MILL_SONATYPE_USERNAME MILL_SONATYPE_PASSWORD SONATYPE_USERNAME SONATYPE_PASSWORD GH_TOKEN GITHUB_TOKEN MAKEFLAGS MFLAGS MAKEOVERRIDES; \
 	$(STRAY_GUARD); \
-	./mill shutdown >/dev/null 2>&1 || true; \
-	trap './mill shutdown >/dev/null 2>&1 || true' EXIT; \
+	$(MILL_BARE) shutdown >/dev/null 2>&1 || true; \
+	trap '$(MILL_BARE) shutdown >/dev/null 2>&1 || true' EXIT; \
 	$(MODULE_GUARD); \
 	$(SOURCE_RELEASE_ENV); \
-	unset MILL_SONATYPE_USERNAME MILL_SONATYPE_PASSWORD; \
+	unset MILL_SONATYPE_USERNAME MILL_SONATYPE_PASSWORD SONATYPE_USERNAME SONATYPE_PASSWORD; \
 	VERSION=$$(./mill --no-daemon show release.gitVersion | tr -d '"'); \
 	case "$$VERSION" in *-SNAPSHOT) BUNDLE=();; *) BUNDLE=(--bundleName "$(BUNDLE_PREFIX)-$$VERSION");; esac; \
 	MILL_TESTS_PUBLISH_DRY_RUN=1 MILL_SONATYPE_USERNAME=dry-run-no-upload MILL_SONATYPE_PASSWORD=dry-run-no-upload \
@@ -452,7 +462,7 @@ release-preflight:
 	@set -eo pipefail; \
 	$(NO_CREDENTIALS); \
 	$(STRAY_GUARD); \
-	VERSION=$$(./mill --no-daemon show release.gitVersion | tr -d '"'); \
+	VERSION=$$($(MILL_BARE) --no-daemon show release.gitVersion | tr -d '"'); \
 	case "$$VERSION" in *-SNAPSHOT) echo "[preflight] $$VERSION is not a release"; exit 1;; esac; \
 	$(VERSION_GUARD); \
 	$(MODULE_GUARD); \

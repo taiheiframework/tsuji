@@ -43,7 +43,12 @@ object DeepNestingSpec extends ZIOSpecDefault:
     "01",
     "-",
     "{\"a\":[1,{\"b\":}]}",
+    "{\"a\":1,\"b\":[1 2]}",
   )
+
+  // A message whose argument is a list of messages: each level of it is three levels of JSON.
+  object Lists extends MessageFamily("lists"):
+    val all = message[(errors: List[Message])]("{$errors}")
 
   // A built AST `n` levels deep, without recursion.
   private def ast(n: Int): Json =
@@ -87,6 +92,15 @@ object DeepNestingSpec extends ZIOSpecDefault:
         unknown.fromJson[Message].map(_.toJson.fromJson[Json]) == Right(unknown.fromJson[Json]),
       )
     },
+    test("the deepest messages the library writes, nested in lists, read back") {
+      given Catalogues = Catalogues(Seq(Lists, Shapes, Orders))
+      def nest(n: Int): Message = if n == 0 then Orders.cancelled else Lists.all(List(nest(n - 1)))
+      val deepest               = nest(MessageArg.MaxDepth)
+      assertTrue(
+        deepest.toJson.fromJson[Message] == Right(deepest),
+        nest(MessageArg.MaxDepth + 1).toJson.fromJson[Message].left.exists(_.contains("nested deeper")),
+      )
+    },
     test("the bounded reader reads and refuses what zio-json's reader does, with the same errors") {
       // Compared as written out again: Json's own equality is not reflexive for an object that
       // repeats a name, and the repeated name must survive as it does with zio-json's reader.
@@ -94,7 +108,7 @@ object DeepNestingSpec extends ZIOSpecDefault:
         s.fromJson[Json](
           using BoundedJson.decoder
         ).map(_.toJson) != s.fromJson[Json].map(_.toJson)
-      assertTrue(samples.size == 30, "[1,]".fromJson[Json].isLeft, differ.isEmpty)
+      assertTrue(samples.size == 31, "[1,]".fromJson[Json].isLeft, differ.isEmpty)
     },
     test("a built AST deeper than the bound is refused without recursion, a shallow one is kept") {
       given Catalogues = Catalogues(Seq(Orders))

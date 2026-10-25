@@ -311,9 +311,11 @@ publishLocal:
 # and one of whose files GitHub Packages already has. Before Mill starts it writes a marker next
 # to where the version's bundle would be, as publish-github does: from then on the version may be
 # on Central, so it is never published again from here and release-abort refuses to undo it.
+# The marker is written under the tag's version and Mill uploads under its own: they must agree.
 publish:
 	@set -eo pipefail; \
 	$(TAG_VERSION); \
+	TAGGED=$$VERSION; \
 	if git ls-files --error-unmatch "$(EMBARGO_FILE)" >/dev/null 2>&1; then echo "[publish] refused: $(EMBARGO_FILE) is tracked"; exit 1; fi; \
 	if [ -e "$$B.CENTRAL_UPLOAD_STARTED" ] || [ -L "$$B.CENTRAL_UPLOAD_STARTED" ]; then \
 	  echo "[publish] refused: the upload of $$VERSION to Maven Central started before ($$(cat "$$B.CENTRAL_UPLOAD_STARTED" 2>/dev/null)), and it is never started again."; \
@@ -342,6 +344,7 @@ publish:
 	VERSION=$$(./mill --no-daemon show release.gitVersion | tr -d '"'); \
 	case "$$VERSION" in *-SNAPSHOT) echo "[publish] refused: $$VERSION is not a release (an exact v-tag on a clean tree)"; exit 1;; esac; \
 	$(VERSION_GUARD); \
+	if [ "$$VERSION" != "$$TAGGED" ]; then echo "[publish] refused: Mill would publish $$VERSION, not the tag's $$TAGGED"; exit 1; fi; \
 	mkdir -p "$(BUNDLES)"; \
 	echo "$$(date -u +%Y-%m-%dT%H:%M:%SZ) to Maven Central" > "$$B.CENTRAL_UPLOAD_STARTED"; \
 	echo "[publish] $$VERSION to Maven Central: from here on the version may be final"; \
@@ -352,9 +355,11 @@ publish:
 # Only MILL_TESTS_PUBLISH_DRY_RUN, a test hook of Mill's, keeps this from uploading, and
 # release-finalize builds its bundle here: the Central token is unset before Mill starts, and Mill,
 # which wants credentials before it looks at the hook, gets a placeholder that is no token. A Mill
-# that no longer honours the hook fails to authenticate instead of publishing to Central.
+# that no longer honours the hook fails to authenticate instead of publishing to Central. A token
+# exported in the calling shell is unset first, before any Mill call or daemon can see it.
 publish-dry-run:
 	@set -e; \
+	unset MILL_SONATYPE_USERNAME MILL_SONATYPE_PASSWORD; \
 	$(STRAY_GUARD); \
 	./mill shutdown >/dev/null 2>&1 || true; \
 	trap './mill shutdown >/dev/null 2>&1 || true' EXIT; \

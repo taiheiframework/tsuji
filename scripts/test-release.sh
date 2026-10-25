@@ -303,21 +303,25 @@ expect "embargo-lift lifts one version" 0 "no longer under embargo" "${M[@]}" em
 expect "embargo-lift refuses a version that is not under embargo" 1 "not under embargo" "${M[@]}" embargo-lift "VERSION=$V"
 
 # --- the targets that start Mill, against a stand-in ----------------------------------------
-# The stand-in answers the guards, and for the publishing command records which credential
+# The stand-in answers the guards, and records which Central token variables reached each Mill
+# call before the publishing one (in $MLOG.pre), and for the publishing command which credential
 # variables reached it (their names, never their values), its arguments, and whether the Central
-# marker was there when it started. Mill 1.3.1 signs in its own JVM; only an added --useGpgCli
+# marker was there when it started. STANDIN_VERSION, when set, is the version it reports. Mill 1.3.1 signs in its own JVM; only an added --useGpgCli
 # would hand the passphrase to a gpg command line, so the arguments must be exactly these.
 MLOG="$W/mill-env"
 cat > "$G/mill" <<EOF
 #!/usr/bin/env bash
 case "\$*" in
-  shutdown) exit 0;;
-  "resolve __.publishArtifacts") printf '%s\n' $PUBLISHED;;
+  shutdown|"resolve __.publishArtifacts")
+    for v in MILL_SONATYPE_USERNAME MILL_SONATYPE_PASSWORD; do
+      if [ -n "\${!v+x}" ]; then echo "\$1 \$v set"; else echo "\$1 \$v unset"; fi
+    done >> "$MLOG.pre"
+    [ "\$1" = shutdown ] || printf '%s\n' $PUBLISHED;;
   "--no-daemon show release.gitVersion")
     for v in MILL_SONATYPE_USERNAME MILL_SONATYPE_PASSWORD; do
       if [ -n "\${!v+x}" ]; then echo "show \$v set"; else echo "show \$v unset"; fi
     done > "$MLOG.show"
-    echo '"$V"';;
+    echo "\"\${STANDIN_VERSION:-$V}\"";;
   "--no-daemon mill.javalib.SonatypeCentralPublishModule/"*)
     for v in MILL_SONATYPE_USERNAME MILL_SONATYPE_PASSWORD MILL_PGP_SECRET_BASE64 MILL_PGP_PASSPHRASE MILL_TESTS_PUBLISH_DRY_RUN; do
       if [ "\${!v-}" = dry-run-no-upload ]; then echo "\$v placeholder"
@@ -343,10 +347,13 @@ saw "MILL_SONATYPE_USERNAME placeholder" && saw "MILL_SONATYPE_PASSWORD placehol
 saw "MILL_PGP_SECRET_BASE64 set" && saw "MILL_PGP_PASSPHRASE set" && saw "MILL_TESTS_PUBLISH_DRY_RUN set" \
   && pass "publish-dry-run: Mill gets the release key and the dry-run switch" || fail "publish-dry-run: Mill lacks the key or the switch"
 saw "$ARGS" && pass "publish-dry-run: Mill gets the bundle name and no other argument" || fail "publish-dry-run: Mill's arguments: $(grep '^args' "$MLOG")"
-rm -f "$MLOG"
+rm -f "$MLOG" "$MLOG.pre"
 MILL_SONATYPE_USERNAME=env-user MILL_SONATYPE_PASSWORD=env-token "${M[@]}" publish-dry-run >/dev/null 2>&1
 saw "MILL_SONATYPE_USERNAME placeholder" && saw "MILL_SONATYPE_PASSWORD placeholder" \
   && pass "publish-dry-run: nor a Central token from the environment" || fail "publish-dry-run: Mill saw the Central token from the environment"
+grep -q "^shutdown " "$MLOG.pre" 2>/dev/null && grep -q "^resolve " "$MLOG.pre" && ! grep -q " set$" "$MLOG.pre" \
+  && pass "publish-dry-run: no Mill call, shutdown and the module guard included, sees a Central token from the environment" \
+  || fail "publish-dry-run: a Mill call before the dry run saw the Central token from the environment: $(grep ' set$' "$MLOG.pre" 2>/dev/null | tr '\n' ' ')"
 rm -f "$MLOG"; chmod 640 "$W/release.env"
 expect "publish-dry-run refuses a release env others can read" 1 "mode 600" "${M[@]}" publish-dry-run "RELEASE_ENV=$W/release.env"
 chmod 600 "$W/release.env"; ln -s "$W/release.env" "$W/link.env"
@@ -364,6 +371,9 @@ saw "MILL_PGP_SECRET_BASE64 unset" \
 # release-abort above removed the tag; the release is at it again.
 git -C "$G" -c user.name=Test -c user.email=test@example.invalid -c tag.gpgsign=false tag -a "v$V" -m test
 rm -rf "$W/served/taiheiframework"; echo "$V" > "$G/.release-embargo"; rm -f "$MLOG"
+expect "publish refuses when Mill would publish another version than the tag's" 1 "not the tag's" env STANDIN_VERSION=9.9.8 "${M[@]}" publish "RELEASE_ENV=$W/release.env"
+[ ! -e "$B.CENTRAL_UPLOAD_STARTED" ] && [ ! -e "$MLOG" ] \
+  && pass "and it wrote no Central marker and started no upload" || fail "publish marked or started a Central upload for another version than the tag's"
 expect "publish uploads an embargoed version to Central" 0 "to Maven Central" env MILL_TESTS_PUBLISH_DRY_RUN=1 "${M[@]}" publish "RELEASE_ENV=$W/release.env"
 [ -s "$B.CENTRAL_UPLOAD_STARTED" ] && saw "marker before mill" \
   && pass "publish marked the Central upload before Mill started" || fail "publish did not mark the Central upload before Mill"

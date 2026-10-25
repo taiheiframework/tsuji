@@ -56,8 +56,8 @@ make test           # ./mill __.test.testForked    (JVM + JS; JS runs on Node)
 make fmt            # ./mill __.reformat
 make fix            # ./mill __.fix                 (scalafix)
 make validate       # repo-guard + release-test + fix + fmt + compile + test + mima
-make repo-guard     # Coursier's defaults, then REPO_URL for dev.taihei alone, nothing else;
-                    # every resolved dev.taihei file checked
+make repo-guard     # Coursier's defaults (local Ivy, Central), then REPO_URL for dev.taihei
+                    # alone, nothing else; every resolved dev.taihei file checked
 make release-test   # the release machinery's own tests, against stand-ins on localhost
 make mima           # binary compatibility with the newest release tag of the current major,
                     # which must be on Central or REPO_URL (MIMA_BASELINE=x.y.z until it is)
@@ -122,7 +122,10 @@ A release publishes only the commit `release-prepare` validated, and refuses whe
 does not track is in a source or resource folder, or a stray build file is in the tree.
 Credentials never go on make's command line (`make … VAR=value`): make hands such a value on to
 every command it runs, also after an `unset`. They come from `~/.edo-release.env` or the
-environment, and only `make publish` and the dry run's signing step (the key alone) get them.
+environment. From the file only `make publish` and the dry run's signing step (the key alone)
+get them; do not export them in the shell you build in, where every Mill call of a build target
+and of `release-prepare` would see them (repo-guard, `release-preflight` and the dry run unset
+them first).
 
 `make publish` is only for a security fix under embargo, which goes to Central first; it refuses
 any other version, and a version whose Central upload it started before. It reads the Central

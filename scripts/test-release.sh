@@ -406,7 +406,6 @@ case "\$*" in
       if [ -n "\${!v+x}" ]; then echo "show \$v set"; else echo "show \$v unset"; fi
     done > "$MLOG.show"
     echo "\"\${STANDIN_VERSION:-$V}\"";;
-  "show release.gitVersion") echo "\"\${STANDIN_VERSION:-$V}\"";;
   "show "*".repositories") echo '{"m.repositories": []}';;
   "show __.resolverOrder") cat "$RESOLVERS_JSON";;
   "resolve __.resolvedMvnDeps") cat "$RESOLVING";;
@@ -739,6 +738,15 @@ saw "MILL_SONATYPE_USERNAME set" && saw "MILL_TESTS_PUBLISH_DRY_RUN unset" \
 rm -f "$MLOG"
 expect "publish never starts the Central upload of a version twice" 1 "started before" "${M[@]}" publish "RELEASE_ENV=$W/release.env"
 [ ! -e "$MLOG" ] && pass "and Mill did not run" || fail "Mill ran for a second Central upload"
+# The CI route: no release env file, every credential from the environment. publish must hand all
+# of them to the publishing call, and run nothing but shutdown on a daemon.
+rm -f "$B.CENTRAL_UPLOAD_STARTED" "$MLOG" "$MLOG.calls"
+expect "publish takes the credentials from the environment when there is no release env (CI)" 0 "to Maven Central" \
+  env MILL_TESTS_PUBLISH_DRY_RUN=1 "${TOKENS[@]}" "${M[@]}" publish
+saw "MILL_SONATYPE_USERNAME set" && saw "MILL_SONATYPE_PASSWORD set" && saw "MILL_PGP_SECRET_BASE64 set" && saw "MILL_PGP_PASSPHRASE set" \
+  && ! grep -v -e '^--no-daemon ' -e '^shutdown ' "$MLOG.calls" >/dev/null \
+  && pass "publish: the publishing call gets all four from the environment, and no daemon sees them" \
+  || fail "publish: on the CI route, Mill's environment or a daemon: $(cat "$MLOG" "$MLOG.calls" 2>/dev/null | tr '\n' ';')"
 rm -f "$G/.release-embargo"
 expect "release-bundle never signs again a version signed for Central" 1 "never signed again" "${M[@]}" release-bundle
 expect "release-github sends a version that went to Central first to central-bundle" 1 "make central-bundle" "${M[@]}" release-github

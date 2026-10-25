@@ -270,9 +270,10 @@ mima:
 	echo "[mima] baseline: $$BASELINE"
 	./mill __.mimaReportBinaryIssues
 
-# An open repository resolves from Maven Central, then the family's repository, and nothing else
-# (ADR 0004, section 5), so anyone can clone and build it without credentials, a pin moves only
-# to a released version, and nothing but a released dev.taihei file comes from REPO_URL:
+# An open repository resolves from Coursier's defaults (the local Ivy repository, then Maven
+# Central), then the family's repository for dev.taihei alone, and nothing else (ADR 0004,
+# section 5), so anyone can clone and build it without credentials, a pin moves only to a
+# released version, and nothing but a released dev.taihei file comes from REPO_URL:
 # 1. no Coursier setting in the environment adds a repository, and the build files name REPO_URL
 #    once, as build.mill's release.repoUrl, add it once, after Coursier's defaults, and name no
 #    other repository (release.py build-repos);

@@ -4,16 +4,20 @@
 # embargo in the Makefile, run against scripts/fake_registry.py on localhost. A throwaway git
 # repository holds a copy of the Makefile and scripts/, tagged v9.9.9, with a synthetic bundle
 # signed by throwaway keys (no Mill, never the release key): what is tested is what the targets do
-# with a bundle, its signatures, the tokens and the registry's answers. The Central check asks
-# repo1.maven.org about version 9.9.9, so the test needs the network. One line per check; exits
-# non-zero when any check fails.
+# with a bundle, its signatures, the tokens and the registry's answers. Where a target starts Mill,
+# a stand-in answers and records which credential variables reached it. The mill launcher's
+# download check runs against a stand-in curl. The Central check asks repo1.maven.org about version
+# 9.9.9, so the test needs the network. One line per check; exits non-zero when any check fails.
 set -uo pipefail
 # make hands its command-line variables to every make below it, through MAKEFLAGS and as
 # environment variables: release-prepare TYPE=... EMBARGO=... runs make validate, and so this
 # script, and the make calls here would inherit them (an EMBARGO=0 from outside answers the very
 # question one check asks). TYPE, EMBARGO and VERSION are the ones the Makefile reads from there;
-# RELEASE_ENV and COURSIER_CONFIG_DIR it reads from the environment.
-unset MAKEFLAGS MFLAGS MAKEOVERRIDES MAKELEVEL TYPE EMBARGO VERSION RELEASE_ENV COURSIER_CONFIG_DIR
+# COURSIER_CONFIG_DIR it reads from the environment. The release credentials and the launcher's
+# version variables are cleared too, so that only what a check sets reaches the targets.
+unset MAKEFLAGS MFLAGS MAKEOVERRIDES MAKELEVEL TYPE EMBARGO VERSION RELEASE_ENV COURSIER_CONFIG_DIR \
+  MILL_SONATYPE_USERNAME MILL_SONATYPE_PASSWORD MILL_PGP_SECRET_BASE64 MILL_PGP_PASSPHRASE \
+  MILL_VERSION DEFAULT_MILL_VERSION MILL_TESTS_PUBLISH_DRY_RUN
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$HERE/.." && pwd)
@@ -52,7 +56,13 @@ print-prefix:
 	@echo $(BUNDLE_PREFIX)
 EOF
 )
-[ -n "$ARTIFACTS" ] && [ -n "$PREFIX" ] || { echo "cannot read ARTIFACTS and BUNDLE_PREFIX from the Makefile"; exit 1; }
+PUBLISHED=$(make -s -C "$REPO" --no-print-directory -f - print-published <<'EOF' 2>/dev/null
+include Makefile
+print-published:
+	@echo $(PUBLISHED)
+EOF
+)
+[ -n "$ARTIFACTS" ] && [ -n "$PREFIX" ] && [ -n "$PUBLISHED" ] || { echo "cannot read ARTIFACTS, BUNDLE_PREFIX and PUBLISHED from the Makefile"; exit 1; }
 
 # --- a synthetic tree in the layout Mill writes -----------------------------------------------
 SRC="$W/src"
@@ -148,6 +158,26 @@ expect "pins: a module of this library at another version is refused" 1 "not thi
 expect "pins: without --own, a module of this library is a pin like any other" 1 "not a released version" R pins "$W/p5.pom"
 deps_pom "$W/p4.pom" "$(dep dev.zio zio_3 2.1.27)"
 [ -z "$(R pins "$W/p4.pom")" ] && pass "pins: a POM without dev.taihei dependencies lists none" || fail "pins: listed a foreign dependency"
+
+# --- the mill launcher ----------------------------------------------------------------------
+# A stand-in curl records its arguments and writes a file that is not Mill where -o points.
+L="$W/launcher"; mkdir -p "$L/bin" "$L/cwd"
+cat > "$L/bin/curl" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$L/curl-args"
+out=""; while [ \$# -gt 0 ]; do [ "\$1" = -o ] && out="\$2"; shift; done
+[ -n "\$out" ] && printf 'not mill' > "\$out"
+EOF
+chmod +x "$L/bin/curl"
+launch() { (cd "$L/cwd" && env PATH="$L/bin:$PATH" MILL_FINAL_DOWNLOAD_FOLDER="$L/dl" MILL_OUTPUT_DIR="$L/out" "$@" sh "$REPO/mill" --version); }
+expect "launcher: a download that does not match the pinned SHA-256 is refused" 1 "not the pinned" launch MILL_VERSION=1.3.1
+[ -s "$L/curl-args" ] && [ ! -e "$L/dl" ] && [ ! -e "$L/out/mill-temp-download" ] \
+  && pass "launcher: and it is neither kept nor made executable" || fail "launcher: the refused download was kept"
+grep -qF -- "--proto =https --proto-redir =https" "$L/curl-args" \
+  && pass "launcher: curl may use HTTPS only, also after a redirect" || fail "launcher: curl's protocols are not limited: $(cat "$L/curl-args")"
+: > "$L/curl-args"
+expect "launcher: a version without a pinned SHA-256 is refused" 1 "No SHA-256 is pinned" launch MILL_VERSION=1.3.0
+[ ! -s "$L/curl-args" ] && pass "launcher: and nothing is downloaded for it" || fail "launcher: curl ran for an unpinned version"
 
 # --- the Makefile targets against the fake registry ----------------------------------------
 G="$W/repo"; mkdir -p "$G/scripts"
@@ -271,6 +301,86 @@ printf '%s\n1.2.3\n' "$V" > "$G/.release-embargo"
 expect "embargo-lift lifts one version" 0 "no longer under embargo" "${M[@]}" embargo-lift "VERSION=$V"
 [ "$(cat "$G/.release-embargo")" = "1.2.3" ] && pass "and keeps the others" || fail "embargo-lift changed the other versions"
 expect "embargo-lift refuses a version that is not under embargo" 1 "not under embargo" "${M[@]}" embargo-lift "VERSION=$V"
+
+# --- the targets that start Mill, against a stand-in ----------------------------------------
+# The stand-in answers the guards, and for the publishing command records which credential
+# variables reached it (their names, never their values), its arguments, and whether the Central
+# marker was there when it started. Mill 1.3.1 signs in its own JVM; only an added --useGpgCli
+# would hand the passphrase to a gpg command line, so the arguments must be exactly these.
+MLOG="$W/mill-env"
+cat > "$G/mill" <<EOF
+#!/usr/bin/env bash
+case "\$*" in
+  shutdown) exit 0;;
+  "resolve __.publishArtifacts") printf '%s\n' $PUBLISHED;;
+  "--no-daemon show release.gitVersion")
+    for v in MILL_SONATYPE_USERNAME MILL_SONATYPE_PASSWORD; do
+      if [ -n "\${!v+x}" ]; then echo "show \$v set"; else echo "show \$v unset"; fi
+    done > "$MLOG.show"
+    echo '"$V"';;
+  "--no-daemon mill.javalib.SonatypeCentralPublishModule/"*)
+    for v in MILL_SONATYPE_USERNAME MILL_SONATYPE_PASSWORD MILL_PGP_SECRET_BASE64 MILL_PGP_PASSPHRASE MILL_TESTS_PUBLISH_DRY_RUN; do
+      if [ "\${!v-}" = dry-run-no-upload ]; then echo "\$v placeholder"
+      elif [ -n "\${!v+x}" ]; then echo "\$v set"; else echo "\$v unset"; fi
+    done > "$MLOG"
+    echo "args \$*" >> "$MLOG"
+    if [ -e "$B.CENTRAL_UPLOAD_STARTED" ]; then echo "marker before mill" >> "$MLOG"; fi;;
+  *) echo "stand-in mill: unexpected \$*" >&2; exit 1;;
+esac
+EOF
+chmod +x "$G/mill"
+( umask 077
+  printf "export MILL_SONATYPE_USERNAME='test-central-user'\nexport MILL_SONATYPE_PASSWORD='test-central-token'\n" > "$W/release.env"
+  printf "export MILL_PGP_SECRET_BASE64='dGVzdA=='\nexport MILL_PGP_PASSPHRASE='test'\n" >> "$W/release.env" )
+saw() { grep -qxF "$1" "$MLOG" 2>/dev/null; }
+ARGS="args --no-daemon mill.javalib.SonatypeCentralPublishModule/ --bundleName $PREFIX-$V"
+
+rm -f "$MLOG"
+expect "publish-dry-run runs with the release env" 0 "bundle in" "${M[@]}" publish-dry-run "RELEASE_ENV=$W/release.env"
+saw "MILL_SONATYPE_USERNAME placeholder" && saw "MILL_SONATYPE_PASSWORD placeholder" \
+  && grep -qxF "show MILL_SONATYPE_USERNAME unset" "$MLOG.show" && grep -qxF "show MILL_SONATYPE_PASSWORD unset" "$MLOG.show" \
+  && pass "publish-dry-run: Mill gets a placeholder, never the Central token from the release env" || fail "publish-dry-run: a Mill saw the Central token, or no placeholder"
+saw "MILL_PGP_SECRET_BASE64 set" && saw "MILL_PGP_PASSPHRASE set" && saw "MILL_TESTS_PUBLISH_DRY_RUN set" \
+  && pass "publish-dry-run: Mill gets the release key and the dry-run switch" || fail "publish-dry-run: Mill lacks the key or the switch"
+saw "$ARGS" && pass "publish-dry-run: Mill gets the bundle name and no other argument" || fail "publish-dry-run: Mill's arguments: $(grep '^args' "$MLOG")"
+rm -f "$MLOG"
+MILL_SONATYPE_USERNAME=env-user MILL_SONATYPE_PASSWORD=env-token "${M[@]}" publish-dry-run >/dev/null 2>&1
+saw "MILL_SONATYPE_USERNAME placeholder" && saw "MILL_SONATYPE_PASSWORD placeholder" \
+  && pass "publish-dry-run: nor a Central token from the environment" || fail "publish-dry-run: Mill saw the Central token from the environment"
+rm -f "$MLOG"; chmod 640 "$W/release.env"
+expect "publish-dry-run refuses a release env others can read" 1 "mode 600" "${M[@]}" publish-dry-run "RELEASE_ENV=$W/release.env"
+chmod 600 "$W/release.env"; ln -s "$W/release.env" "$W/link.env"
+expect "publish-dry-run refuses a release env that is a link" 1 "not a link" "${M[@]}" publish-dry-run "RELEASE_ENV=$W/link.env"
+ln -s "$W/missing.env" "$W/dangling.env"
+expect "publish-dry-run refuses a release env that is a dangling link" 1 "not a link" "${M[@]}" publish-dry-run "RELEASE_ENV=$W/dangling.env"
+[ ! -e "$MLOG" ] && pass "and Mill never ran for a refused release env" || fail "Mill ran although the release env was refused"
+mkdir -p "$W/home"
+env HOME="$W/home" RELEASE_ENV="$W/release.env" make -C "$G" --no-print-directory publish-dry-run >/dev/null 2>&1
+saw "MILL_PGP_SECRET_BASE64 unset" \
+  && pass "an environment variable RELEASE_ENV does not choose the file that is sourced" || fail "RELEASE_ENV from the environment was sourced"
+
+# make publish marks the Central upload before Mill starts, as publish-github does for GitHub
+# Packages, so that it never runs twice for a version and release-abort does not undo it.
+# release-abort above removed the tag; the release is at it again.
+git -C "$G" -c user.name=Test -c user.email=test@example.invalid -c tag.gpgsign=false tag -a "v$V" -m test
+rm -rf "$W/served/taiheiframework"; echo "$V" > "$G/.release-embargo"; rm -f "$MLOG"
+expect "publish uploads an embargoed version to Central" 0 "to Maven Central" env MILL_TESTS_PUBLISH_DRY_RUN=1 "${M[@]}" publish "RELEASE_ENV=$W/release.env"
+[ -s "$B.CENTRAL_UPLOAD_STARTED" ] && saw "marker before mill" \
+  && pass "publish marked the Central upload before Mill started" || fail "publish did not mark the Central upload before Mill"
+saw "$ARGS" && pass "publish: Mill gets the bundle name and no other argument" || fail "publish: Mill's arguments: $(grep '^args' "$MLOG")"
+saw "MILL_SONATYPE_USERNAME set" && saw "MILL_TESTS_PUBLISH_DRY_RUN unset" \
+  && pass "publish gives Mill the Central token, and no dry-run switch, not even an inherited one" || fail "publish: Mill's environment"
+rm -f "$MLOG"
+expect "publish never starts the Central upload of a version twice" 1 "started before" "${M[@]}" publish "RELEASE_ENV=$W/release.env"
+[ ! -e "$MLOG" ] && pass "and Mill did not run" || fail "Mill ran for a second Central upload"
+rm -f "$G/.release-embargo"
+expect "release-bundle never signs again a version signed for Central" 1 "never signed again" "${M[@]}" release-bundle
+expect "publish-github never uploads a version signed for Central" 1 "never signed again" "${M[@]}" publish-github
+printf '{"currentVersion":"0.0.0","newVersion":"%s","releaseType":"patch","branch":"main","head":"x","embargo":true}\n' "$V" > "$G/.release-state.json"
+expect "release-abort undoes nothing once the Central upload started" 1 "may be final there" "${M[@]}" release-abort
+git -C "$G" rev-parse -q --verify "refs/tags/v$V" >/dev/null && [ -e "$G/.release-state.json" ] \
+  && pass "the tag and the release state stay" || fail "release-abort removed the tag or the state"
+rm -f "$G/.release-state.json" "$B.CENTRAL_UPLOAD_STARTED"
 
 [ "$FAILED" = 0 ] && echo "[release-test] all checks passed" || echo "[release-test] FAILED"
 exit "$FAILED"

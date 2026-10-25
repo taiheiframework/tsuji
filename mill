@@ -4,8 +4,31 @@
 # Download: https://repo1.maven.org/maven2/com/lihaoyi/mill-dist/1.3.1/mill-dist-1.3.1-mill.sh
 # Documentation: https://mill-build.org/mill/cli/installation-ide.html#_bootstrap_scripts
 # Script Version: 1.3.1
+#
+# Changed for the Taihei Framework: the launcher checks the SHA-256 of the Mill it downloads
+# against the values pinned in mill_pinned_sha256 below, before the file is made executable, and
+# curl may use HTTPS only, also after a redirect. A version without a pinned hash is refused, so a
+# Mill upgrade replaces this script and pins the new version's hashes in the same commit. The
+# hashes were taken from repo1.maven.org, checked against Central's .sha1 and against the PGP
+# signature of each file by Mill's release key (8F0D 3BA7 045A A84F 4FCC A818 66DB 4638 D2A8 A7E9).
 
 set -e
+
+mill_pinned_sha256() {
+  case "$1" in
+    1.3.1) echo "374b734cb5275f89fc9a92b88c0649cb2f633316dc56ad3565ba6f36d76d607e" ;;
+    1.3.1-native-linux-amd64) echo "fb94aa9389803f0330c80abe6430ba8427346cb41dbc0666418d52f7ce1fa1c4" ;;
+    1.3.1-native-linux-aarch64) echo "fe9f6d0d8a9b92cd4926a5b2d6d006706a04f7c856647db7712be8b296f8ea8a" ;;
+    1.3.1-native-mac-aarch64) echo "5af063ae94085a703596cc02bb390f8e8f901d043d3bb569cf66e0db1cd14943" ;;
+    1.3.1-native-mac-amd64) echo "abadbcf3551e55e3f5cef2541196a05f48dc5aa7bd62f516c207e7596a7df23c" ;;
+    *) echo "" ;;
+  esac
+}
+
+mill_sha256() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d ' ' -f 1
+  else shasum -a 256 "$1" | cut -d ' ' -f 1; fi
+}
 
 if [ -z "${DEFAULT_MILL_VERSION}" ] ; then DEFAULT_MILL_VERSION="1.3.1"; fi
 
@@ -173,8 +196,23 @@ if [ ! -s "${MILL}" ] || [ "$MILL_TEST_DRY_RUN_LAUNCHER_SCRIPT" = "1" ] ; then
     exit 0
   fi
 
+  MILL_EXPECTED_SHA256="$(mill_pinned_sha256 "$MILL_VERSION$ARTIFACT_SUFFIX")"
+  if [ -z "${MILL_EXPECTED_SHA256}" ] ; then
+    echo "No SHA-256 is pinned for mill ${MILL_VERSION}${ARTIFACT_SUFFIX} in this launcher: refusing to download it." 1>&2
+    exit 1
+  fi
+
   echo "Downloading mill ${MILL_VERSION} from ${MILL_DOWNLOAD_URL} ..." 1>&2
-  curl -f -L -o "${MILL_TEMP_DOWNLOAD_FILE}" "${MILL_DOWNLOAD_URL}"
+  rm -f "${MILL_TEMP_DOWNLOAD_FILE}"
+  curl -f -L --proto '=https' --proto-redir '=https' -o "${MILL_TEMP_DOWNLOAD_FILE}" "${MILL_DOWNLOAD_URL}"
+
+  MILL_ACTUAL_SHA256="$(mill_sha256 "${MILL_TEMP_DOWNLOAD_FILE}")"
+  if [ "${MILL_ACTUAL_SHA256}" != "${MILL_EXPECTED_SHA256}" ] ; then
+    rm -f "${MILL_TEMP_DOWNLOAD_FILE}"
+    echo "The SHA-256 of ${MILL_DOWNLOAD_URL} is ${MILL_ACTUAL_SHA256}, not the pinned ${MILL_EXPECTED_SHA256}: refusing to run it." 1>&2
+    exit 1
+  fi
+  unset MILL_EXPECTED_SHA256 MILL_ACTUAL_SHA256
 
   chmod +x "${MILL_TEMP_DOWNLOAD_FILE}"
 

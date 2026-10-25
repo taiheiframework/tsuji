@@ -60,31 +60,43 @@ object release extends Module {
   // work on the next major starts on main; release-prepare TYPE=major still sets none.
   val majorLine = "5.0.0"
 
-  // Where a version of this library is on Maven Central: the JVM module's POM.
-  private def centralPom(v: String) =
-    s"https://repo1.maven.org/maven2/dev/taihei/taihei-tsuji_3/$v/taihei-tsuji_3-$v.pom"
+  // The family's Maven repository, the one repository this build adds to Coursier's defaults
+  // (Maven Central), after them. It serves the libraries' immutable GitHub Releases, so a version
+  // is usable before the release train takes it to Central. The Makefile's REPO_URL holds the
+  // same string, and repo-guard checks that they agree. Moving the site to another address
+  // changes both lines.
+  val repoUrl = "https://taiheiframework.github.io/repo/"
 
-  // Whether Maven Central has a version: 200 yes, 404 no, anything else fails the build, since
-  // a baseline we cannot determine must not turn into no baseline.
-  private def onCentral(v: String): Boolean = {
+  // Where a version of this library's JVM module has its POM, in a Maven repository.
+  private def pomAt(root: String, v: String) =
+    s"${root.stripSuffix("/")}/dev/taihei/taihei-tsuji_3/$v/taihei-tsuji_3-$v.pom"
+
+  // Whether a repository has a version: 200 yes, 404 no, anything else (a redirect included)
+  // fails the build, since a baseline we cannot determine must not turn into no baseline. A file,
+  // not the version's directory: the family's repository answers 404 for a directory.
+  private def has(name: String, root: String, v: String): Boolean = {
     val code = os
-      .proc("curl", "-q", "-s", "--proto", "=https", "--max-time", "30", "-o", "/dev/null", "-w", "%{http_code}", centralPom(v))
+      .proc("curl", "-q", "-s", "--proto", "=https", "--max-time", "30", "-o", "/dev/null", "-w", "%{http_code}", pomAt(root, v))
       .call(check = false)
       .out
       .trim()
     code match {
       case "200" => true
       case "404" => false
-      case other => sys.error(s"cannot tell whether $v is on Maven Central (HTTP $other): no MiMa baseline")
+      case other => sys.error(s"cannot tell whether $v is on $name (HTTP $other): no MiMa baseline")
     }
   }
 
-  // The release MiMa compares with: the newest v-tag reachable from HEAD whose version is on Maven
-  // Central, none before firstRelease or majorLine. A release is tagged and pushed once it is on
-  // GitHub Packages, and reaches Central with the next release train (ADR 0003), so the newest tag
-  // may name a version MiMa cannot resolve yet: that tag is named in the log, and the baseline is
-  // the newest tag before it that Central has. At most one version waits at a time, which
-  // release-prepare enforces. On a release itself (an exact v-tag on a clean tree, as in CI on the
+  private def released(v: String): Boolean =
+    has("Maven Central", "https://repo1.maven.org/maven2", v) || has(repoUrl, repoUrl, v)
+
+  // The release MiMa compares with: the newest v-tag reachable from HEAD, none before
+  // firstRelease or majorLine, whose version must be on Maven Central or on the family's
+  // repository (repoUrl); MiMa resolves it through the same two. A tag on neither fails the build,
+  // naming it: a pushed tag is final and is published by release-github and publish-repo within
+  // minutes, so a tag the repository does not serve is something to look at, never a reason to
+  // compare with an older release unseen. Until it is served, MIMA_BASELINE names the release to
+  // compare with. On a release itself (an exact v-tag on a clean tree, as in CI on the
   // tagged commit) that tag is HEAD's own, which would compare the release with itself; so there
   // the search starts at the commit before it. MIMA_BASELINE overrides it: `none` for a major,
   // which may break (release-prepare TYPE=major sets it), or a version.
@@ -115,11 +127,13 @@ object release extends Module {
           .map(_.trim.stripPrefix("v"))
           .filter(_.matches("[0-9]+\\.[0-9]+\\.[0-9]+"))
           .filter(v => atLeast(v, firstRelease) && atLeast(v, majorLine))
-        val (waiting, rest) = candidates.span(v => !onCentral(v))
-        waiting.foreach { v =>
-          Task.log.warn(s"v$v is not on Maven Central yet: it waits for the release train, so MiMa compares with the newest tag on Central")
+        candidates.headOption.map { v =>
+          if (!released(v))
+            sys.error(
+              s"v$v is neither on Maven Central nor on $repoUrl: publish it (make release-github, make publish-repo), or set MIMA_BASELINE",
+            )
+          v
         }
-        rest.headOption
     }
   }
 }
@@ -140,8 +154,28 @@ trait TaiheiMima extends Mima with PublishModule {
 // Shared publishing settings for JVM and JS modules: what Maven Central
 // validates (name, description, url, licence, developer, scm, sources, docs).
 // ---------------------------------------------------------------------------
-trait TaiheiPublishSettings extends PublishModule {
+// The repositories a module resolves from, in order, as repo-guard reads them.
+trait TaiheiResolverOrder extends CoursierModule {
+  def resolverOrder: T[Seq[String]] = Task {
+    repositoriesTask().map {
+      case m: coursier.maven.MavenRepository => m.root
+      case i: coursier.ivy.IvyRepository     => s"ivy:${i.pattern.string}"
+      case other                             => other.toString
+    }
+  }
+}
+
+trait TaiheiPublishSettings extends PublishModule with TaiheiResolverOrder {
   def publishVersion = release.gitVersion()
+
+  // Coursier's defaults (Maven Central), then the family's repository, and nothing else. Mill's
+  // own `repositories` would put an added repository before Central, where it could stand in for
+  // anything Central has; appended, it is asked only for what Central does not have. The test
+  // modules use their module's repositories. repo-guard reads resolverOrder.
+  override def repositoriesTask: Task[Seq[coursier.Repository]] = Task.Anon {
+    coursierConfigModule().defaultRepositories() :+ coursier.maven.MavenRepository(release.repoUrl)
+  }
+
 
   // What a published jar holds comes only from folders in git: no default folder under the
   // module's directory, where a stray file would go into a jar unnoticed. A module that has
@@ -186,7 +220,7 @@ trait TaiheiModule extends ScalaModule with ScalafmtModule with ScalafixModule w
     "-java-output-version:17",
   )
 
-  trait TaiheiTests extends ScalaTests with ScalafmtModule with ScalafixModule {
+  trait TaiheiTests extends ScalaTests with ScalafmtModule with ScalafixModule with TaiheiResolverOrder {
     def testFramework = "zio.test.sbt.ZTestFramework"
 
     // The JDK the tests run on: the module's (Mill's own) unless TAIHEI_TEST_JAVA_HOME names
@@ -239,7 +273,7 @@ trait TaiheiJSModule extends ScalaJSModule with ScalafmtModule with ScalafixModu
     mvn"io.github.cquiroz::scala-java-time-tzdb::${V.scalaJavaTime}",
   )
 
-  trait TaiheiJSTests extends ScalaJSTests with ScalafmtModule with ScalafixModule {
+  trait TaiheiJSTests extends ScalaJSTests with ScalafmtModule with ScalafixModule with TaiheiResolverOrder {
     def testFramework = "zio.test.sbt.ZTestFramework"
 
     // The tests of legacy.Message use it on purpose.

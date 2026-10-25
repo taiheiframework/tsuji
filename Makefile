@@ -14,31 +14,47 @@ BUNDLE_PREFIX = dev.taihei-taihei-tsuji
 FIRST_RELEASE = 5.0.0
 LEGACY_CENTRAL_PATH = dev/taihei/taihei-i18n_3
 
-# One signed bundle, two registries (ADR 0003). release-finalize builds and signs the bundle
-# once, keeps it in BUNDLES (gitignored, outside out/ so a mill clean cannot remove it) with
-# its ledger SHA256SUMS and a deterministic zip, uploads those files unchanged to the GitHub
-# Packages registry of this repository, and reads every one back. The next release train in
-# nakama takes the same files to Maven Central. Nothing is ever built or signed a second time.
+# One signed bundle (ADR 0004). release-finalize builds and signs the bundle once and keeps it in
+# BUNDLES (gitignored, outside out/ so a mill clean cannot remove it) with its ledger SHA256SUMS
+# and a deterministic zip; it uploads nothing. Once main and the tag are pushed, release-github
+# keeps the zip and SHA256SUMS on an immutable GitHub Release of the tag, which publishes the
+# version. The family's Maven repository (REPO_URL) is built from those releases alone, and
+# publish-repo starts its deploy and reads every file back. The next release train in nakama
+# takes the same files to Maven Central. Nothing is ever built or signed a second time.
 # Plain assignments, not ?=: an environment variable of the same name does not point a release at
-# another registry, key or token file. A command-line override still does (the tests use one),
-# and so does a MAKEFLAGS in the environment: these are guards against mistakes, not against
-# someone who controls the shell that runs make.
+# another repository, key or file. A command-line override still does (the tests use one), and
+# so does a MAKEFLAGS in the environment: these are guards against mistakes, not against someone
+# who controls the shell that runs make. Credentials never go on make's command line.
 GITHUB_REPO = taiheiframework/tsuji
-GITHUB_PACKAGES_URL = https://maven.pkg.github.com/$(GITHUB_REPO)
+# The family's Maven repository: the one repository the build adds after Maven Central, the same
+# string as release.repoUrl in build.mill (repo-guard checks that they agree). It answers 404
+# for a directory, so every check asks for a file. SITE_REPO builds it with SITE_WORKFLOW.
+REPO_URL = https://taiheiframework.github.io/repo/
+SITE_REPO = taiheiframework/repo
+SITE_WORKFLOW = deploy.yml
+CENTRAL = https://repo1.maven.org/maven2
+GITHUB_API = https://api.github.com
+# The family's libraries: a dev.taihei artifact taihei-<name>... is released in the repository
+# OWNER/<name>, on an immutable GitHub Release of its tag (repo-guard checks the files the build
+# resolves against it).
+OWNER = taiheiframework
+FAMILY = tsuji mihon
+# How often verify-repo reads the site back, and how long it waits in between (seconds): the
+# Pages CDN may serve the previous deployment for a few minutes. How long publish-repo waits for
+# the dispatched deploy to appear.
+VERIFY_TRIES = 10
+VERIFY_WAIT = 30
+DISPATCH_WAIT = 5
 BUNDLES = $(CURDIR)/.release-bundles
-# The release key, and how many signatures a bundle carries: 3 modules x (jar, sources,
-# javadoc, pom).
+# The release key, its public key (repo-guard checks signatures with it alone), and how many
+# signatures a bundle carries: 3 modules x (jar, sources, javadoc, pom).
 RELEASE_KEY = 5026B2996DDB697EC4630BCF14A733E2A507702F
+RELEASE_KEY_FILE = $(CURDIR)/keys/release-key.asc
 SIGNATURES = 12
-# The publish token (write:packages only): its own file, written by the dotfiles, read only by
-# publish-github and never by Mill. The read token (read:packages only): Coursier's credentials
-# file, the entry for host maven.pkg.github.com. The write token never reads, and neither ever
-# sits in RELEASE_ENV.
-PUBLISH_ENV = $(HOME)/.taihei-packages-publish.env
-READ_CREDENTIALS = $(or $(COURSIER_CONFIG_DIR),$(HOME)/.config/coursier)/credentials.properties
-# A security fix goes to Central first and to GitHub Packages only after its advisory is
-# published (ADR 0003, section 7). release-prepare EMBARGO=1 writes the new version here, and
-# every target that uploads to GitHub Packages refuses it until make embargo-lift.
+# A security fix goes to Central first, and gets its GitHub Release, and so reaches the family's
+# repository, only after its advisory is published (ADR 0004, section 8). release-prepare
+# EMBARGO=1 writes the new version here, and release-github and publish-repo refuse it until
+# make embargo-lift.
 EMBARGO_FILE = $(CURDIR)/.release-embargo
 # Where publish-dry-run writes the bundle (Mill empties it before each run). A named bundle is in
 # its own subdirectory, <bundle name>/, in Maven layout: that tree is the release.
@@ -93,8 +109,7 @@ VERSION_GUARD = if ! [[ "$$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$$ ]]; then echo "
 # elsewhere; like the paths above it is a plain assignment, so an environment variable does not.
 RELEASE_ENV = $(HOME)/.edo-release.env
 # The file is run as shell code inside the credentialed recipe, so it is sourced only when it is
-# a regular file of ours, not a link, that nobody else can read or write: the test PUBLISH_ENV
-# gets. A missing file leaves the environment (CI) to provide the variables.
+# a regular file of ours, not a link, that nobody else can read or write. A missing file leaves the environment (CI) to provide the variables.
 SOURCE_RELEASE_ENV = F="$(RELEASE_ENV)"; \
 	if [ -e "$$F" ] || [ -L "$$F" ]; then \
 		if [ ! -f "$$F" ] || [ -L "$$F" ] || [ ! -O "$$F" ] || ! python3 -I -c 'import os, sys; sys.exit(os.stat(sys.argv[1]).st_mode & 0o077)' "$$F"; then \
@@ -114,7 +129,7 @@ STATE_GUARD = if [ -L "$(RELEASE_STATE)" ] || git ls-files --error-unmatch "$(RE
 	echo "[ERROR] $(RELEASE_STATE) is tracked or a symlink: refusing to use it"; exit 1; fi
 
 # The release at HEAD: an exact v-tag on a tree without tracked changes, read from git alone, so
-# the upload steps never start Mill. Sets VERSION and B, the bundle's directory.
+# the publishing steps never start Mill. Sets VERSION and B, the bundle's directory.
 TAG_VERSION = VERSION=$$(git describe --exact-match --tags --match 'v[0-9]*' HEAD 2>/dev/null) || { \
 		echo "[ERROR] HEAD is not at a release tag"; exit 1; }; \
 	VERSION=$${VERSION\#v}; \
@@ -132,30 +147,26 @@ TAG_VERSION = VERSION=$$(git describe --exact-match --tags --match 'v[0-9]*' HEA
 EMBARGO_GUARD = if [ -L "$(EMBARGO_FILE)" ] || git ls-files --error-unmatch "$(EMBARGO_FILE)" >/dev/null 2>&1; then \
 		echo "[ERROR] $(EMBARGO_FILE) is tracked or a symlink: refusing to use it"; exit 1; fi; \
 	if [ -f "$(EMBARGO_FILE)" ] && grep -qxF "$$VERSION" "$(EMBARGO_FILE)"; then \
-		echo "[ERROR] $$VERSION is under embargo: a security fix goes to Maven Central first, and to GitHub Packages"; \
+		echo "[ERROR] $$VERSION is under embargo: a security fix goes to Maven Central first, and gets its GitHub Release"; \
 		echo "        only after its advisory is published (then make embargo-lift VERSION=$$VERSION)"; exit 1; fi; \
 	if [ -L "$(RELEASE_STATE)" ]; then echo "[ERROR] $(RELEASE_STATE) is a symlink"; exit 1; fi; \
 	if [ -e "$(RELEASE_STATE)" ]; then \
 		EMB=$$(python3 -I -c 'import json, sys; print("yes" if json.load(open(sys.argv[1])).get("embargo") is not False else "no")' "$(RELEASE_STATE)" 2>/dev/null) || EMB=unreadable; \
 		case "$$EMB" in \
 			no) ;; \
-			yes) echo "[ERROR] the release in progress is under embargo: nothing goes to GitHub Packages"; exit 1;; \
+			yes) echo "[ERROR] the release in progress is under embargo: no GitHub Release, nothing on $(REPO_URL)"; exit 1;; \
 			*) echo "[ERROR] $(RELEASE_STATE) cannot be read: refusing, it may hold an embargo"; exit 1;; \
 		esac; \
 	fi
 
-# The read token, from Coursier's credentials file: sets RUSER and RTOKEN. They stay shell
-# variables, never exported and never an argument (a command line is readable in /proc); curl
-# gets them as a config on stdin.
-READ_AUTH = if [ ! -f "$(READ_CREDENTIALS)" ] || [ -L "$(READ_CREDENTIALS)" ]; then \
-		echo "[ERROR] no read token: $(READ_CREDENTIALS) is missing (the dotfiles write it)"; exit 1; fi; \
-	PREFIX=$$(sed -n 's/^\([A-Za-z0-9_-]*\)\.host=maven\.pkg\.github\.com[[:space:]]*$$/\1/p' "$(READ_CREDENTIALS)") || exit 1; \
-	if [ "$$(printf '%s' "$$PREFIX" | grep -c .)" != 1 ]; then \
-		echo "[ERROR] $(READ_CREDENTIALS) needs exactly one entry for host maven.pkg.github.com"; exit 1; fi; \
-	RUSER=$$(sed -n "s/^$$PREFIX\.username=//p" "$(READ_CREDENTIALS)" | head -n1); \
-	RTOKEN=$$(sed -n "s/^$$PREFIX\.password=//p" "$(READ_CREDENTIALS)" | head -n1); \
-	if ! [[ "$$RUSER" =~ ^[A-Za-z0-9-]+$$ && "$$RTOKEN" =~ ^[A-Za-z0-9_]+$$ ]]; then \
-		echo "[ERROR] the maven.pkg.github.com entry in $(READ_CREDENTIALS) has no plain username and password"; exit 1; fi
+# Needs URL. The HTTP status of a GET of $$URL without credentials, without following a redirect
+# (a redirect is an answer that stops a check), 000 when there is no answer.
+HTTP_CODE = { curl -q -s --proto '=https' --max-time 30 -o /dev/null -w '%{http_code}' "$$URL" || true; }
+
+# Needs P, a path of CENTRAL_PATHS, and VERSION. Sets A, the artifact, and FILES, its main files:
+# the POM, and the jar, sources and javadoc unless it is POM_ONLY.
+FILES_OF = A=$${P\#\#*/}; FILES="$$A-$$VERSION.pom"; \
+	case " $(POM_ONLY) " in *" $$A "*) ;; *) FILES="$$FILES $$A-$$VERSION.jar $$A-$$VERSION-sources.jar $$A-$$VERSION-javadoc.jar";; esac
 
 # Needs DIR, a Maven tree. Every .asc in it verifies, made by the release key (gpg's VALIDSIG
 # names the primary key's fingerprint, whatever the locale), and there are exactly SIGNATURES.
@@ -177,30 +188,33 @@ SIGNATURE_CHECK = ( set -eo pipefail; N=0; \
 	if [ "$$N" != "$(SIGNATURES)" ]; then echo "[signatures] $$N signatures by the release key, not $(SIGNATURES)"; exit 1; fi; \
 	echo "[signatures] $$N signatures by $(RELEASE_KEY)" )
 
-# Needs VERSION. A version Maven Central has already was signed for Central: building, signing or
-# uploading it again for GitHub Packages would give other signature bytes. The upload of such a
-# version (a security fix after its advisory, ADR 0003 section 7) belongs to the release train
-# tooling, which takes Central's own files; here it is refused.
-CENTRAL_GUARD = CODE=$$(curl -q -s --proto '=https' --max-time 30 -o /dev/null -w '%{http_code}' "https://repo1.maven.org/maven2/$(firstword $(CENTRAL_PATHS))/$$VERSION/" || true); \
+# Needs VERSION. A version Maven Central has already was signed for Central: building or signing
+# it again would give other signature bytes. Such a version (a security fix after its advisory,
+# ADR 0004 section 8) gets its GitHub Release from Central's own files: make central-bundle.
+CENTRAL_GUARD = P=$(firstword $(CENTRAL_PATHS)); A=$${P\#\#*/}; URL="$(CENTRAL)/$$P/$$VERSION/$$A-$$VERSION.pom"; CODE=$$($(HTTP_CODE)); \
 	case "$$CODE" in \
 		404) ;; \
-		200) echo "[ERROR] $$VERSION is on Maven Central already: it is never signed or uploaded a second time from here"; exit 1;; \
+		200) echo "[ERROR] $$VERSION is on Maven Central already: it is never signed a second time; make central-bundle takes Central's files"; exit 1;; \
 		*) echo "[ERROR] cannot tell whether $$VERSION is on Maven Central (HTTP $$CODE)"; exit 1;; \
 	esac
 
 # Needs B, from TAG_VERSION. make publish signed this version for Maven Central and started its
-# upload there: a second signing here would put other signature bytes on GitHub Packages than
-# Central may serve, so the version reaches GitHub Packages from Central's own files instead.
+# upload there: a second signing here would give its GitHub Release other signature bytes than
+# Central may serve, so the release takes Central's own files instead (make central-bundle).
 CENTRAL_STARTED_GUARD = if [ -e "$$B.CENTRAL_UPLOAD_STARTED" ] || [ -L "$$B.CENTRAL_UPLOAD_STARTED" ]; then \
 		echo "[ERROR] $$VERSION was signed for Maven Central and its upload there started ($$(cat "$$B.CENTRAL_UPLOAD_STARTED" 2>/dev/null)):"; \
-		echo "        it is never signed again here; it reaches GitHub Packages as Central's own files"; exit 1; fi
+		echo "        it is never signed again here; its GitHub Release takes Central's own files (make central-bundle)"; exit 1; fi
 
-# Needs RUSER and RTOKEN. The HTTP status of a GET of $$URL, without following a redirect.
-GITHUB_STATUS = { printf 'user = "%s:%s"\n' "$$RUSER" "$$RTOKEN" | \
-	curl -q -K - -s --proto '=https' --max-time 60 -o /dev/null -w '%{http_code}' "$$URL" || true; }
+# Needs VERSION. Lists the tags and the names of every GitHub Release of this repository, drafts
+# included (gh, logged in as a maintainer, sees them), and refuses when one is the version's.
+RELEASE_ABSENT = RELEASES=$$(gh api --paginate "repos/$(GITHUB_REPO)/releases?per_page=100" --jq '.[] | .tag_name, .name') || { \
+		echo "[ERROR] cannot list the GitHub Releases of $(GITHUB_REPO) (gh auth status?)"; exit 1; }; \
+	if printf '%s\n' "$$RELEASES" | grep -qxF -e "v$$VERSION" -e "$$VERSION"; then \
+		echo "[ERROR] a GitHub Release for $$VERSION exists already in $(GITHUB_REPO) (a draft counts): the version is not prepared again;"; \
+		echo "        the CTO and the CISO decide what follows"; exit 1; fi
 
 .PHONY: clean fix fmt compile prepare build test mima repo-guard release-test validate deps publishLocal publish \
-        publish-dry-run release-bundle publish-github verify-github release-github \
+        publish-dry-run release-bundle central-bundle release-github publish-repo verify-repo \
         release-preflight release-prepare release-finalize release-abort release-status embargo-lift
 
 # ---------------------------------------------------------------------------
@@ -229,51 +243,72 @@ test:
 	./mill __.test.testForked
 
 # Binary compatibility with the baseline release (release.mimaBaseline: the newest v-tag before
-# HEAD whose version is on Maven Central, or MIMA_BASELINE). A tag that waits for the release
-# train is named, never skipped silently. A break fails here; a major sets MIMA_BASELINE=none.
+# HEAD, which must be on Maven Central or on REPO_URL, or MIMA_BASELINE). A tag on neither fails,
+# naming it, and is never passed over. A break fails here; a major sets MIMA_BASELINE=none.
 mima:
 	@set -eo pipefail; BASELINE=$$(./mill show release.mimaBaseline | tr -d '\n "' | sed 's/^null$$/none/'); \
 	echo "[mima] baseline: $$BASELINE"
 	./mill __.mimaReportBinaryIssues
 
-# An open repository resolves from Maven Central only (ADR 0003, section 5), so anyone can
-# clone and build it without credentials, and a pin moves only to a version on Central:
-# 1. no build file names a repository, and no Coursier setting in the environment adds one;
-# 2. every published module adds no repository to Coursier's defaults;
-# 3. every dev.taihei dependency of a published module is on Maven Central (not one that still
-#    waits for the release train on GitHub Packages). A dependency on another module of this
-#    library (taihei-tsuji-tools on taihei-tsuji) is the same release, and needs the same version.
-# The text scan reads tracked build files; an untracked build file is STRAY_GUARD's to refuse at a
-# release, and a Coursier mirror file in the user's home is outside this repository. CI on a
-# clean runner, with no credentials, stays the proof that the build needs none.
+# An open repository resolves from Maven Central, then the family's repository, and nothing else
+# (ADR 0004, section 5), so anyone can clone and build it without credentials, a pin moves only
+# to a released version, and nothing but a released dev.taihei file comes from REPO_URL:
+# 1. no Coursier setting in the environment adds a repository, and the build files name REPO_URL
+#    once, as build.mill's release.repoUrl, add it once, after Coursier's defaults, and name no
+#    other repository (release.py build-repos);
+# 2. Mill's own `repositories`, which would come before Central, is empty, and every module
+#    resolves from exactly Coursier's defaults followed by REPO_URL;
+# 3. every dev.taihei dependency of a published module is on Maven Central or on REPO_URL. A
+#    dependency on another module of this library (taihei-tsuji-tools on taihei-tsuji) is the
+#    same release, and needs the same version;
+# 4. every file the build resolved came from Maven Central or REPO_URL, only dev.taihei from
+#    REPO_URL, and every dev.taihei file, with its POM, is in the SHA256SUMS of its version's
+#    immutable GitHub Release, or, for a version without one (before this route, or a security
+#    fix before its advisory), comes from Central with a good signature by the release key
+#    (release.py resolved, CISO condition C12). The GitHub API is asked without a token.
+# Each check asks for a file, never a directory, and a redirect stops it. The text scan reads
+# tracked build files; an untracked build file is STRAY_GUARD's to refuse at a release, and a
+# Coursier mirror file in the user's home is outside this repository. CI on a clean runner, with
+# no credentials, stays the proof that the build needs none. release-finalize runs it first.
+RESOLVED = resolvedMvnDeps,resolvedRunMvnDeps,scalaCompilerClasspath,scalacPluginClasspath,scalaDocClasspath,resolvedMimaPreviousArtifacts,scalaJSToolsClasspath,scalafixToolClasspath
 repo-guard:
 	@set -euo pipefail; \
 	if [ -n "$${COURSIER_REPOSITORIES:-}$${COURSIER_MIRRORS:-}$${COURSIER_CREDENTIALS:-}" ]; then \
-		echo "[repo-guard] COURSIER_REPOSITORIES, COURSIER_MIRRORS or COURSIER_CREDENTIALS is set: this build resolves from Maven Central only, unset them"; exit 1; fi; \
+		echo "[repo-guard] COURSIER_REPOSITORIES, COURSIER_MIRRORS or COURSIER_CREDENTIALS is set: this build resolves from Maven Central and $(REPO_URL) only, unset them"; exit 1; fi; \
 	LIST=$$(git ls-files -- $(BUILD_FILES) .github); mapfile -t FILES <<< "$$LIST"; \
-	RC=0; HITS=$$(grep -n -I -E 'repositories|MavenRepository|maven\.pkg\.github\.com' -- "$${FILES[@]}") || RC=$$?; \
-	if [ "$$RC" -gt 1 ]; then echo "[repo-guard] cannot read the build files"; exit 1; fi; \
-	if [ -n "$$HITS" ]; then echo "[repo-guard] a build file names a repository besides Maven Central:"; echo "$$HITS"; exit 1; fi; \
-	MODULES="$(PUBLISHED)"; MODULES="$${MODULES//.publishArtifacts/}"; MODULES="{$${MODULES// /,}}"; \
+	python3 -I scripts/release.py build-repos --url "$(REPO_URL)" "$${FILES[@]}"; \
+	MODULES="$(PUBLISHED)"; MODULES="$${MODULES//.publishArtifacts/}"; \
 	T=$$(mktemp -d "$(CURDIR)/.repo-guard.XXXXXX"); trap 'rm -rf "$$T"' EXIT; \
-	./mill show "$$MODULES.repositories" > "$$T/repositories.json"; \
+	./mill show "{$${MODULES// /,}}.repositories" > "$$T/repositories.json"; \
 	python3 -I scripts/release.py no-repos "$$T/repositories.json"; \
-	./mill show "$$MODULES.pom" > "$$T/poms.json"; \
+	./mill show '__.resolverOrder' > "$$T/resolvers.json"; \
+	python3 -I scripts/release.py resolvers --url "$(REPO_URL)" --modules "$$MODULES" "$$T/resolvers.json"; \
+	./mill show "{$${MODULES// /,}}.pom" > "$$T/poms.json"; \
 	python3 -I -c 'import json, sys; [print(v.split(":", 3)[3]) for v in json.load(open(sys.argv[1])).values()]' "$$T/poms.json" > "$$T/poms"; \
 	mapfile -t POMS < "$$T/poms"; \
 	python3 -I scripts/release.py pins --own "$(ARTIFACTS)" "$${POMS[@]}" | sort -u > "$$T/pins"; \
 	while read -r A V; do \
-		CODE=$$(curl -q -s --proto '=https' --max-time 30 -o /dev/null -w '%{http_code}' "https://repo1.maven.org/maven2/dev/taihei/$$A/$$V/" || true); \
+		URL="$(CENTRAL)/dev/taihei/$$A/$$V/$$A-$$V.pom"; CODE=$$($(HTTP_CODE)); \
 		case "$$CODE" in \
-			200) echo "[repo-guard] dev.taihei:$$A:$$V is on Maven Central";; \
-			404) echo "[repo-guard] dev.taihei:$$A:$$V is not on Maven Central yet: it waits for the release train, and a pin moves only to a version on Central"; exit 1;; \
+			200) echo "[repo-guard] dev.taihei:$$A:$$V is on Maven Central"; continue;; \
+			404) ;; \
 			*) echo "[repo-guard] cannot tell whether dev.taihei:$$A:$$V is on Maven Central (HTTP $$CODE)"; exit 1;; \
 		esac; \
+		URL="$(REPO_URL)dev/taihei/$$A/$$V/$$A-$$V.pom"; CODE=$$($(HTTP_CODE)); \
+		case "$$CODE" in \
+			200) echo "[repo-guard] dev.taihei:$$A:$$V is on $(REPO_URL)";; \
+			404) echo "[repo-guard] dev.taihei:$$A:$$V is neither on Maven Central nor on $(REPO_URL): a pin moves only to a released version"; exit 1;; \
+			*) echo "[repo-guard] cannot tell whether dev.taihei:$$A:$$V is on $(REPO_URL) (HTTP $$CODE)"; exit 1;; \
+		esac; \
 	done < "$$T/pins"; \
-	echo "[repo-guard] Maven Central only"
+	./mill show '__.{$(RESOLVED)}' > "$$T/resolved.json"; \
+	python3 -I scripts/release.py resolved --workspace "$(CURDIR)" --url "$(REPO_URL)" --central "$(CENTRAL)" --api "$(GITHUB_API)" \
+		--owner "$(OWNER)" --family "$(FAMILY)" --key "$(RELEASE_KEY_FILE)" --fingerprint "$(RELEASE_KEY)" "$$T/resolved.json" | sed 's/^/[repo-guard] /'; \
+	echo "[repo-guard] Maven Central, then $(REPO_URL), and nothing else"
 
-# The release machinery's own tests: scripts/release.py, and the GitHub Packages targets against a
-# fake registry on localhost. No real registry, no token and no signing key is involved.
+# The release machinery's own tests: scripts/release.py, and the release targets against stand-ins
+# for Maven Central, the family's repository, the GitHub API, gh and Mill on localhost. No real
+# registry, no token and no signing key is involved.
 release-test:
 	@bash scripts/test-release.sh
 
@@ -304,13 +339,13 @@ publishLocal:
 # before the guard ran (by a stray build file, an IDE, another make): so the daemon is shut down
 # right after the guard, the Mill commands that see the credentials run with --no-daemon (so no
 # client that starts a daemon in between can hand them one), and the daemon is shut down again at
-# the end, so that no process keeps the credentials. On the GitHub Packages route (ADR 0003) this
-# is only the direct Central upload of a security release under embargo: Mill signs again here,
-# so a version that went to GitHub Packages must never come through it (the release train takes
-# that one to Central, as the same files). It refuses a version that is not in $(EMBARGO_FILE),
-# and one of whose files GitHub Packages already has. Before Mill starts it writes a marker next
-# to where the version's bundle would be, as publish-github does: from then on the version may be
-# on Central, so it is never published again from here and release-abort refuses to undo it.
+# the end, so that no process keeps the credentials. On the route of ADR 0004 this is only the
+# direct Central upload of a security release under embargo: Mill signs again here, so a version
+# that has a GitHub Release must never come through it (the release train takes that one to
+# Central, as the same files). It refuses a version that is not in $(EMBARGO_FILE), and one of
+# whose files the family's repository already serves. Before Mill starts it writes a marker next
+# to where the version's bundle would be: from then on the version may be on Central, so it is
+# never published again from here, and its GitHub Release takes Central's files (central-bundle).
 # The marker is written under the tag's version and Mill uploads under its own: they must agree.
 publish:
 	@set -eo pipefail; \
@@ -322,14 +357,13 @@ publish:
 	  echo "          Check the Central Portal's deployments and https://repo1.maven.org/maven2/$(firstword $(CENTRAL_PATHS))/$$VERSION/;"; \
 	  echo "          the CTO and the CISO decide what follows, normally the next patch version."; exit 1; fi; \
 	if [ -L "$(EMBARGO_FILE)" ] || ! [ -f "$(EMBARGO_FILE)" ] || ! grep -qxF "$$VERSION" "$(EMBARGO_FILE)"; then \
-	  echo "[publish] refused: $$VERSION is not under embargo. A release goes to GitHub Packages with release-finalize,"; \
-	  echo "          and to Maven Central with the release train, as the same signed files."; exit 1; fi; \
-	$(READ_AUTH); \
+	  echo "[publish] refused: $$VERSION is not under embargo. A release is published by its immutable GitHub Release"; \
+	  echo "          (release-finalize, release-github), and reaches Maven Central with the release train, as the same signed files."; exit 1; fi; \
 	for P in $(CENTRAL_PATHS); do \
-	  A=$${P##*/}; \
-	  for F in "$$A-$$VERSION.pom" "$$A-$$VERSION.jar" "$$A-$$VERSION-sources.jar" "$$A-$$VERSION-javadoc.jar"; do \
-	    URL="$(GITHUB_PACKAGES_URL)/$$P/$$VERSION/$$F"; CODE=$$($(GITHUB_STATUS)); \
-	    if [ "$$CODE" != 404 ]; then echo "[publish] refused: $$P/$$VERSION/$$F answers HTTP $$CODE on GitHub Packages, not 404"; exit 1; fi; \
+	  $(FILES_OF); \
+	  for F in $$FILES; do \
+	    URL="$(REPO_URL)$$P/$$VERSION/$$F"; CODE=$$($(HTTP_CODE)); \
+	    if [ "$$CODE" != 404 ]; then echo "[publish] refused: $$P/$$VERSION/$$F answers HTTP $$CODE on $(REPO_URL), not 404"; exit 1; fi; \
 	  done; \
 	done; \
 	$(STRAY_GUARD); \
@@ -372,12 +406,13 @@ publish-dry-run:
 		./mill --no-daemon mill.javalib.SonatypeCentralPublishModule/ "$${BUNDLE[@]}"; \
 	echo "[publish-dry-run] bundle in $(DRY_RUN_DIR)"
 
-# Refuses when the version at HEAD is not a release, or when any of its artifacts is already on
-# Maven Central or on GitHub Packages, naming each one that is: a version in either registry is
-# final (Central is immutable, and a version on GitHub Packages is never deleted or replaced).
-# Central must answer 200 or 404, GitHub Packages 404 for each file: any other answer (401, 403,
-# a redirect, 5xx) stops, because then we cannot tell. GitHub Packages is asked with the read
-# token, never with the publish token or gh.
+# Refuses when the version at HEAD is not a release, when any of its files is already on Maven
+# Central or on the family's repository (naming each one that is: a version on either is final),
+# or when its tag is on origin or a GitHub Release for it exists, a draft included (from the push
+# of its tag a version is final, from its GitHub Release it is public; CISO condition C17). Each
+# file must answer 404 on both: 200 is a release that exists, and any other answer (a redirect,
+# 401, 403, 5xx) stops, because then we cannot tell. Nothing is asked with a credential but the
+# GitHub Releases, which gh lists as the maintainer, so that a draft is seen too.
 release-preflight:
 	@set -eo pipefail; \
 	$(STRAY_GUARD); \
@@ -387,43 +422,38 @@ release-preflight:
 	$(MODULE_GUARD); \
 	FOUND=""; \
 	for P in $(CENTRAL_PATHS); do \
-	  CODE=$$(curl -q -s --proto '=https' --max-time 30 -o /dev/null -w '%{http_code}' "https://repo1.maven.org/maven2/$$P/$$VERSION/" || true); \
-	  case "$$CODE" in \
-	    200) FOUND="$$FOUND $$P";; \
-	    404) ;; \
-	    *) echo "[preflight] cannot tell whether $$P/$$VERSION is on Maven Central (HTTP $$CODE)"; exit 1;; \
-	  esac; \
-	done; \
-	if [ -n "$$FOUND" ]; then echo "[preflight] $$VERSION is already on Maven Central:$$FOUND"; exit 1; fi; \
-	echo "[preflight] $$VERSION is not on Maven Central yet ($(CENTRAL_PATHS))"; \
-	$(READ_AUTH); \
-	for P in $(CENTRAL_PATHS); do \
-	  A=$${P##*/}; \
-	  for F in "$$A-$$VERSION.pom" "$$A-$$VERSION.jar" "$$A-$$VERSION-sources.jar" "$$A-$$VERSION-javadoc.jar"; do \
-	    URL="$(GITHUB_PACKAGES_URL)/$$P/$$VERSION/$$F"; CODE=$$($(GITHUB_STATUS)); \
-	    case "$$CODE" in \
-	      404) ;; \
-	      200|301|302|303|307|308) FOUND="$$FOUND $$P/$$VERSION/$$F";; \
-	      *) echo "[preflight] cannot tell whether $$P/$$VERSION/$$F is on GitHub Packages (HTTP $$CODE)"; exit 1;; \
-	    esac; \
+	  $(FILES_OF); \
+	  for F in $$FILES; do \
+	    for BASE in "$(CENTRAL)/" "$(REPO_URL)"; do \
+	      URL="$$BASE$$P/$$VERSION/$$F"; CODE=$$($(HTTP_CODE)); \
+	      case "$$CODE" in \
+	        404) ;; \
+	        200) FOUND="$$FOUND $$URL";; \
+	        *) echo "[preflight] cannot tell whether $$URL exists (HTTP $$CODE): stopped"; exit 1;; \
+	      esac; \
+	    done; \
 	  done; \
 	done; \
-	if [ -n "$$FOUND" ]; then echo "[preflight] $$VERSION is already on GitHub Packages, and final:$$FOUND"; exit 1; fi; \
-	echo "[preflight] $$VERSION is not on GitHub Packages yet ($(GITHUB_PACKAGES_URL))"
+	if [ -n "$$FOUND" ]; then echo "[preflight] $$VERSION is released already, and final:"; printf '  %s\n' $$FOUND; exit 1; fi; \
+	echo "[preflight] $$VERSION is neither on Maven Central nor on $(REPO_URL)"; \
+	REMOTE=$$(git ls-remote --tags origin "refs/tags/v$$VERSION") || { echo "[preflight] cannot read the tags on origin"; exit 1; }; \
+	if [ -n "$$REMOTE" ]; then echo "[preflight] v$$VERSION is on origin already: the version is final"; exit 1; fi; \
+	$(RELEASE_ABSENT); \
+	echo "[preflight] v$$VERSION is not on origin, and $(GITHUB_REPO) has no GitHub Release for it"
 
 # ---------------------------------------------------------------------------
-# GitHub Packages (ADR 0003): one signed bundle, uploaded unchanged, read back, and kept on an
-# immutable GitHub Release. release-finalize runs release-bundle, publish-github and
-# verify-github; release-github runs once main and the tag are pushed.
+# The release (ADR 0004): one signed bundle, kept on an immutable GitHub Release, from which the
+# family's repository serves it. release-finalize runs release-bundle; release-github runs once
+# main and the tag are pushed, then publish-repo, which runs verify-repo.
 # ---------------------------------------------------------------------------
 
 # Builds and signs the release at HEAD's tag once (the dry run's bundle mode, so exactly what
 # Central would receive) and keeps it in $(BUNDLES): the Maven tree, the ledger SHA256SUMS (the
 # SHA-256 of every file, sorted by path), a deterministic zip and the zip's SHA-256. It checks
-# what Central checks before anything is uploaded anywhere: per module the jar, sources, javadoc
+# what Central checks before anything leaves the machine: per module the jar, sources, javadoc
 # and POM, each with its signature and checksums, the checksums right, the POM fields Central
-# needs, and every signature good and made by the release key, $(SIGNATURES) of them. A bundle is
-# built once: an existing one is refused.
+# needs and no repository in a POM, and every signature good and made by the release key,
+# $(SIGNATURES) of them. A bundle is built once: an existing one is refused.
 release-bundle:
 	@set -eo pipefail; \
 	$(TAG_VERSION); \
@@ -443,92 +473,53 @@ release-bundle:
 	echo "[bundle] $$B"; \
 	echo "[bundle] $$(cat "$$B/$(BUNDLE_PREFIX)-$$VERSION.zip.sha256")"
 
-# Uploads every file of the bundle at HEAD's tag, unchanged, with an HTTP PUT to the GitHub
-# Packages registry of this repository, each module's POM last, and stops on the first answer
-# that is not 2xx. The publish token is read from $(PUBLISH_ENV) alone, inside this recipe: it
-# stays a shell variable and reaches curl as a config on stdin (curl -K -), never as an argument
-# or in the environment, and no other target and no Mill process sees it. A version is uploaded
-# once: from the first file on it is final, and an interrupted upload is never started again.
-# Before the first file it checks the bundle once more: the ledger, every signature by the release
-# key, that Maven Central does not have the version yet, and, with the read token, that GitHub
-# Packages has none of its files (so a lost UPLOAD_STARTED cannot mix two signing runs).
-publish-github:
+# The bundle of a security fix, which went to Maven Central first (make publish) and gets its
+# GitHub Release only after its advisory is published (ADR 0004, section 8; CISO condition C14):
+# built from the files Central serves, never signed again. It downloads every file of the
+# version from Central, checks them as release-bundle checks its own (files, checksums, POMs,
+# $(SIGNATURES) signatures by the release key), and compares them byte for byte with the local
+# publish directory when there is one. Then release-github and publish-repo, after embargo-lift.
+central-bundle:
 	@set -eo pipefail; \
 	$(TAG_VERSION); \
-	$(CENTRAL_STARTED_GUARD); \
-	$(EMBARGO_GUARD); \
-	if [ ! -d "$$B" ] || [ -L "$$B" ]; then echo "[publish-github] no bundle for $$VERSION: make release-bundle"; exit 1; fi; \
-	if [ -e "$$B/UPLOAD_STARTED" ]; then \
-	  echo "[publish-github] the upload of $$VERSION started before ($$(cat "$$B/UPLOAD_STARTED")): the version is final on GitHub Packages."; \
-	  echo "                 It is never uploaded again; make verify-github shows what is there."; exit 1; fi; \
-	python3 -I scripts/release.py verify --dest "$$B" > "$$B/upload-order"; \
-	DIR="$$B/repository"; $(SIGNATURE_CHECK); \
-	$(CENTRAL_GUARD); \
-	$(READ_AUTH); \
-	while read -r SUM P; do \
-	  URL="$(GITHUB_PACKAGES_URL)/$$P"; CODE=$$($(GITHUB_STATUS)); \
-	  if [ "$$CODE" != 404 ]; then \
-	    echo "[publish-github] $$P answers HTTP $$CODE on GitHub Packages, not 404: the version is there already, or we cannot tell"; exit 1; fi; \
-	done < "$$B/SHA256SUMS"; \
-	F="$(PUBLISH_ENV)"; \
-	if [ ! -f "$$F" ] || [ -L "$$F" ] || [ ! -O "$$F" ] || ! python3 -I -c 'import os, sys; sys.exit(os.stat(sys.argv[1]).st_mode & 0o077)' "$$F"; then \
-	  echo "[publish-github] $$F must be a file of yours with mode 600 (the dotfiles write it)"; exit 1; fi; \
-	PUSER=$$(sed -n 's/^TAIHEI_PACKAGES_PUBLISH_USER=//p' "$$F" | head -n1); PUSER=$${PUSER#\'}; PUSER=$${PUSER%\'}; \
-	PTOKEN=$$(sed -n 's/^TAIHEI_PACKAGES_PUBLISH_TOKEN=//p' "$$F" | head -n1); PTOKEN=$${PTOKEN#\'}; PTOKEN=$${PTOKEN%\'}; \
-	if ! [[ "$$PUSER" =~ ^[A-Za-z0-9-]+$$ && "$$PTOKEN" =~ ^[A-Za-z0-9_]+$$ ]]; then \
-	  echo "[publish-github] $$F holds no plain TAIHEI_PACKAGES_PUBLISH_USER and TAIHEI_PACKAGES_PUBLISH_TOKEN"; exit 1; fi; \
-	RESPONSE=$$(mktemp "$$B/.response.XXXXXX"); trap 'rm -f "$$RESPONSE"' EXIT; \
-	echo "$$(date -u +%Y-%m-%dT%H:%M:%SZ) to $(GITHUB_PACKAGES_URL)" > "$$B/UPLOAD_STARTED"; \
-	echo "[publish-github] $$VERSION to $(GITHUB_PACKAGES_URL): from here on the version is final"; \
-	while IFS= read -r P; do \
-	  CODE=$$(printf 'user = "%s:%s"\n' "$$PUSER" "$$PTOKEN" | curl -q -K - -sS --proto '=https' --max-time 300 \
-	    -X PUT --upload-file "$$B/repository/$$P" -o "$$RESPONSE" -w '%{http_code}' "$(GITHUB_PACKAGES_URL)/$$P") || CODE="$${CODE:-000}"; \
-	  case "$$CODE" in \
-	    2??) echo "  uploaded $$P";; \
-	    *) echo "[publish-github] $$P: HTTP $$CODE, stopped. The files before it are on GitHub Packages, and $$VERSION is final:"; \
-	       head -c 2000 "$$RESPONSE"; echo; \
-	       echo "                 tell the CTO and the CISO, and never upload this version again"; exit 1;; \
-	  esac; \
-	done < "$$B/upload-order"; \
-	date -u +%Y-%m-%dT%H:%M:%SZ > "$$B/UPLOAD_DONE"; \
-	echo "[publish-github] $$(wc -l < "$$B/upload-order" | tr -d ' ') files uploaded; next: make verify-github"
+	if [ -e "$$B" ] || [ -L "$$B" ]; then echo "[central-bundle] $$B exists already: a bundle is built once"; exit 1; fi; \
+	P=$(firstword $(CENTRAL_PATHS)); A=$${P##*/}; URL="$(CENTRAL)/$$P/$$VERSION/$$A-$$VERSION.pom"; CODE=$$($(HTTP_CODE)); \
+	if [ "$$CODE" != 200 ]; then echo "[central-bundle] $$VERSION is not on Maven Central (HTTP $$CODE): its bundle is release-finalize's"; exit 1; fi; \
+	mkdir -p "$(BUNDLES)"; rm -rf -- "$$B.download" "$$B.partial"; \
+	python3 -I scripts/release.py fetch --base "$(CENTRAL)" --group "$(ARTIFACT_GROUP)" --version "$$VERSION" \
+		--artifacts "$(ARTIFACTS)" --pom-only "$(POM_ONLY)" --dest "$$B.download"; \
+	python3 -I scripts/release.py bundle --source "$$B.download" --dest "$$B.partial" --group "$(ARTIFACT_GROUP)" \
+		--version "$$VERSION" --artifacts "$(ARTIFACTS)" --pom-only "$(POM_ONLY)" --name "$(BUNDLE_PREFIX)-$$VERSION"; \
+	DIR="$$B.partial/repository"; $(SIGNATURE_CHECK); \
+	LOCAL="$(DRY_RUN_DIR)/$(BUNDLE_PREFIX)-$$VERSION"; \
+	if [ -d "$$LOCAL" ]; then \
+	  python3 -I scripts/release.py same "$$LOCAL" "$$B.partial/repository" || { \
+	    echo "[central-bundle] Maven Central's files differ from the local publish directory $$LOCAL: stop, and bring it to the CISO"; exit 1; }; \
+	  echo "[central-bundle] byte-equal to the local publish directory"; \
+	else echo "[central-bundle] no local publish directory to compare with"; fi; \
+	rm -rf -- "$$B.download"; \
+	if [ -e "$$B" ] || [ -L "$$B" ]; then echo "[central-bundle] $$B appeared while it was built"; exit 1; fi; \
+	mv -- "$$B.partial" "$$B"; \
+	echo "[central-bundle] $$B, from Maven Central's files; nothing was signed again"; \
+	echo "[central-bundle] $$(cat "$$B/$(BUNDLE_PREFIX)-$$VERSION.zip.sha256")"
 
-# Downloads every file in the ledger back from GitHub Packages with the read token and compares
-# it with SHA256SUMS. A missing file or a mismatch stops the release before anything is pushed,
-# and is a security incident for the CISO. curl follows GitHub's redirect to its storage but
-# sends the credentials only to maven.pkg.github.com, never to the host it is redirected to.
-verify-github:
-	@set -eo pipefail; \
-	$(TAG_VERSION); \
-	if [ ! -d "$$B" ] || [ -L "$$B" ]; then echo "[verify-github] no bundle for $$VERSION"; exit 1; fi; \
-	python3 -I scripts/release.py verify --dest "$$B" > /dev/null; \
-	$(READ_AUTH); \
-	T=$$(mktemp -d "$$B/.verify.XXXXXX"); trap 'rm -rf "$$T"' EXIT; \
-	BAD=0; N=0; \
-	while read -r SUM P; do \
-	  rm -f "$$T/file"; \
-	  CODE=$$(printf 'user = "%s:%s"\n' "$$RUSER" "$$RTOKEN" | curl -q -K - -sS -L --proto '=https' --proto-redir '=https' --max-time 300 \
-	    -o "$$T/file" -w '%{http_code}' "$(GITHUB_PACKAGES_URL)/$$P") || CODE="$${CODE:-000}"; \
-	  if [ "$$CODE" != 200 ] || [ ! -f "$$T/file" ]; then echo "  MISSING  $$P (HTTP $$CODE)"; BAD=1; continue; fi; \
-	  GOT=$$(python3 -I -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$$T/file"); \
-	  if [ "$$GOT" != "$$SUM" ]; then echo "  CHANGED  $$P"; BAD=1; else N=$$((N + 1)); fi; \
-	done < "$$B/SHA256SUMS"; \
-	if [ "$$BAD" != 0 ]; then \
-	  echo "[verify-github] SECURITY INCIDENT: GitHub Packages does not serve the signed bundle of $$VERSION."; \
-	  echo "                Push nothing, upload nothing again, and bring it to the CISO."; exit 1; fi; \
-	echo "$$(date -u +%Y-%m-%dT%H:%M:%SZ) $$N files" > "$$B/VERIFIED"; \
-	echo "[verify-github] all $$N files of $$VERSION are served unchanged by $(GITHUB_PACKAGES_URL)"
-
-# Keeps the bundle on an immutable GitHub Release of the pushed tag, the source of truth the
-# release train takes it from: the zip and SHA256SUMS as assets, the release notes and the zip's
-# SHA-256 as the body. Runs after verify-github and after main and the tag are on origin, then
-# checks that GitHub reports the release as immutable and serves both assets unchanged.
+# Publishes the version: keeps the bundle on an immutable GitHub Release of the pushed tag, the
+# source of truth the family's repository serves and the release train takes to Central (CISO
+# condition C17). It checks the bundle and its signatures once more, and that no GitHub Release
+# for the version exists yet; it creates the release as a draft with the zip and SHA256SUMS as
+# assets and the notes and the zip's SHA-256 as the body, downloads the assets back and compares
+# them with the bundle, and only then publishes it, checks that GitHub reports it immutable, and
+# reads the assets back once more. If any step fails, the draft stays unpublished, and the CTO and
+# the CISO decide what follows. The zip's SHA-256 goes on the release ticket, every time.
 release-github:
 	@set -eo pipefail; \
 	$(TAG_VERSION); \
 	$(EMBARGO_GUARD); \
-	if [ ! -f "$$B/VERIFIED" ]; then echo "[release-github] $$VERSION was not read back from GitHub Packages: make verify-github"; exit 1; fi; \
+	if [ ! -d "$$B" ] || [ -L "$$B" ]; then \
+	  if [ -e "$$B.CENTRAL_UPLOAD_STARTED" ]; then echo "[release-github] no bundle for $$VERSION: it went to Maven Central first, so make central-bundle takes Central's files"; \
+	  else echo "[release-github] no bundle for $$VERSION: release-finalize builds it"; fi; exit 1; fi; \
 	python3 -I scripts/release.py verify --dest "$$B" > /dev/null; \
+	DIR="$$B/repository"; $(SIGNATURE_CHECK); \
 	ZIP="$(BUNDLE_PREFIX)-$$VERSION.zip"; ZIPSUM=$$(cut -c1-64 "$$B/$$ZIP.sha256"); \
 	NOTES="RELEASE_$${VERSION//./_}.md"; \
 	if [ ! -f "$$NOTES" ] || [ -L "$$NOTES" ] || ! git ls-files --error-unmatch "$$NOTES" >/dev/null 2>&1; then \
@@ -538,39 +529,122 @@ release-github:
 	  echo "[release-github] v$$VERSION on origin is not the local tag: push main and the tag first"; exit 1; fi; \
 	git fetch -q origin main; \
 	if ! git merge-base --is-ancestor HEAD origin/main; then echo "[release-github] main on origin does not hold the release commit: push main first"; exit 1; fi; \
+	$(RELEASE_ABSENT); \
 	T=$$(mktemp -d "$$B/.release.XXXXXX"); trap 'rm -rf "$$T"' EXIT; \
 	{ cat "$$NOTES"; printf '\n## The signed bundle\n\n'; \
-	  printf 'This release is one signed bundle: the same files on GitHub Packages and, after the next release train, on Maven Central.\n\n'; \
+	  printf 'This release is one signed bundle: the same files on %s and, after the next release train, on Maven Central.\n\n' "$(REPO_URL)"; \
 	  printf -- '- `%s`, SHA-256 `%s`\n' "$$ZIP" "$$ZIPSUM"; \
 	  printf -- '- `SHA256SUMS` lists the SHA-256 of every file in it.\n'; \
 	  printf -- '- Every jar and POM is signed by the release key `%s`.\n' "$(RELEASE_KEY)"; } > "$$T/body.md"; \
+	UNPUBLISHED='the draft stays unpublished: stop, and the CTO and the CISO decide what follows'; \
 	gh release create "v$$VERSION" --repo "$(GITHUB_REPO)" --verify-tag --draft --title "$$VERSION" \
-	  --notes-file "$$T/body.md" "$$B/$$ZIP" "$$B/SHA256SUMS"; \
+	  --notes-file "$$T/body.md" "$$B/$$ZIP" "$$B/SHA256SUMS" > /dev/null || { echo "[release-github] creating the draft failed: $$UNPUBLISHED"; exit 1; }; \
+	echo "[release-github] draft v$$VERSION created; reading its assets back"; \
+	gh release download "v$$VERSION" --repo "$(GITHUB_REPO)" --dir "$$T/draft" --pattern "$$ZIP" --pattern SHA256SUMS || { \
+	  echo "[release-github] the draft's assets cannot be downloaded: $$UNPUBLISHED"; exit 1; }; \
+	GOT=$$(python3 -I -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$$T/draft/$$ZIP"); \
+	if [ "$$GOT" != "$$ZIPSUM" ] || ! cmp -s "$$T/draft/$$ZIP" "$$B/$$ZIP" || ! cmp -s "$$T/draft/SHA256SUMS" "$$B/SHA256SUMS"; then \
+	  echo "[release-github] the draft's assets differ from the bundle: $$UNPUBLISHED"; exit 1; fi; \
 	gh release edit "v$$VERSION" --repo "$(GITHUB_REPO)" --draft=false > /dev/null; \
+	echo "[release-github] v$$VERSION is published: from here on the version is public"; \
 	IMMUTABLE=$$(gh api "repos/$(GITHUB_REPO)/releases/tags/v$$VERSION" --jq '.immutable'); \
 	if [ "$$IMMUTABLE" != true ]; then \
 	  echo "[release-github] GitHub does not report the release v$$VERSION as immutable ($$IMMUTABLE): stop, and bring it to the CISO"; exit 1; fi; \
 	gh release download "v$$VERSION" --repo "$(GITHUB_REPO)" --dir "$$T/assets" --pattern "$$ZIP" --pattern SHA256SUMS; \
 	if ! cmp -s "$$T/assets/$$ZIP" "$$B/$$ZIP" || ! cmp -s "$$T/assets/SHA256SUMS" "$$B/SHA256SUMS"; then \
 	  echo "[release-github] the release's assets differ from the bundle: stop, and bring it to the CISO"; exit 1; fi; \
-	echo "[release-github] v$$VERSION is an immutable release holding the bundle ($$ZIP, SHA-256 $$ZIPSUM)"
+	echo "[release-github] v$$VERSION is an immutable release holding the bundle"; \
+	if [ -f "$(RELEASE_STATE)" ] && [ ! -L "$(RELEASE_STATE)" ] && \
+	   [ "$$(python3 -I -c 'import json, sys; print(json.load(open(sys.argv[1])).get("newVersion", ""))' "$(RELEASE_STATE)" 2>/dev/null)" = "$$VERSION" ]; then \
+	  rm -f "$(RELEASE_STATE)"; fi; \
+	echo "[release-github] record on the release ticket: $$ZIP SHA-256 $$ZIPSUM"; \
+	echo "[release-github] next: make publish-repo"
+
+# Puts the version on the family's repository: checks that its GitHub Release is published and
+# immutable, dispatches the site's deploy workflow on main, waits for that run, and then reads
+# every file back (verify-repo). The site is built from the immutable releases alone, so nothing
+# is uploaded and no token but gh's own is used. A failure here is a CISO incident about the site;
+# the version is final already and goes in the next release train.
+publish-repo:
+	@set -eo pipefail; \
+	$(TAG_VERSION); \
+	$(EMBARGO_GUARD); \
+	if [ ! -d "$$B" ] || [ -L "$$B" ]; then echo "[publish-repo] no bundle for $$VERSION"; exit 1; fi; \
+	python3 -I scripts/release.py verify --dest "$$B" > /dev/null; \
+	STATE=$$(gh api "repos/$(GITHUB_REPO)/releases/tags/v$$VERSION" --jq '[.immutable, .draft, .prerelease] | map(tostring) | join(" ")') || { \
+	  echo "[publish-repo] $(GITHUB_REPO) has no published release v$$VERSION: make release-github first"; exit 1; }; \
+	if [ "$$STATE" != "true false false" ]; then \
+	  echo "[publish-repo] the GitHub Release v$$VERSION is not published and immutable (immutable, draft, prerelease: $$STATE)"; exit 1; fi; \
+	SINCE=$$(python3 -I -c 'import datetime as d; print((d.datetime.now(d.timezone.utc) - d.timedelta(minutes=2)).strftime("%Y-%m-%dT%H:%M:%SZ"))'); \
+	gh workflow run "$(SITE_WORKFLOW)" --repo "$(SITE_REPO)" --ref main; \
+	echo "[publish-repo] dispatched $(SITE_WORKFLOW) in $(SITE_REPO); waiting for its run"; \
+	RUN=""; \
+	for I in $$(seq 30); do \
+	  RUN=$$(gh run list --repo "$(SITE_REPO)" --workflow "$(SITE_WORKFLOW)" --event workflow_dispatch --limit 20 \
+	    --json databaseId,createdAt --jq '.[] | select(.createdAt >= "'"$$SINCE"'") | .databaseId' | tail -n 1); \
+	  [ -n "$$RUN" ] && break; sleep $(DISPATCH_WAIT); \
+	done; \
+	if [ -z "$$RUN" ]; then echo "[publish-repo] no run of $(SITE_WORKFLOW) appeared: check $(SITE_REPO)'s Actions, then make verify-repo"; exit 1; fi; \
+	if ! gh run watch "$$RUN" --repo "$(SITE_REPO)" --exit-status > /dev/null; then \
+	  echo "[publish-repo] run $$RUN of $(SITE_WORKFLOW) failed: the site serves what it served before. v$$VERSION is final;"; \
+	  echo "               bring it to the CISO"; exit 1; fi; \
+	echo "[publish-repo] run $$RUN deployed the site"; \
+	$(MAKE) --no-print-directory verify-repo
+
+# Downloads every file in the ledger back from the family's repository, without credentials and
+# without following a redirect, and compares it with SHA256SUMS; the site's own SHA256SUMS must
+# hold every line of the ledger. A missing file is asked again (the Pages CDN may still serve the
+# previous deployment), up to VERIFY_TRIES times; a changed file stops at once. Either failure is
+# a CISO incident about the site, not about the version, which is final already.
+verify-repo:
+	@set -eo pipefail; \
+	$(TAG_VERSION); \
+	if [ ! -d "$$B" ] || [ -L "$$B" ]; then echo "[verify-repo] no bundle for $$VERSION"; exit 1; fi; \
+	python3 -I scripts/release.py verify --dest "$$B" > /dev/null; \
+	T=$$(mktemp -d "$$B/.verify.XXXXXX"); trap 'rm -rf "$$T"' EXIT; \
+	for TRY in $$(seq $(VERIFY_TRIES)); do \
+	  MISSING=0; N=0; \
+	  rm -f "$$T/sums"; \
+	  CODE=$$(curl -q -sS --proto '=https' --max-time 60 -o "$$T/sums" -w '%{http_code}' "$(REPO_URL)SHA256SUMS") || CODE="$${CODE:-000}"; \
+	  if [ "$$CODE" != 200 ] || ! python3 -I -c 'import sys; a = open(sys.argv[1]).read().splitlines(); b = set(open(sys.argv[2], errors="replace").read().splitlines()); sys.exit(0 if set(a) <= b else 1)' "$$B/SHA256SUMS" "$$T/sums"; then \
+	    echo "  MISSING  lines of the ledger in $(REPO_URL)SHA256SUMS (HTTP $$CODE)"; MISSING=1; fi; \
+	  while read -r SUM P; do \
+	    rm -f "$$T/file"; \
+	    CODE=$$(curl -q -sS --proto '=https' --max-time 300 -o "$$T/file" -w '%{http_code}' "$(REPO_URL)$$P") || CODE="$${CODE:-000}"; \
+	    if [ "$$CODE" != 200 ] || [ ! -f "$$T/file" ]; then echo "  MISSING  $$P (HTTP $$CODE)"; MISSING=1; continue; fi; \
+	    GOT=$$(python3 -I -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$$T/file"); \
+	    if [ "$$GOT" != "$$SUM" ]; then \
+	      echo "  CHANGED  $$P"; \
+	      echo "[verify-repo] SECURITY INCIDENT: $(REPO_URL) serves other bytes than the signed bundle of $$VERSION."; \
+	      echo "             Change nothing, and bring it to the CISO."; exit 1; fi; \
+	    N=$$((N + 1)); \
+	  done < "$$B/SHA256SUMS"; \
+	  [ "$$MISSING" = 0 ] && break; \
+	  if [ "$$TRY" -lt $(VERIFY_TRIES) ]; then echo "[verify-repo] try $$TRY of $(VERIFY_TRIES): not every file is served yet, again in $(VERIFY_WAIT)s"; sleep $(VERIFY_WAIT); fi; \
+	done; \
+	if [ "$$MISSING" != 0 ]; then \
+	  echo "[verify-repo] SECURITY INCIDENT: $(REPO_URL) does not serve every file of $$VERSION after $(VERIFY_TRIES) tries."; \
+	  echo "             The version is final; bring it to the CISO."; exit 1; fi; \
+	echo "$$(date -u +%Y-%m-%dT%H:%M:%SZ) $$N files from $(REPO_URL)" > "$$B/REPO_VERIFIED"; \
+	echo "[verify-repo] all $$N files of $$VERSION are served unchanged by $(REPO_URL)"
 
 # ---------------------------------------------------------------------------
 # Release
 # Usage: make release-prepare TYPE=patch|minor|major EMBARGO=0|1
 #        (review RELEASE_x_y_z.md)
-#        make release-finalize   (notes commit, local tag, preflight, the signed bundle, its upload
-#                                 to GitHub Packages and the read-back; the push is yours)
+#        make release-finalize   (repo-guard, notes commit, local tag, preflight, the signed bundle
+#                                 and its checks; nothing is uploaded)
 #        git push origin main && git push origin vX.Y.Z
-#        make release-github     (the bundle on an immutable GitHub Release)
+#        make release-github     (the bundle on an immutable GitHub Release: the version is public)
+#        make publish-repo       (the site's deploy, then verify-repo reads every file back)
 #        Maven Central follows in the next release train (make release-train in nakama).
 #
-# The tag is created locally, and only after every file was read back unchanged from GitHub
-# Packages do you push main and the tag. Before the first upload nothing is public: make
-# release-abort, fix the cause, then release-prepare the same version again. From the first file
-# on GitHub Packages the version is final and goes to Central in the next train.
-# A security fix (EMBARGO=1) goes the other way: Maven Central first, with publish, and GitHub
-# Packages only after its advisory is published (ADR 0003, section 7).
+# Until the tag is pushed nothing has left the machine: make release-abort, fix the cause, then
+# release-prepare the same version again. From the push of its tag the version is final, and from
+# its GitHub Release it is public; it goes to Central in the next train.
+# A security fix (EMBARGO=1) goes the other way: Maven Central first, with publish, and its GitHub
+# Release, built from Central's files (central-bundle), only after its advisory is published
+# (ADR 0004, section 8).
 # ---------------------------------------------------------------------------
 
 # release-finalize publishes the commit release-prepare validated, and refuses any other HEAD.
@@ -648,7 +722,7 @@ release-prepare:
 	if [ "$(EMBARGO)" = 1 ]; then \
 		if [ -L "$(EMBARGO_FILE)" ]; then echo "[ERROR] $(EMBARGO_FILE) is a symlink"; exit 1; fi; \
 		grep -qxF "$$NEW" "$(EMBARGO_FILE)" 2>/dev/null || echo "$$NEW" >> "$(EMBARGO_FILE)"; \
-		echo "[OK] $$NEW is under embargo: Maven Central first, GitHub Packages after the advisory"; \
+		echo "[OK] $$NEW is under embargo: Maven Central first, its GitHub Release after the advisory"; \
 	fi; \
 	NT=$$(mktemp "$(CURDIR)/.release-notes.XXXXXX"); trap 'rm -f "$$NT"' EXIT; \
 	if command -v claude >/dev/null 2>&1; then \
@@ -755,6 +829,7 @@ release-finalize:
 	if [ "$$PREPARED" != "$$(git rev-parse HEAD)" ]; then \
 		echo "[ERROR] HEAD is not the commit release-prepare validated ($${PREPARED:-none recorded}): make release-abort, then release-prepare again"; exit 1; \
 	fi; \
+	$(MAKE) --no-print-directory repo-guard; \
 	if git rev-parse -q --verify "refs/tags/v$$NEW" >/dev/null; then \
 		echo "[ERROR] v$$NEW is already tagged: an earlier finalize got that far. Check Central, then make release-abort"; exit 1; \
 	fi; \
@@ -797,19 +872,18 @@ release-finalize:
 		echo "=============================================="; \
 		echo "Once the portal says PUBLISHED and repo1.maven.org answers 200, push main and the tag:"; \
 		echo "  git push origin main && git push origin v$$NEW"; \
-		echo "GitHub Packages only after the advisory is published."; \
+		echo "Its GitHub Release only after the advisory is published: make embargo-lift VERSION=$$NEW,"; \
+		echo "  make central-bundle, make release-github, make publish-repo"; \
 	else \
 		$(MAKE) --no-print-directory release-bundle; \
-		$(MAKE) --no-print-directory publish-github; \
-		$(MAKE) --no-print-directory verify-github; \
-		rm -f $(RELEASE_STATE); \
 		echo ""; \
 		echo "=============================================="; \
-		echo "RELEASE v$$NEW ON GITHUB PACKAGES, READ BACK UNCHANGED (tag local)"; \
+		echo "RELEASE v$$NEW BUILT AND SIGNED, NOTHING UPLOADED (tag local)"; \
 		echo "=============================================="; \
-		echo "Push main and the tag, then keep the bundle on an immutable GitHub Release:"; \
+		echo "Until the tag is pushed, make release-abort undoes it. From the push on the version is final:"; \
 		echo "  git push origin main && git push origin v$$NEW"; \
-		echo "  make release-github"; \
+		echo "  make release-github   (publishes it: the immutable GitHub Release)"; \
+		echo "  make publish-repo     (the site's deploy, and the read-back of every file)"; \
 		echo "Maven Central follows in the next release train (make release-train in nakama)."; \
 	fi
 
@@ -825,10 +899,12 @@ release-abort:
 			echo "        Its tag stays and nothing was undone. Check the Central Portal's deployments and"; \
 			echo "        https://repo1.maven.org/maven2/$(firstword $(CENTRAL_PATHS))/$$NEW/; the CTO and the CISO decide what follows."; exit 1; \
 		fi; \
-		if [ -e "$$B/UPLOAD_STARTED" ]; then \
-			echo "[ERROR] files of v$$NEW reached GitHub Packages ($$(cat "$$B/UPLOAD_STARTED")): the version is final."; \
-			echo "        It is never deleted or replaced, and its tag and bundle stay. Nothing was undone."; \
-			echo "        The CTO and the CISO decide what follows, normally the next patch version."; exit 1; \
+		REMOTE=$$(git ls-remote --tags origin "refs/tags/v$$NEW") || { \
+			echo "[ERROR] cannot read the tags on origin, so cannot tell whether v$$NEW is final: nothing was undone"; exit 1; }; \
+		if [ -n "$$REMOTE" ]; then \
+			echo "[ERROR] v$$NEW is on origin: from the push of its tag the version is final. It is never deleted or replaced,"; \
+			echo "        and its tag and bundle stay. Nothing was undone. If its GitHub Release is missing, make release-github;"; \
+			echo "        otherwise the CTO and the CISO decide what follows, normally the next patch version."; exit 1; \
 		fi; \
 		rm -rf -- "$$B.partial"; \
 		if [ -e "$$B" ]; then rm -rf -- "$$B"; echo "[OK] Removed the bundle of v$$NEW, which never left this machine"; fi; \
@@ -844,14 +920,14 @@ release-abort:
 		fi; \
 		rm -f $(RELEASE_STATE); \
 		echo "[OK] Release aborted, tag v$$NEW removed"; \
-		echo "[WARN] If an upload reached the Central Portal or GitHub Packages before the failure, v$$NEW is final there:"; \
-		echo "       check https://repo1.maven.org/maven2/$(firstword $(CENTRAL_PATHS))/$$NEW/ and make release-preflight"; \
-		echo "       before you release this version again. A version on GitHub Packages is never deleted or replaced."; \
+		echo "[WARN] make release-preflight before you release this version again: it refuses a version that is on"; \
+		echo "       Maven Central or $(REPO_URL), or whose tag or GitHub Release exists."; \
 	else \
 		echo "No release in progress"; \
 	fi
 
-# After a security fix's advisory is published, its version may go to GitHub Packages as well.
+# After a security fix's advisory is published, its version may get its GitHub Release, and so
+# reach the family's repository, as well.
 embargo-lift:
 	@set -eo pipefail; \
 	if ! [[ "$(VERSION)" =~ ^[0-9]+\.[0-9]+\.[0-9]+$$ ]]; then echo "[ERROR] Usage: make embargo-lift VERSION=x.y.z, once its advisory is published"; exit 1; fi; \

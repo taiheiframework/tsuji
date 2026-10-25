@@ -44,7 +44,9 @@ receives security fixes for 12 months after the release of Taihei Tsuji 5.0.0.
 - ZIO 2.1.27 (`zio-json` 1.1 for codecs, `zio-test`)
 - scala-java-time 2.8 (JS `java.time` support)
 
-Everything resolves from Maven Central; the build needs no credentials.
+The build resolves from Maven Central first, then from the family's Maven repository
+(`REPO_URL` in the Makefile, built from the immutable GitHub Releases), and from nothing else;
+neither needs credentials.
 
 ## Build
 
@@ -54,9 +56,9 @@ make test           # ./mill __.test.testForked    (JVM + JS; JS runs on Node)
 make fmt            # ./mill __.reformat
 make fix            # ./mill __.fix                 (scalafix)
 make validate       # repo-guard + release-test + fix + fmt + compile + test + mima
-make repo-guard     # Maven Central only: no other repository, every dev.taihei pin on Central
-make release-test   # the release machinery's own tests, against a fake registry on localhost
-make mima           # binary compatibility with the newest release of the current major on Central
+make repo-guard     # Central, then REPO_URL, nothing else; every resolved dev.taihei file checked
+make release-test   # the release machinery's own tests, against stand-ins on localhost
+make mima           # binary compatibility with the newest release of the current major
 make publishLocal   # to ~/.ivy2/local (a SNAPSHOT only)
 ```
 
@@ -68,23 +70,34 @@ anything else a SNAPSHOT of the last tag.
 ```sh
 make release-prepare TYPE=patch|minor|major EMBARGO=0|1
                                                # validate, write RELEASE_x_y_z.md
-make release-finalize                          # commit the notes, tag locally, check
-                                               # both registries, build and sign the
-                                               # bundle once, upload it to GitHub
-                                               # Packages and read every file back
-git push origin main && git push origin vX.Y.Z # only after the read-back succeeded
-make release-github                            # the bundle on an immutable GitHub Release
+make release-finalize                          # repo-guard, commit the notes, tag locally,
+                                               # check Central, REPO_URL and GitHub, build
+                                               # and sign the bundle once; uploads nothing
+git push origin main && git push origin vX.Y.Z # from here on the version is final
+make release-github                            # publishes it: the bundle on an immutable
+                                               # GitHub Release, read back and compared
+make publish-repo                              # the repository's deploy, then every file
+                                               # read back (verify-repo)
 make publish-dry-run                           # the signed bundle, written to out/
 ```
 
 One release publishes `taihei-tsuji` (JVM and Scala.js) and `taihei-tsuji-tools` with the same
-version, as one signed bundle. Its files go unchanged to this repository's GitHub Packages
-registry first, and to Maven Central with the next release train, so a new version can take up to
-a month to reach Central; `SHA256SUMS` on the GitHub Release lists the SHA-256 of every file, and
-both registries serve exactly those bytes. A security fix goes to Central first (`EMBARGO=1`).
-The build itself resolves from Maven Central only, and `make validate` checks it (`repo-guard`).
-A release publishes only the commit `release-prepare` validated, and refuses when a file git does
-not track is in a source or resource folder, or a stray build file is in the tree.
+version, as one signed bundle, built and signed once. Its zip and `SHA256SUMS`, the SHA-256 of
+every file, are kept on an immutable GitHub Release of the tag; that release publishes the
+version. The family's Maven repository is built from those releases alone, so nothing is ever
+uploaded to it, and the next release train takes the same files to Maven Central. Both serve
+exactly the bytes `SHA256SUMS` lists. A security fix goes to Central first (`EMBARGO=1`), and
+gets its GitHub Release, from Central's own files (`make central-bundle`), only after its
+advisory is published.
+
+`make validate` checks the build's repositories (`repo-guard`): Maven Central first, then
+`REPO_URL`, and nothing else; every `dev.taihei` pin on one of them; every file the build
+resolved from one of them, only `dev.taihei` from `REPO_URL`; and every resolved `dev.taihei`
+file in the `SHA256SUMS` of its version's immutable GitHub Release, or, for a version without
+one, on Central with a good signature by the release key (`keys/release-key.asc`). A release
+publishes only the commit `release-prepare` validated, and refuses when a file git does not track
+is in a source or resource folder, or a stray build file is in the tree. Credentials never go on
+make's command line.
 
 `make publish` is only for a security fix under embargo, which goes to Central first; it refuses
 any other version, and a version whose Central upload it started before. It reads the Central
@@ -95,10 +108,8 @@ environment (`MILL_SONATYPE_USERNAME`, `MILL_SONATYPE_PASSWORD`, `MILL_PGP_SECRE
 `MILL_PGP_PASSPHRASE`). The dry run that builds the release bundle gets the release key but never
 the Central token, neither from that file nor from the shell. The `mill` launcher downloads Mill
 over HTTPS only and keeps a download only when its SHA-256 matches the one pinned in the launcher;
-a copy already in Mill's cache is not checked again. The upload to GitHub Packages reads a
-`write:packages` token from `~/.taihei-packages-publish.env` alone, and the read-back a
-`read:packages` token from Coursier's credentials file (host `maven.pkg.github.com`); neither is
-ever in `~/.edo-release.env`.
+a copy already in Mill's cache is not checked again. `release-github` and `publish-repo` use the
+maintainer's `gh` login; nothing else in a release needs a token.
 Releases are signed by the Taihei Framework release key, fingerprint
 `5026 B299 6DDB 697E C463  0BCF 14A7 33E2 A507 702F`, with the user ids
 `Taihei Framework Releases <releases@taihei.dev>` and, from before the family was renamed,

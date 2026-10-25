@@ -44,9 +44,9 @@ receives security fixes for 12 months after the release of Taihei Tsuji 5.0.0.
 - ZIO 2.1.27 (`zio-json` 1.1 for codecs, `zio-test`)
 - scala-java-time 2.8 (JS `java.time` support)
 
-The build resolves from Maven Central first, then from the family's Maven repository
-(`REPO_URL` in the Makefile, built from the immutable GitHub Releases), and from nothing else;
-neither needs credentials.
+The build resolves from Coursier's defaults (the local Ivy repository, then Maven Central), then
+from the family's Maven repository (`REPO_URL` in the Makefile, built from the immutable GitHub
+Releases) for `dev.taihei` alone, and from nothing else; none of them needs credentials.
 
 ## Build
 
@@ -56,7 +56,8 @@ make test           # ./mill __.test.testForked    (JVM + JS; JS runs on Node)
 make fmt            # ./mill __.reformat
 make fix            # ./mill __.fix                 (scalafix)
 make validate       # repo-guard + release-test + fix + fmt + compile + test + mima
-make repo-guard     # Central, then REPO_URL, nothing else; every resolved dev.taihei file checked
+make repo-guard     # Coursier's defaults, then REPO_URL for dev.taihei alone, nothing else;
+                    # every resolved dev.taihei file checked
 make release-test   # the release machinery's own tests, against stand-ins on localhost
 make mima           # binary compatibility with the newest release tag of the current major,
                     # which must be on Central or REPO_URL (MIMA_BASELINE=x.y.z until it is)
@@ -84,8 +85,12 @@ make release-abort                             # until the tag (and the notes co
 make publish-dry-run                           # the signed bundle, written to out/
 ```
 
+`release-prepare` refuses while the previous release is not on Maven Central yet: at most one
+version of a library waits for the release train.
+
 A security fix (`make release-prepare … EMBARGO=1`) goes the other way: `release-finalize`
-publishes it to Maven Central with `make publish`; once its advisory is published,
+publishes it to Maven Central with `make publish`. Once the Central Portal says PUBLISHED and
+repo1.maven.org answers 200 for it, push `main` and the tag; once its advisory is published,
 `make embargo-lift VERSION=x.y.z` records the lift, which nothing after it does without, then
 `make central-bundle` (the bundle from Central's own files), `make release-github` and
 `make publish-repo`.
@@ -99,15 +104,25 @@ exactly the bytes `SHA256SUMS` lists. A security fix goes to Central first (`EMB
 gets its GitHub Release, from Central's own files (`make central-bundle`), only after its
 advisory is published.
 
-`make validate` checks the build's repositories (`repo-guard`): Maven Central first, then
-`REPO_URL`, which the build asks for `dev.taihei` alone, and nothing else; every `dev.taihei`
-pin on one of them; every file the build resolved from one of them; and every resolved
-`dev.taihei` file in the `SHA256SUMS` of its version's immutable GitHub Release and signed by
-the release key (`keys/release-key.asc`), or, for a version without a release, on Central with a
-good signature by that key. A release
-publishes only the commit `release-prepare` validated, and refuses when a file git does not track
-is in a source or resource folder, or a stray build file is in the tree. Credentials never go on
-make's command line.
+`make validate` checks the build's repositories (`repo-guard`): Coursier's defaults (the local
+Ivy repository, then Maven Central), then `REPO_URL` for `dev.taihei` alone, and nothing else,
+for every module that resolves dependencies, published or not; every `dev.taihei` pin on one of
+them; every file the build resolved from one of them; and every resolved `dev.taihei` file in
+the `SHA256SUMS` of its version's immutable GitHub Release and signed by the release key
+(`keys/release-key.asc`), or, for a version without a release, on Central with a good signature
+by that key.
+
+repo-guard asks the GitHub API without a token: when the API answers HTTP 403 or 429 (its limit
+for anonymous requests), wait an hour and run it again. When it names a file other than
+`dev.taihei` in the Coursier cache of `REPO_URL`, remove that repository's directory from the
+cache (`~/.cache/coursier/v1/https/taiheiframework.github.io/repo/` on Linux,
+`~/Library/Caches/Coursier/v1/https/taiheiframework.github.io/repo/` on macOS) and build again.
+
+A release publishes only the commit `release-prepare` validated, and refuses when a file git
+does not track is in a source or resource folder, or a stray build file is in the tree.
+Credentials never go on make's command line (`make … VAR=value`): make hands such a value on to
+every command it runs, also after an `unset`. They come from `~/.edo-release.env` or the
+environment, and only `make publish` and the dry run's signing step (the key alone) get them.
 
 `make publish` is only for a security fix under embargo, which goes to Central first; it refuses
 any other version, and a version whose Central upload it started before. It reads the Central

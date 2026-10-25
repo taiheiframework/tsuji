@@ -306,8 +306,9 @@ expect "embargo-lift refuses a version that is not under embargo" 1 "not under e
 # The stand-in answers the guards, and records which Central token variables reached each Mill
 # call before the publishing one (in $MLOG.pre), and for the publishing command which credential
 # variables reached it (their names, never their values), its arguments, and whether the Central
-# marker was there when it started. STANDIN_VERSION, when set, is the version it reports. Mill 1.3.1 signs in its own JVM; only an added --useGpgCli
-# would hand the passphrase to a gpg command line, so the arguments must be exactly these.
+# marker was there when it started. STANDIN_VERSION, when set, is the version it reports. Mill
+# 1.3.1 signs in its own JVM; only an added --useGpgCli would hand the passphrase to a gpg command
+# line, so the arguments must be exactly these.
 MLOG="$W/mill-env"
 cat > "$G/mill" <<EOF
 #!/usr/bin/env bash

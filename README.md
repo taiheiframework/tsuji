@@ -95,9 +95,10 @@ environment (`MILL_SONATYPE_USERNAME`, `MILL_SONATYPE_PASSWORD`, `MILL_PGP_SECRE
 `MILL_PGP_PASSPHRASE`). The dry run that builds the release bundle gets the release key but never
 the Central token, neither from that file nor from the shell. The `mill` launcher downloads Mill
 over HTTPS only and keeps a download only when its SHA-256 matches the one pinned in the launcher;
-a copy already in Mill's cache is not checked again. The upload to GitHub Packages reads a `write:packages` token from
-`~/.taihei-packages-publish.env` alone, and the read-back a `read:packages` token from Coursier's
-credentials file (host `maven.pkg.github.com`); neither is ever in `~/.edo-release.env`.
+a copy already in Mill's cache is not checked again. The upload to GitHub Packages reads a
+`write:packages` token from `~/.taihei-packages-publish.env` alone, and the read-back a
+`read:packages` token from Coursier's credentials file (host `maven.pkg.github.com`); neither is
+ever in `~/.edo-release.env`.
 Releases are signed by the Taihei Framework release key, fingerprint
 `5026 B299 6DDB 697E C463  0BCF 14A7 33E2 A507 702F`, with the user ids
 `Taihei Framework Releases <releases@taihei.dev>` and, from before the family was renamed,

@@ -36,6 +36,11 @@ expect() {
   fi
   printf '%s\n' "$out" | tail -n 4 | sed 's/^/     /'
 }
+# The real Mill runs with only these variables, so that no credential in the caller's environment
+# reaches it.
+KEEP=(PATH="$PATH" HOME="$HOME")
+[ -n "${XDG_CACHE_HOME:-}" ] && KEEP+=(XDG_CACHE_HOME="$XDG_CACHE_HOME")
+[ -n "${TMPDIR:-}" ] && KEEP+=(TMPDIR="$TMPDIR")
 # The hash of a file, computed without any tool the launcher uses.
 sha() { python3 -I -B -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$1"; }
 
@@ -148,6 +153,16 @@ for SH in "${SHELLS[@]}"; do
   done
 done
 
+# bash imports functions from the environment: one posing as sha256sum, answering the pin, must
+# not make a tampered copy pass.
+if command -v bash >/dev/null 2>&1; then
+  reset; plant "$NAME"
+  expect "a sha256sum function from the environment does not stand in for the hash under bash" 1 "not the pinned" \
+    env "BASH_FUNC_sha256sum%%=() { echo $(pinned "$NAME"); }" PATH="$W/bin:$PATH" MILL_FINAL_DOWNLOAD_FOLDER="$W/dl" \
+    MILL_OUTPUT_DIR="$W/out" bash --posix -c 'cd "$1" && exec bash --posix "$2" --version' - "$W/cwd" "$LAUNCHER"
+  [ ! -e "$W/ran" ] && pass "and the tampered copy did not run" || fail "a sha256sum function let the tampered copy run"
+fi
+
 # The hash without sha256sum, as on a macOS without coreutils: openssl first, then shasum. Each
 # runs on a PATH that holds only the tools the launcher needs, and must compute the right hash.
 # touch is there so that a planted file that does run leaves its mark.
@@ -172,11 +187,11 @@ done
 # validate has run ./mill before this (repo-guard or the release tests do); otherwise the next line
 # downloads it, as a fresh clone's first build would.
 REAL=$(cd "$W/cwd" && MILL_TEST_DRY_RUN_LAUNCHER_SCRIPT=1 sh "$LAUNCHER" | tail -n 1)
-[ -s "$REAL" ] || (cd "$REPO" && ./mill --version >/dev/null 2>&1) || true
+[ -s "$REAL" ] || (cd "$REPO" && env -i "${KEEP[@]}" ./mill --version >/dev/null 2>&1) || true
 if [ -s "$REAL" ]; then
   reset
   expect "the pinned mill $NAME from the cache runs" 0 "Mill Build Tool version $PIN" \
-    env PATH="$W/bin:$PATH" MILL_FINAL_DOWNLOAD_FOLDER="$(dirname "$REAL")" MILL_OUTPUT_DIR="$W/out" \
+    env -i "${KEEP[@]}" PATH="$W/bin:$PATH" MILL_FINAL_DOWNLOAD_FOLDER="$(dirname "$REAL")" MILL_OUTPUT_DIR="$W/out" \
     sh -c 'cd "$1" && exec sh "$2" --version' - "$W/cwd" "$LAUNCHER"
   [ ! -s "$W/curl-args" ] && pass "and nothing was downloaded for it" || fail "curl ran for the cached, pinned mill"
 
@@ -192,7 +207,7 @@ OKCURL
   chmod +x "$W/okbin/curl"
   reset
   expect "a download that matches the pin is kept and runs" 0 "Mill Build Tool version $PIN" \
-    env PATH="$W/okbin:$PATH" MILL_FINAL_DOWNLOAD_FOLDER="$W/dl" MILL_OUTPUT_DIR="$W/out" \
+    env -i "${KEEP[@]}" PATH="$W/okbin:$PATH" MILL_FINAL_DOWNLOAD_FOLDER="$W/dl" MILL_OUTPUT_DIR="$W/out" \
     sh -c 'cd "$1" && exec sh "$2" --version' - "$W/cwd" "$LAUNCHER"
   [ -s "$W/curl-args" ] && [ -x "$W/dl/$NAME" ] && [ "$(sha "$W/dl/$NAME")" = "$(pinned "$NAME")" ] \
     && pass "and it is in the download folder, executable, with the pinned SHA-256" \

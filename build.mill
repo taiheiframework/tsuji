@@ -67,28 +67,17 @@ object release extends Module {
   // changes both lines.
   val repoUrl = "https://taiheiframework.github.io/repo/"
 
-  // Where a version of this library's JVM module has its POM, in a Maven repository.
-  private def pomAt(root: String, v: String) =
-    s"${root.stripSuffix("/")}/dev/taihei/taihei-tsuji_3/$v/taihei-tsuji_3-$v.pom"
-
-  // Whether a repository has a version: 200 yes, 404 no, anything else (a redirect included)
-  // fails the build, since a baseline we cannot determine must not turn into no baseline. A file,
-  // not the version's directory: the family's repository answers 404 for a directory.
-  private def has(name: String, root: String, v: String): Boolean = {
-    val code = os
-      .proc("curl", "-q", "-s", "--proto", "=https", "--max-time", "30", "-o", "/dev/null", "-w", "%{http_code}", pomAt(root, v))
-      .call(check = false)
-      .out
-      .trim()
-    code match {
-      case "200" => true
-      case "404" => false
-      case other => sys.error(s"cannot tell whether $v is on $name (HTTP $other): no MiMa baseline")
-    }
+  // Whether a version of this library is released, on Maven Central or on repoUrl, asked of its
+  // JVM module's POM by scripts/release.py (a file, not the version's directory, which the
+  // family's repository answers 404 for). A version on neither, or an answer that is neither 200
+  // nor 404 (a redirect included), fails the build: a baseline we cannot determine must not turn
+  // into no baseline, or into an older one.
+  private def released(root: os.Path, v: String): Unit = {
+    val r = os
+      .proc("python3", "-I", root / "scripts" / "release.py", "released", "--central", "https://repo1.maven.org/maven2", "--url", repoUrl, "--artifact", "taihei-tsuji_3", v)
+      .call(check = false, stderr = os.Pipe)
+    if (r.exitCode != 0) sys.error(s"no MiMa baseline: ${r.err.text().trim()}")
   }
-
-  private def released(v: String): Boolean =
-    has("Maven Central", "https://repo1.maven.org/maven2", v) || has(repoUrl, repoUrl, v)
 
   // The release MiMa compares with: the newest v-tag reachable from HEAD, none before
   // firstRelease or majorLine, whose version must be on Maven Central or on the family's
@@ -128,10 +117,7 @@ object release extends Module {
           .filter(_.matches("[0-9]+\\.[0-9]+\\.[0-9]+"))
           .filter(v => atLeast(v, firstRelease) && atLeast(v, majorLine))
         candidates.headOption.map { v =>
-          if (!released(v))
-            sys.error(
-              s"v$v is neither on Maven Central nor on $repoUrl: publish it (make release-github, make publish-repo), or set MIMA_BASELINE",
-            )
+          released(root, v)
           v
         }
     }

@@ -259,8 +259,8 @@ mima:
 # 2. Mill's own `repositories`, which would come before Central, is empty, and every module
 #    resolves from exactly Coursier's defaults followed by REPO_URL;
 # 3. every dev.taihei dependency of a published module is on Maven Central or on REPO_URL. A
-#    dependency on another module of this library (taihei-tsuji-tools on taihei-tsuji) is the
-#    same release, and needs the same version;
+#    dependency on another module of this library is the same release, and needs the same
+#    version;
 # 4. every file the build resolved came from Maven Central or REPO_URL, only dev.taihei from
 #    REPO_URL, and every dev.taihei file, with its POM, is in the SHA256SUMS of its version's
 #    immutable GitHub Release, or, for a version without one (before this route, or a security
@@ -270,7 +270,11 @@ mima:
 # tracked build files; an untracked build file is STRAY_GUARD's to refuse at a release, and a
 # Coursier mirror file in the user's home is outside this repository. CI on a clean runner, with
 # no credentials, stays the proof that the build needs none. release-finalize runs it first.
-RESOLVED = resolvedMvnDeps,resolvedRunMvnDeps,scalaCompilerClasspath,scalacPluginClasspath,scalaDocClasspath,resolvedMimaPreviousArtifacts,scalaJSToolsClasspath,scalafixToolClasspath
+# The resolved classpaths repo-guard reads (Mill's own tasks; a module lists those it has).
+RESOLVED = resolvedMvnDeps,resolvedRunMvnDeps,scalaCompilerClasspath,scalacPluginClasspath,scalaDocClasspath
+RESOLVED := $(RESOLVED),scalaDocPluginClasspath,semanticDbPluginClasspath,resolvedMimaPreviousArtifacts
+RESOLVED := $(RESOLVED),scalaJSToolsClasspath,scalaJSWorkerClasspath,scalaJSLinkerClasspath,scalaJSJsEnvMvnDeps
+RESOLVED := $(RESOLVED),scalafixToolClasspath,pgpWorkerClasspath
 repo-guard:
 	@set -euo pipefail; \
 	if [ -n "$${COURSIER_REPOSITORIES:-}$${COURSIER_MIRRORS:-}$${COURSIER_CREDENTIALS:-}" ]; then \
@@ -527,7 +531,7 @@ release-github:
 	REMOTE_TAG=$$(git ls-remote origin "refs/tags/v$$VERSION^{}" | cut -f1) || { echo "[release-github] cannot read the tags on origin"; exit 1; }; \
 	if [ "$$REMOTE_TAG" != "$$(git rev-parse "v$$VERSION^{commit}")" ]; then \
 	  echo "[release-github] v$$VERSION on origin is not the local tag: push main and the tag first"; exit 1; fi; \
-	git fetch -q origin main; \
+	git fetch -q origin main 2>/dev/null || { echo "[release-github] main is not on origin: push main first"; exit 1; }; \
 	if ! git merge-base --is-ancestor HEAD origin/main; then echo "[release-github] main on origin does not hold the release commit: push main first"; exit 1; fi; \
 	$(RELEASE_ABSENT); \
 	T=$$(mktemp -d "$$B/.release.XXXXXX"); trap 'rm -rf "$$T"' EXIT; \
@@ -575,14 +579,16 @@ publish-repo:
 	  echo "[publish-repo] $(GITHUB_REPO) has no published release v$$VERSION: make release-github first"; exit 1; }; \
 	if [ "$$STATE" != "true false false" ]; then \
 	  echo "[publish-repo] the GitHub Release v$$VERSION is not published and immutable (immutable, draft, prerelease: $$STATE)"; exit 1; fi; \
-	SINCE=$$(python3 -I -c 'import datetime as d; print((d.datetime.now(d.timezone.utc) - d.timedelta(minutes=2)).strftime("%Y-%m-%dT%H:%M:%SZ"))'); \
+	RUNS="gh run list --repo $(SITE_REPO) --workflow $(SITE_WORKFLOW) --event workflow_dispatch --limit 50 --json databaseId --jq .[].databaseId"; \
+	BEFORE=$$($$RUNS) || { echo "[publish-repo] cannot list the runs of $(SITE_WORKFLOW) in $(SITE_REPO)"; exit 1; }; \
 	gh workflow run "$(SITE_WORKFLOW)" --repo "$(SITE_REPO)" --ref main; \
 	echo "[publish-repo] dispatched $(SITE_WORKFLOW) in $(SITE_REPO); waiting for its run"; \
 	RUN=""; \
 	for I in $$(seq 30); do \
-	  RUN=$$(gh run list --repo "$(SITE_REPO)" --workflow "$(SITE_WORKFLOW)" --event workflow_dispatch --limit 20 \
-	    --json databaseId,createdAt --jq '.[] | select(.createdAt >= "'"$$SINCE"'") | .databaseId' | tail -n 1); \
-	  [ -n "$$RUN" ] && break; sleep $(DISPATCH_WAIT); \
+	  NEW=$$($$RUNS | awk -v before=" $$(echo $$BEFORE) " 'NF && index(before, " " $$1 " ") == 0'); \
+	  if [ "$$(printf '%s' "$$NEW" | grep -c .)" -gt 1 ]; then \
+	    echo "[publish-repo] more than one new run of $(SITE_WORKFLOW) ($$(echo $$NEW)): watch them in $(SITE_REPO)'s Actions, then make verify-repo"; exit 1; fi; \
+	  RUN=$$NEW; [ -n "$$RUN" ] && break; sleep $(DISPATCH_WAIT); \
 	done; \
 	if [ -z "$$RUN" ]; then echo "[publish-repo] no run of $(SITE_WORKFLOW) appeared: check $(SITE_REPO)'s Actions, then make verify-repo"; exit 1; fi; \
 	if ! gh run watch "$$RUN" --repo "$(SITE_REPO)" --exit-status > /dev/null; then \
@@ -634,7 +640,7 @@ verify-repo:
 #        (review RELEASE_x_y_z.md)
 #        make release-finalize   (repo-guard, notes commit, local tag, preflight, the signed bundle
 #                                 and its checks; nothing is uploaded)
-#        git push origin main && git push origin vX.Y.Z
+#        git push origin main && git push origin vX.Y.Z   (or both in one push)
 #        make release-github     (the bundle on an immutable GitHub Release: the version is public)
 #        make publish-repo       (the site's deploy, then verify-repo reads every file back)
 #        Maven Central follows in the next release train (make release-train in nakama).
@@ -905,6 +911,18 @@ release-abort:
 			echo "[ERROR] v$$NEW is on origin: from the push of its tag the version is final. It is never deleted or replaced,"; \
 			echo "        and its tag and bundle stay. Nothing was undone. If its GitHub Release is missing, make release-github;"; \
 			echo "        otherwise the CTO and the CISO decide what follows, normally the next patch version."; exit 1; \
+		fi; \
+		if [ "$$(git log -1 --pretty=%s)" = "Add release notes for version $$NEW" ]; then \
+			MAIN=$$(git ls-remote origin refs/heads/main | cut -f1) || { \
+				echo "[ERROR] cannot read main on origin, so cannot tell whether the notes commit is pushed: nothing was undone"; exit 1; }; \
+			if [ -n "$$MAIN" ]; then \
+				git cat-file -e "$$MAIN^{commit}" 2>/dev/null || git fetch -q origin main || { \
+					echo "[ERROR] cannot fetch main from origin, so cannot tell whether the notes commit is pushed: nothing was undone"; exit 1; }; \
+				if git merge-base --is-ancestor HEAD "$$MAIN"; then \
+					echo "[ERROR] main on origin holds the notes commit of v$$NEW: undoing it would need a force push. Nothing was undone."; \
+					echo "        Push the tag (git push origin v$$NEW), then make release-github, or bring it to the CTO."; exit 1; \
+				fi; \
+			fi; \
 		fi; \
 		rm -rf -- "$$B.partial"; \
 		if [ -e "$$B" ]; then rm -rf -- "$$B"; echo "[OK] Removed the bundle of v$$NEW, which never left this machine"; fi; \

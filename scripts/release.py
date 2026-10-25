@@ -36,6 +36,10 @@ problem on stderr, when anything is not exactly as expected.
   fetch    --base URL --group G --version V --artifacts "A B" [--pom-only "A"] --dest DIR
            Download a released version's files from a Maven repository (Central, for a security
            fix's GitHub Release), every required file and the optional ones it has.
+  released --central URL --url URL --artifact A VERSION
+           Exit 0 when Maven Central or URL has VERSION of artifact A (its POM answers 200, asked
+           of Central first); fail, naming it, when both answer 404, and on any other answer.
+           The MiMa baseline: a release tag that neither serves is never passed over.
   same     DIR DIR
            Check that two Maven trees hold the same files with the same bytes.
 """
@@ -617,9 +621,9 @@ def resolved(args):
                 problems.append(str(e))
                 continue
             for p, r in todo:
-                if r in checked:
+                if p in checked:
                     continue
-                checked.add(r)
+                checked.add(p)
                 if os.path.islink(p) or not os.path.isfile(p):
                     problems.append(f"{p}: not a regular file")
                 elif sums is not None:
@@ -689,6 +693,17 @@ def fetch(args):
     print(f"{len(got)} files from {args.base}")
 
 
+def released(args):
+    for name, base in (("Maven Central", args.central.rstrip("/")), (args.url, args.url.rstrip("/"))):
+        check_url(base + "/")
+        url = f"{base}/dev/taihei/{args.artifact}/{args.version}/{args.artifact}-{args.version}.pom"
+        code, _ = http_get(url, MAX_FILE, follow=False)
+        if code == 200:
+            print(f"{args.version} is on {name}")
+            return
+    fail([f"v{args.version} is neither on Maven Central nor on {args.url}: publish it (make release-github, make publish-repo), or set MIMA_BASELINE"])
+
+
 def same(args):
     a, b = tree(args.a), tree(args.b)
     problems = [f"only in {args.a}: {p}" for p in a if p not in b] + [f"only in {args.b}: {p}" for p in b if p not in a]
@@ -726,12 +741,16 @@ def main():
     for opt in ("--base", "--group", "--version", "--artifacts", "--dest"):
         fe.add_argument(opt, required=True)
     fe.add_argument("--pom-only", default="")
+    rl = sub.add_parser("released")
+    for opt in ("--central", "--url", "--artifact"):
+        rl.add_argument(opt, required=True)
+    rl.add_argument("version")
     sm = sub.add_parser("same")
     sm.add_argument("a")
     sm.add_argument("b")
     args = parser.parse_args()
     commands = {"bundle": bundle, "verify": verify, "pins": pins, "no-repos": no_repos, "resolvers": resolvers,
-                "build-repos": build_repos, "resolved": resolved, "fetch": fetch, "same": same}
+                "build-repos": build_repos, "resolved": resolved, "fetch": fetch, "released": released, "same": same}
     try:
         commands[args.command](args)
     except Refused as e:

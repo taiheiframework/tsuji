@@ -98,8 +98,8 @@ for who in release other; do
   gpg --batch --quiet --passphrase '' --pinentry-mode loopback --quick-gen-key "Test $who <$who@example.invalid>" ed25519 sign never 2>/dev/null \
     || { echo "gpg cannot make a test key"; exit 1; }
 done
-KEY=$(gpg --list-keys --with-colons "release@example.invalid" | awk -F: '$1 == "fpr" { print $10; exit }')
-OTHER=$(gpg --list-keys --with-colons "other@example.invalid" | awk -F: '$1 == "fpr" { print $10; exit }')
+KEY=$(gpg --list-keys --with-colons "release@example.invalid" 2>/dev/null | awk -F: '$1 == "fpr" { print $10; exit }')
+OTHER=$(gpg --list-keys --with-colons "other@example.invalid" 2>/dev/null | awk -F: '$1 == "fpr" { print $10; exit }')
 gpg --batch --quiet --armor --export "$KEY" > "$W/release-key.asc" 2>/dev/null
 sign() { rm -f "$2.asc"; gpg --batch --quiet --pinentry-mode loopback --passphrase '' --local-user "$1" --armor --detach-sign -o "$2.asc" "$2" 2>/dev/null; }
 while IFS= read -r f; do sign "$KEY" "$f"; done < <(find "$SRC" -type f \( -name '*.jar' -o -name '*.pom' \) | sort)
@@ -286,6 +286,20 @@ cp_json "$(ref "$SITEC/dev/taihei/taihei-stranger_3/1.0.0/taihei-stranger_3-1.0.
 expect "resolved: a dev.taihei artifact of no family library is refused" 1 "not a released version of a family library" resolved "$W/c7.json"
 printf '{"m.x": []}\n' > "$W/c8.json"
 expect "resolved: nothing resolved at all is refused" 1 "resolved no files" resolved "$W/c8.json"
+expect "resolved: a key file that is not the pinned key is refused" 1 "is not the key $OTHER" \
+  R resolved --workspace "$W/ws" --url "$SITE" --central "$CENTRAL" --api "$API" --owner "$OWNER" --family "$FAMILY" \
+  --key "$W/release-key.asc" --fingerprint "$OTHER" "$W/c6.json"
+CACHE2="$W/cache2/v1/https/localhost:$PORT/central/org/y/y/1.0"; mkdir -p "$CACHE2"; printf 'y' > "$CACHE2/y-1.0.jar"
+cp_json "$(ref "$CENTC/org/x/x/1.0/x-1.0.jar")" "$(ref "$CACHE2/y-1.0.jar")" > "$W/c9.json"
+expect "resolved: files from two Coursier caches are refused" 1 "more than one Coursier cache" resolved "$W/c9.json"
+
+# released: the MiMa baseline's check; a release tag on neither Central nor the site fails.
+mkdir -p "$S/central/dev/taihei/$DA/6.6.6" "$S/site/dev/taihei/$DA/6.6.7"
+printf 'pom' > "$S/central/dev/taihei/$DA/6.6.6/$DA-6.6.6.pom"; printf 'pom' > "$S/site/dev/taihei/$DA/6.6.7/$DA-6.6.7.pom"
+expect "released: a version on Central" 0 "on Maven Central" R released --central "$CENTRAL" --url "$SITE" --artifact "$DA" 6.6.6
+expect "released: a version on the site" 0 "on $SITE" R released --central "$CENTRAL" --url "$SITE" --artifact "$DA" 6.6.7
+expect "released: a version on neither fails, naming it" 1 "v6.6.8 is neither on Maven Central nor on" R released --central "$CENTRAL" --url "$SITE" --artifact "$DA" 6.6.8
+expect "released: a redirect fails" 1 "HTTP 301" R released --central "$CENTRAL" --url "$BASE/moved/" --artifact "$DA" 6.6.7
 
 # --- the mill launcher ----------------------------------------------------------------------
 # A stand-in curl records its arguments and writes a file that is not Mill where -o points.
@@ -355,7 +369,9 @@ chmod +x "$G/mill"
 # The stand-in gh logs every call. Its GitHub Releases live in $GHS: "releases" lists the tags
 # and names that exist, "draft/" a draft's assets, "published" marks it published, "immutable"
 # what the API reports (true by default). A dispatched deploy copies the bundle onto the stand-in
-# site, unless "deploy-skip" exists; "run-fails" makes the run fail, "corrupt" changes a draft's zip.
+# site, unless "deploy-skip" exists, and shows as run 4242 beside an older run 4100 ("no-run": it
+# never shows, "two-runs": another new one shows too); "run-fails" makes the run fail. "corrupt"
+# changes a draft's zip, "corrupt-published" the zip downloaded once it is published.
 cat > "$W/bin/gh" <<EOF
 #!/usr/bin/env bash
 printf '%s\n' "\$*" >> "$GLOG"
@@ -368,7 +384,9 @@ case "\$1 \$2" in
     printf 'v$V\n$V\n' >> "$GHS/releases"; exit 0;;
   "release download")
     dir=""; while [ \$# -gt 0 ]; do [ "\$1" = --dir ] && dir="\$2"; shift; done
-    mkdir -p "\$dir"; cp "$GHS"/draft/* "\$dir/"; exit 0;;
+    mkdir -p "\$dir"; cp "$GHS"/draft/* "\$dir/"
+    [ -e "$GHS/published" ] && [ -e "$GHS/corrupt-published" ] && for z in "\$dir"/*.zip; do printf x >> "\$z"; done
+    exit 0;;
   "release edit") touch "$GHS/published"; exit 0;;
   "api repos/"*)
     [ -e "$GHS/published" ] || exit 1
@@ -380,7 +398,9 @@ case "\$1 \$2" in
       cat "$B/SHA256SUMS" >> "$S/site/SHA256SUMS"
     fi
     touch "$GHS/dispatched"; exit 0;;
-  "run list") [ -e "$GHS/dispatched" ] && echo 4242; exit 0;;
+  "run list")
+    echo 4100; [ -e "$GHS/no-run" ] && exit 0
+    [ -e "$GHS/dispatched" ] && echo 4242; [ -e "$GHS/dispatched" ] && [ -e "$GHS/two-runs" ] && echo 4243; exit 0;;
   "run watch") [ -e "$GHS/run-fails" ] && exit 1; exit 0;;
 esac
 echo "stand-in gh: unexpected \$*" >&2; exit 1
@@ -478,7 +498,11 @@ expect "release-abort removes a bundle whose tag was never pushed" 0 "never left
 [ ! -e "$B" ] && ! git -C "$G" rev-parse -q --verify "refs/tags/v$V" >/dev/null && pass "the bundle and the local tag are gone" || fail "the bundle or the tag stayed"
 git -C "$G" -c user.name=Test -c user.email=test@example.invalid -c tag.gpgsign=false tag -a "v$V" -m test
 use_bundle "$SRC"
-git -C "$G" push -q origin HEAD:refs/heads/main "refs/tags/v$V" 2>/dev/null
+git -C "$G" push -q origin "refs/tags/v$V" 2>/dev/null
+gh_reset
+expect "release-github refuses while main is not on origin" 1 "push main first" "${M[@]}" release-github
+! gh_called "release create" && pass "and creates nothing" || fail "it created a release without main on origin"
+git -C "$G" push -q origin HEAD:refs/heads/main 2>/dev/null
 printf '{"currentVersion":"0.0.0","newVersion":"%s","releaseType":"patch","branch":"main","head":"x","embargo":false}\n' "$V" > "$G/.release-state.json"
 expect "release-abort undoes nothing once the tag is on origin" 1 "the version is final" "${M[@]}" release-abort
 git -C "$G" rev-parse -q --verify "refs/tags/v$V" >/dev/null && [ -d "$B" ] && [ -e "$G/.release-state.json" ] && pass "the tag, the bundle and the state stay" || fail "release-abort removed something"
@@ -493,6 +517,8 @@ expect "release-github leaves a draft whose assets differ unpublished" 1 "the dr
 ! gh_called "release edit" && pass "and never publishes it" || fail "it published a draft whose assets differ"
 gh_reset; echo false > "$GHS/immutable"
 expect "release-github stops when GitHub does not report the release immutable" 1 "not report the release v$V as immutable" "${M[@]}" release-github
+gh_reset; touch "$GHS/corrupt-published"
+expect "release-github reads the published release back" 1 "the release's assets differ" "${M[@]}" release-github
 gh_reset
 expect "release-github publishes the bundle" 0 "record on the release ticket: $PREFIX-$V.zip SHA-256 $ZIPSUM" "${M[@]}" release-github
 grep -q -- "release create v$V --repo .* --verify-tag --draft" "$GLOG" && [ "$(grep -n 'release create' "$GLOG" | cut -d: -f1)" -lt "$(grep -n 'release edit' "$GLOG" | cut -d: -f1)" ] \
@@ -516,6 +542,14 @@ cp "$S/site/SHA256SUMS" "$W/site-sums"; sed -i.bak '1d' "$S/site/SHA256SUMS"; rm
 expect "verify-repo wants every ledger line in the site's SHA256SUMS" 1 "lines of the ledger" "${M[@]}" verify-repo
 cp "$W/site-sums" "$S/site/SHA256SUMS"
 expect "verify-repo follows no redirect" 1 "HTTP 301" "${M[@]}" verify-repo "REPO_URL=$BASE/moved/"
+gh_called "run watch 4242" && ! gh_called "run watch 4100" && pass "publish-repo watches the run its dispatch started, not an older one" || fail "publish-repo watched another run"
+echo false > "$GHS/immutable"
+expect "publish-repo refuses a release GitHub does not report immutable" 1 "not published and immutable" "${M[@]}" publish-repo
+rm "$GHS/immutable"; rm -f "$GHS/dispatched"; touch "$GHS/no-run"
+expect "publish-repo stops when no run of the deploy appears" 1 "no run of" "${M[@]}" publish-repo
+rm "$GHS/no-run" "$GHS/dispatched"; touch "$GHS/two-runs"
+expect "publish-repo stops when more than one new run appears" 1 "more than one new run" "${M[@]}" publish-repo
+rm "$GHS/two-runs" "$GHS/dispatched"
 touch "$GHS/run-fails"
 expect "publish-repo stops on a failed deploy run" 1 "failed" "${M[@]}" publish-repo
 rm "$GHS"/published
@@ -543,6 +577,10 @@ expect "central-bundle builds the bundle from Central's files" 0 "nothing was si
 diff <(cd "$SRC" && find . -type f -name '*.asc' | sort | xargs sha256sum) <(cd "$B/repository" && find . -type f -name '*.asc' | sort | xargs sha256sum) >/dev/null \
   && pass "central-bundle keeps Central's signature bytes" || fail "central-bundle's signatures differ from Central's"
 expect "central-bundle builds a bundle once" 1 "built once" "${M[@]}" central-bundle
+rm -rf "$B"; CJ=$(first_jar "$S/central/dev"); cp "$CJ.asc" "$W/central.asc"; sign "$OTHER" "$CJ"
+expect "central-bundle refuses a file on Central signed by another key" 1 "not signed by the release key" "${M[@]}" central-bundle
+cp "$W/central.asc" "$CJ.asc"; rm -rf "$B.partial" "$B.download"
+"${M[@]}" central-bundle >/dev/null 2>&1
 rm -rf "$B"; DRY="$G/out/mill.javalib.SonatypeCentralPublishModule/publishAll.dest/repository/$PREFIX-$V"
 mkdir -p "$DRY"; cp -r "$SRC/dev" "$DRY/"
 expect "central-bundle compares Central's files with the local publish directory" 0 "byte-equal to the local publish directory" "${M[@]}" central-bundle
@@ -618,6 +656,15 @@ HEAD_BEFORE=$(git -C "$G" rev-parse HEAD)
 expect "release-finalize runs repo-guard first" 1 "[repo-guard] COURSIER_REPOSITORIES" env COURSIER_REPOSITORIES=https://example.invalid "${M[@]}" release-finalize
 [ "$(git -C "$G" rev-parse HEAD)" = "$HEAD_BEFORE" ] && ! git -C "$G" rev-parse -q --verify "refs/tags/v9.9.10" >/dev/null \
   && pass "and a refusal there commits and tags nothing" || fail "release-finalize committed or tagged before repo-guard"
+rm -f "$G/.release-state.json"
+
+# release-abort undoes no notes commit that main on origin holds, also before the tag is pushed.
+git -C "$G" -c user.name=Test -c user.email=test@example.invalid -c commit.gpgsign=false commit -q --allow-empty -m "Add release notes for version 9.9.10"
+git -C "$G" push -q origin HEAD:refs/heads/main 2>/dev/null
+printf '{"currentVersion":"9.9.9","newVersion":"9.9.10","releaseType":"patch","branch":"main","head":"x","embargo":false}\n' > "$G/.release-state.json"
+NOTES_COMMIT=$(git -C "$G" rev-parse HEAD)
+expect "release-abort undoes no notes commit that is on origin's main" 1 "would need a force push" "${M[@]}" release-abort
+[ "$(git -C "$G" rev-parse HEAD)" = "$NOTES_COMMIT" ] && pass "and the notes commit stays" || fail "release-abort reset a pushed commit"
 rm -f "$G/.release-state.json"
 
 grep -q '^PUT\|^POST' "$W/log" && fail "something was uploaded to a stand-in server" || pass "nothing was ever uploaded"

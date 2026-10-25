@@ -11,7 +11,8 @@ come from the parent folder's `CLAUDE.md` when this repo is checked out under `~
 ```bash
 make validate          # repo-guard, release-test, scalafix, scalafmt, compile, test and MiMa
 make repo-guard        # Central, then REPO_URL only; pins released; resolved dev.taihei files checked
-make mima              # binary compatibility with the newest 5.x release on Central or REPO_URL
+make mima              # against the newest 5.x tag, which must be on Central or REPO_URL
+                       # (between a tag push and publish-repo it fails; MIMA_BASELINE=x.y.z)
 make test              # ./mill __.test.testForked (JS tests run under Node)
 TAIHEI_TEST_JAVA_HOME=<a JDK 17> ./mill tsuji.jvm.test.testForked   # the JVM tests on Java 17
 make publish-dry-run   # the bundle Maven Central would receive, written to out/

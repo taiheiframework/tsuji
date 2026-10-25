@@ -58,7 +58,8 @@ make fix            # ./mill __.fix                 (scalafix)
 make validate       # repo-guard + release-test + fix + fmt + compile + test + mima
 make repo-guard     # Central, then REPO_URL, nothing else; every resolved dev.taihei file checked
 make release-test   # the release machinery's own tests, against stand-ins on localhost
-make mima           # binary compatibility with the newest release of the current major
+make mima           # binary compatibility with the newest release tag of the current major,
+                    # which must be on Central or REPO_URL (MIMA_BASELINE=x.y.z until it is)
 make publishLocal   # to ~/.ivy2/local (a SNAPSHOT only)
 ```
 
@@ -78,8 +79,15 @@ make release-github                            # publishes it: the bundle on an 
                                                # GitHub Release, read back and compared
 make publish-repo                              # the repository's deploy, then every file
                                                # read back (verify-repo)
+make release-abort                             # until the tag (and the notes commit)
+                                               # is pushed: undo the preparation
 make publish-dry-run                           # the signed bundle, written to out/
 ```
+
+A security fix (`make release-prepare … EMBARGO=1`) goes the other way: `release-finalize`
+publishes it to Maven Central with `make publish`; once its advisory is published,
+`make embargo-lift VERSION=x.y.z`, `make central-bundle` (the bundle from Central's own files),
+`make release-github` and `make publish-repo`.
 
 One release publishes `taihei-tsuji` (JVM and Scala.js) and `taihei-tsuji-tools` with the same
 version, as one signed bundle, built and signed once. Its zip and `SHA256SUMS`, the SHA-256 of
@@ -108,8 +116,9 @@ environment (`MILL_SONATYPE_USERNAME`, `MILL_SONATYPE_PASSWORD`, `MILL_PGP_SECRE
 `MILL_PGP_PASSPHRASE`). The dry run that builds the release bundle gets the release key but never
 the Central token, neither from that file nor from the shell. The `mill` launcher downloads Mill
 over HTTPS only and keeps a download only when its SHA-256 matches the one pinned in the launcher;
-a copy already in Mill's cache is not checked again. `release-github` and `publish-repo` use the
-maintainer's `gh` login; nothing else in a release needs a token.
+a copy already in Mill's cache is not checked again. `release-preflight` (inside `release-finalize`),
+`release-github` and `publish-repo` use the maintainer's `gh` login; nothing else in a release
+needs a token.
 Releases are signed by the Taihei Framework release key, fingerprint
 `5026 B299 6DDB 697E C463  0BCF 14A7 33E2 A507 702F`, with the user ids
 `Taihei Framework Releases <releases@taihei.dev>` and, from before the family was renamed,

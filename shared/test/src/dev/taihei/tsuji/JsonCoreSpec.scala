@@ -155,16 +155,20 @@ object JsonCoreSpec extends ZIOSpecDefault:
       },
       test("each bound reads at its limit and refuses one past it, under any ReaderConfig") {
         // Under an unused field of a text, whose own object is the first level of nesting.
-        def text(j: String) = s"""{"text":"x","language":"en","j":$j}"""
-        val pairs           = List(
+        def text(j: String)        = s"""{"text":"x","language":"en","j":$j}"""
+        val pairs                  = List(
           ("[" * 63 + "1" + "]" * 63) -> ("[" * 64 + "1" + "]" * 64),
           ("0." + "0" * 1097 + "1") -> ("0." + "0" * 1098 + "1"),
           "1e999999999" -> "1e1000000000",
-          ("9" * 76) -> ("9" * 77),
+          // The mantissa: below 256 bits reads, 256 bits is refused, either sign.
+          java.math.BigInteger.valueOf(2).pow(255).subtract(java.math.BigInteger.ONE).toString ->
+          java.math.BigInteger.valueOf(2).pow(255).toString,
+          java.math.BigInteger.valueOf(2).pow(255).negate.toString ->
+          java.math.BigInteger.valueOf(2).pow(255).negate.subtract(java.math.BigInteger.ONE).toString,
         )
         // A caller's own configuration: no end-of-input check, small buffers, no hex dump. The
         // bounds are counted in Tsuji's walk, so none of it moves them.
-        val configs         = List(
+        val configs                = List(
           ReaderConfig,
           ReaderConfig
             .withCheckForEndOfInput(false)
@@ -172,7 +176,7 @@ object JsonCoreSpec extends ZIOSpecDefault:
             .withPreferredCharBufSize(12)
             .withAppendHexDumpToParseException(false),
         )
-        val wrong           =
+        val wrong                  =
           for
             config            <- configs
             (within, outside) <- pairs
@@ -180,10 +184,11 @@ object JsonCoreSpec extends ZIOSpecDefault:
             refused = outcome(readFromString[Text](text(outside), config))
             if read != "read" || refused != "refused"
           yield s"${within.take(20)}: $read, ${outside.take(20)}: $refused"
-        val streamed        = pairs.map((_, outside) =>
-          outcome(readFromStream[Text](new java.io.ByteArrayInputStream(text(outside).getBytes(UTF_8)), configs(1)))
-        )
-        assertTrue(wrong.isEmpty, streamed.forall(_ == "refused"))
+        def streamed(json: String) =
+          outcome(readFromStream[Text](new java.io.ByteArrayInputStream(text(json).getBytes(UTF_8)), configs(1)))
+        val streamedWrong          =
+          pairs.filterNot((within, outside) => streamed(within) == "read" && streamed(outside) == "refused")
+        assertTrue(pairs.size == 5, wrong.isEmpty, streamedWrong.isEmpty)
       },
       test("every prefix of valid input is refused, never thrown") {
         val valid  = List(

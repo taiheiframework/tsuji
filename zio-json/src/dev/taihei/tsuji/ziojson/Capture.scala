@@ -10,8 +10,9 @@ import zio.json.ast.Json
 // The only symbols of zio.json.internal this module uses (ADR 0006, J10): a decoder of its own
 // must read from a RetractReader, and an encoder of its own writes into a Write. Both are named
 // in the signatures of JsonDecoder.unsafeDecode and JsonEncoder.unsafeEncode, so no decoder or
-// encoder can avoid them. Of RetractReader this module calls read, readChar, nextNonWhitespace
-// and retract; of Write, write(String).
+// encoder can avoid them. Through a RetractReader this module calls read, readChar and
+// nextNonWhitespace, which are declared on its parent OneCharReader, and retract, the one method
+// RetractReader declares itself; of Write it calls write(String).
 import zio.json.internal.{RetractReader, Write}
 
 import dev.taihei.tsuji.{JsonTree, JsonTreeReader}

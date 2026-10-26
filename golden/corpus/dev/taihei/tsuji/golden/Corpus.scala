@@ -372,6 +372,10 @@ object Corpus:
     "NaN",
     "Infinity",
     "-Infinity",
+    // Either side of the reader's fast path for short integers: 18 digits are read there, 19
+    // through jsoniter-scala.
+    "-" + "9" * 18,
+    "1" + "0" * 18,
   )
 
   // Inputs read as a Message, a Displayable, a Text and a legacy.Message. None reaches a bound

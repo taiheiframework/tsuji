@@ -6,7 +6,7 @@ object Golden501:
 
   val platform = "Scala.js"
 
-  // 1221 entries.
+  // 1229 entries.
   lazy val entries: Map[String, String] =
     List(part0, part1, part2, part3, part4, part5, part6, part7, part8, part9, part10, part11, part12).flatten.toMap
 
@@ -1204,6 +1204,14 @@ object Golden501:
       "displayable|number 59 (-Infinity)" -> "refused",
       "text|number 59 (-Infinity)" -> "refused",
       "legacy|number 59 (-Infinity)" -> "refused",
+      "message|number 60 (-999999999999999999)" -> "{\u0022key\u0022:\u0022no.such\u0022,\u0022args\u0022:{\u0022a\u0022:[-999999999999999999]},\u0022text\u0022:\u0022T\u0022}",
+      "displayable|number 60 (-999999999999999999)" -> "message {\u0022key\u0022:\u0022no.such\u0022,\u0022args\u0022:{\u0022a\u0022:[-999999999999999999]},\u0022text\u0022:\u0022T\u0022}",
+      "text|number 60 (-999999999999999999)" -> "refused",
+      "legacy|number 60 (-999999999999999999)" -> "refused",
+      "message|number 61 (1000000000000000000)" -> "{\u0022key\u0022:\u0022no.such\u0022,\u0022args\u0022:{\u0022a\u0022:[1000000000000000000]},\u0022text\u0022:\u0022T\u0022}",
+      "displayable|number 61 (1000000000000000000)" -> "message {\u0022key\u0022:\u0022no.such\u0022,\u0022args\u0022:{\u0022a\u0022:[1000000000000000000]},\u0022text\u0022:\u0022T\u0022}",
+      "text|number 61 (1000000000000000000)" -> "refused",
+      "legacy|number 61 (1000000000000000000)" -> "refused",
       "language|en" -> "\u0022English\u0022",
       "key|en" -> "refused",
       "language|English" -> "\u0022English\u0022",
@@ -1248,6 +1256,10 @@ object Golden501:
       "key key|empty" -> "{}",
       "catalogue|valid" -> "{\u0022format\u0022:1,\u0022language\u0022:\u0022de\u0022,\u0022messages\u0022:{\u0022a.x\u0022:\u0022A {$n}\u0022,\u0022b.x\u0022:\u0022B\u0022}}",
       "catalogue|format 1.0" -> "{\u0022format\u0022:1,\u0022language\u0022:\u0022de\u0022,\u0022messages\u0022:{}}",
+    )
+
+  private def part12: List[(String, String)] =
+    List(
       "catalogue|format 1e0" -> "{\u0022format\u0022:1,\u0022language\u0022:\u0022de\u0022,\u0022messages\u0022:{}}",
       "catalogue|format string" -> "refused",
       "catalogue|format 2" -> "refused",
@@ -1256,10 +1268,6 @@ object Golden501:
       "catalogue|language name" -> "refused",
       "catalogue|language bad" -> "refused",
       "catalogue|language number" -> "refused",
-    )
-
-  private def part12: List[(String, String)] =
-    List(
       "catalogue|no messages" -> "refused",
       "catalogue|messages array" -> "refused",
       "catalogue|bad key" -> "{\u0022format\u0022:1,\u0022language\u0022:\u0022de\u0022,\u0022messages\u0022:{\u0022a.b\u0022:\u0022y\u0022}}\u000ade: Not a message key: 'nokey'",

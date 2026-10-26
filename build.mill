@@ -24,6 +24,10 @@ object V {
   // been on Maven Central for 14 days, never below 2.41.7; the same as taihei-mihon's.
   val jsoniter      = "2.42.0"
   val scalaJavaTime = "2.8.0"
+  // Exact, never a range (ADR 0006, J10): the dependency of taihei-tsuji-zio-json alone, whose
+  // decoders use zio.json.internal. Its tests also run against the newest zio-json on Central
+  // before a release (ZIO_JSON_TEST_VERSION, see the module).
+  val zioJson       = "1.1.1"
 }
 
 // ---------------------------------------------------------------------------
@@ -131,7 +135,13 @@ object release extends Module {
 // fails on a break (`make mima`, part of validate). No baseline, nothing to compare.
 // ---------------------------------------------------------------------------
 trait TaiheiMima extends Mima with PublishModule {
-  def mimaPreviousVersions = Task(release.mimaBaseline().toSeq)
+  // The first release of this artifact: a baseline before it is a version that does not exist.
+  def mimaFirstRelease: String = release.firstRelease
+
+  def mimaPreviousVersions = Task {
+    def numbers(v: String) = v.split('.').toSeq.map(_.toIntOption.getOrElse(0))
+    release.mimaBaseline().toSeq.filter(v => Ordering.Implicits.seqOrdering[Seq, Int].gteq(numbers(v), numbers(mimaFirstRelease)))
+  }
   // The plugin's default fails without a version; no baseline here means nothing to compare.
   def mimaPreviousArtifacts = Task {
     mimaPreviousVersions().map(v => mvn"${pomSettings().organization}:${artifactId()}:$v")
@@ -246,7 +256,9 @@ trait TaiheiPublishSettings extends PublishModule with TaiheiRepositories {
 // every scope, and everything Coursier resolves from them, afresh, as a user's build would, hold
 // no dev.zio module. It reads the POM's own dependency list, not this build's classpath, which
 // has zio-test in the tests. A dependency on another module of this library (the same version)
-// is checked through that module. `make no-zio`, part of validate.
+// is checked through that module. taihei-tsuji-zio-json is the one artifact that may hold
+// dev.zio (zioAllowed): its POM must name zio-json at exactly V.zioJson, and the modules of this
+// library it depends on must still hold none. `make no-zio`, part of validate.
 // ---------------------------------------------------------------------------
 trait NoZio extends PublishModule with TaiheiRepositories {
   def pomModules: T[Seq[String]] = Task {
@@ -263,10 +275,21 @@ trait NoZio extends PublishModule with TaiheiRepositories {
     (listed ++ resolved ++ inner.flatten).distinct.sorted
   }
 
+  def zioAllowed: Boolean = false
+
   def noZio() = Task.Command {
-    val zio = pomModules().filter(_.startsWith("dev.zio:"))
-    if (zio.nonEmpty) sys.error(s"${artifactId()}'s POM brings ${zio.mkString(", ")}")
-    println(s"[no-zio] ${artifactId()}: ${pomModules().size} modules, none of dev.zio")
+    val zio   = pomModules().filter(_.startsWith("dev.zio:"))
+    val inner = Task.sequence(moduleDeps.collect { case m: NoZio => m.pomModules })().flatten.filter(_.startsWith("dev.zio:"))
+    val pins  = publishXmlDeps().filter(_.artifact.group == "dev.zio").map(d => s"${d.artifact.id}:${d.artifact.version}")
+    if (!zioAllowed) {
+      if (zio.nonEmpty) sys.error(s"${artifactId()}'s POM brings ${zio.mkString(", ")}")
+      println(s"[no-zio] ${artifactId()}: ${pomModules().size} modules, none of dev.zio")
+    } else {
+      if (inner.nonEmpty) sys.error(s"${artifactId()}: a module of this library it depends on brings ${inner.mkString(", ")}")
+      if (!pins.toSeq.exists(_.matches(s"zio-json_(sjs1_)?3:${java.util.regex.Pattern.quote(V.zioJson)}")))
+        sys.error(s"${artifactId()}'s POM does not name zio-json ${V.zioJson}: ${pins.mkString(", ")}")
+      println(s"[no-zio] ${artifactId()}: the one artifact with dev.zio, zio-json ${V.zioJson}; its core holds none")
+    }
   }
 }
 
@@ -447,6 +470,79 @@ object tsuji extends Module {
         wsRoot / "golden" / "corpus",
         wsRoot / "jvm" / "test" / "src" / "dev" / "taihei" / "tsuji" / "golden",
       )
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// taihei-tsuji-zio-json (ADR 0006, section 1): zio-json givens for Tsuji's types, which write the
+// core's bytes and read through the core. The one artifact of this library whose POM holds
+// dev.zio. Its tests run against zio-json V.zioJson, or the version ZIO_JSON_TEST_VERSION names
+// (the newest on Central, before a release: a user's build may evict zio-json upward); only the
+// tests, never what is published.
+// ---------------------------------------------------------------------------
+object ziojson extends Module {
+  val Description = "zio-json codecs for the types of taihei-tsuji, writing the same JSON and reading through it; JVM and Scala.js"
+
+  def zioJsonTestVersion = Task.Input(Task.env.get("ZIO_JSON_TEST_VERSION").map(_.trim).filter(_.nonEmpty))
+
+  object jvm extends TaiheiModule {
+    def artifactName       = "taihei-tsuji-zio-json"
+    override def mimaFirstRelease = "6.0.0"
+    override def zioAllowed = true
+
+    def pomSettings = Task(super.pomSettings().copy(description = Description))
+
+    def moduleDeps = Seq(tsuji.jvm)
+
+    def sources = Task.Sources(
+      wsRoot / "zio-json" / "src",
+    )
+
+    def mvnDeps = Seq(
+      mvn"dev.zio::zio-json:${V.zioJson}",
+    )
+
+    object test extends TaiheiTests {
+      def sources = Task.Sources(
+        wsRoot / "zio-json" / "test" / "src",
+        wsRoot / "golden" / "corpus",
+        wsRoot / "shared" / "test" / "src" / "dev" / "taihei" / "tsuji" / "TestJson.scala",
+      )
+
+      def mvnDeps = Task {
+        super.mvnDeps() ++ zioJsonTestVersion().map(v => mvn"dev.zio::zio-json:$v")
+      }
+    }
+  }
+
+  object js extends TaiheiJSModule {
+    def artifactName       = "taihei-tsuji-zio-json"
+    override def mimaFirstRelease = "6.0.0"
+    override def zioAllowed = true
+
+    def pomSettings = Task(super.pomSettings().copy(description = Description))
+
+    def moduleDeps = Seq(tsuji.js)
+
+    def sources = Task.Sources(
+      wsRoot / "zio-json" / "src",
+    )
+
+    def mvnDeps = Seq(
+      mvn"dev.zio::zio-json::${V.zioJson}",
+    )
+
+    object test extends TaiheiJSTests {
+      def sources = Task.Sources(
+        wsRoot / "zio-json" / "test" / "src",
+        wsRoot / "golden" / "corpus",
+        wsRoot / "shared" / "test" / "src" / "dev" / "taihei" / "tsuji" / "TestJson.scala",
+      )
+
+      def mvnDeps = Task {
+        super.mvnDeps() ++ zioJsonTestVersion().map(v => mvn"dev.zio::zio-json::$v")
+      }
     }
   }
 }

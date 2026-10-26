@@ -3,7 +3,7 @@ SHELL = /bin/bash
 # Maven Central paths of every published artifact, used to see whether a version is already
 # released. Central is immutable: a version that is there cannot be published again, and a
 # release publishes all of them or none.
-CENTRAL_PATHS = dev/taihei/taihei-tsuji_3 dev/taihei/taihei-tsuji_sjs1_3 dev/taihei/taihei-tsuji-tools_3
+CENTRAL_PATHS = dev/taihei/taihei-tsuji_3 dev/taihei/taihei-tsuji_sjs1_3 dev/taihei/taihei-tsuji-tools_3 dev/taihei/taihei-tsuji-zio-json_3 dev/taihei/taihei-tsuji-zio-json_sjs1_3
 ARTIFACT_GROUP = dev.taihei
 ARTIFACTS = $(notdir $(CENTRAL_PATHS))
 # Artifacts that publish a POM and nothing else (a relocation); none in this library.
@@ -49,10 +49,10 @@ VERIFY_WAIT = 30
 DISPATCH_WAIT = 5
 BUNDLES = $(CURDIR)/.release-bundles
 # The release key, its public key (repo-guard checks signatures with it alone), and how many
-# signatures a bundle carries: 3 modules x (jar, sources, javadoc, pom).
+# signatures a bundle carries: 5 modules x (jar, sources, javadoc, pom).
 RELEASE_KEY = 5026B2996DDB697EC4630BCF14A733E2A507702F
 RELEASE_KEY_FILE = $(CURDIR)/keys/release-key.asc
-SIGNATURES = 12
+SIGNATURES = 20
 # A security fix goes to Central first, and gets its GitHub Release, and so reaches the family's
 # repository, only after its advisory is published (ADR 0004, section 8). release-prepare
 # EMBARGO=1 writes the new version here, and release-github and publish-repo refuse it until
@@ -80,7 +80,7 @@ DRY_RUN_DIR = $(CURDIR)/out/mill.javalib.SonatypeCentralPublishModule/publishAll
 # showing it, and .lfsconfig and .gitmodules steer what a checkout fetches. This repository needs
 # none of them, so the guard refuses a tracked .gitattributes at any depth, and a tracked
 # .lfsconfig or .gitmodules, whatever their case: the filter check above stays as a second line.
-SOURCE_DIRS = shared jvm js tools tsuji
+SOURCE_DIRS = shared jvm js tools tsuji zio-json ziojson
 # The build definition decides which modules are published: a stray .mill file anywhere in the
 # tree adds one. So the guard covers it too, and every publishing step checks that exactly the
 # modules below are published.
@@ -95,7 +95,7 @@ STRAY_GUARD = STRAY=$$(git status --porcelain --ignored --untracked-files=all --
 	if [ -n "$$FILTERED" ]; then echo "[ERROR] files with a git filter, whose checkout differs from the reviewed content:"; echo "$$FILTERED"; exit 1; fi; \
 	if [ -n "$$ATTRS" ]; then echo "[ERROR] tracked .gitattributes, .lfsconfig or .gitmodules, which change what a checkout holds:"; echo "$$ATTRS"; exit 1; fi
 
-PUBLISHED = tsuji.js.publishArtifacts tsuji.jvm.publishArtifacts tsuji.tools.publishArtifacts
+PUBLISHED = tsuji.js.publishArtifacts tsuji.jvm.publishArtifacts tsuji.tools.publishArtifacts ziojson.js.publishArtifacts ziojson.jvm.publishArtifacts
 # Without a daemon: in publish the environment may hold the Central token (CI), and a daemon this
 # started would keep it for as long as it lives. And without any credential (MILL_BARE).
 MODULE_GUARD = MODULES=$$($(MILL_BARE) --no-daemon resolve __.publishArtifacts | sort | tr '\n' ' ' | sed 's/ $$//'); \

@@ -110,12 +110,12 @@ object GivensSpec extends ZIOSpecDefault:
       )
       val pair = "{\"text\":\"\ud83d\ude00\",\"language\":\"en\",\"x\":{\"\ud83d\ude00\":1}}"
       assertTrue(
-        lone.forall(_.fromJson[Text].left.exists(_.contains("not Unicode"))),
+        lone.forall(_.fromJson[Text].left.exists(_.contains(Capture.NotUnicode))),
         lone.map(Capture.isUnicode).count(identity) == 0,
         pair.fromJson[Text] == Right(Text("\ud83d\ude00", Language.English)),
       )
     },
-    test("4 MB of numbers just under the bound are read in time that grows with them") {
+    test("4 MB of numbers at the length bound are read in time that grows with them") {
       val near   = "0." + "0" * (JsonTreeReader.MaxNumberLength - 3) + "1"
       val many   = List.fill(4 * 1024 * 1024 / (near.length + 1))(near).mkString("[", ",", "]")
       val input  = s"""{"text":"a","language":"en","x":$many}"""

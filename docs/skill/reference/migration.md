@@ -8,7 +8,7 @@ deprecated, until 7.0.0. 5.0.x gets security fixes for 12 months after 6.0.0.
 
 ### Dependencies
 
-`taihei-tsuji` brings only jsoniter-scala-core (and scala-java-time on Scala.js). zio-json, zio,
+`taihei-tsuji` brings only jsoniter-scala-core (and scala-java-time with its tzdb on Scala.js). zio-json, zio,
 zio-streams and what they bring leave the classpath: code that used them without its own
 dependency adds one.
 
@@ -40,7 +40,7 @@ The JSON on the wire and in catalogue files does not change, and data written by
 as before. The exceptions, listed in the 6.0.0 release notes: an unpaired surrogate is written as
 U+FFFD; a `Long.MinValue` number on the JVM is written as `BigDecimal.toString` writes it; an
 escape of an unpaired surrogate, a number with a leading zero or a bare decimal point, and content
-after the value are refused; a string is at most the caller's `ReaderConfig.maxCharBufSize` long;
+after the value (in the core's codecs, under the default `ReaderConfig`) are refused; a string is at most the caller's `ReaderConfig.maxCharBufSize` long;
 through the module, malformed UTF-8 from bytes reads as U+FFFD.
 
 ### `Language.locale`

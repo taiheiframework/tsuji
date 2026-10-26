@@ -188,7 +188,8 @@ shipped.localize(Language("de"))   // 3 items shipped on 23. Oktober 2026
 
 ## From the platform locale
 
-A `Language` is a BCP 47 tag on every platform, and its JSON form is that tag. The class holds no
+A `Language` is a BCP 47 tag on every platform, and its JSON form is that tag, or a built-in's name
+(`"English"`); both forms are read. The class holds no
 platform locale type: on the JVM `java.util.Locale` appears only in the companion, as the argument
 of `fromLocale` and the result of `locale`.
 
@@ -473,6 +474,8 @@ Orders.cancelled.toJson(using TsujiZioJson.messageEncoder(withText = false))
 - Decoding a `Message` or a `Displayable` needs a `Catalogues` in scope; encoding needs none.
 - A value that is already a zio-json AST (`.as[Message]`) is checked against the same bounds
   before it is decoded.
+- What follows the value is zio-json's to decide: `fromJson` ignores it, where the core's codecs
+  under jsoniter-scala's default `ReaderConfig` refuse it.
 - A value is read whole, members it does not use included, and held at a few times its length
   while it is decoded; no string in it has a length bound of its own, because no zio-json entry
   point has a length setting. Bound the input you read: a limit on a request's body, or `take` on
@@ -491,7 +494,7 @@ in Tsuji's own codecs, whatever `ReaderConfig` you read with:
   objects deep (a catalogue 16), without recursion (a nested message takes two levels, a list
   around it one more, so the 8 levels of messages below fit with room to spare), and a number in
   a message, a text or a catalogue is at most 1100 characters long with an exponent of at most 9
-  digits (leading zeros not counted);
+  digits (leading zeros not counted) and a mantissa below 256 bits (about 77 digits);
   messages nest at most 8 deep, the kept arguments of a message with an unknown key at most 16
   levels and 100000 values, a list holds at most 10000 elements, a 4.x
   message brings at most 1000 templates and 1000 arguments of at most 64K characters, a
@@ -573,7 +576,8 @@ receives security fixes for 12 months after the release of 6.0.0.
 
 ### Dependencies
 
-`taihei-tsuji` depends on jsoniter-scala-core and, on Scala.js, scala-java-time, and on nothing
+`taihei-tsuji` depends on jsoniter-scala-core and, on Scala.js, scala-java-time (with its tzdb),
+and on nothing
 else at run time: zio-json, zio, zio-streams and the libraries they bring are no longer on your
 classpath through Tsuji. If your code uses ZIO, `zio.Chunk` or zio-json without depending on them
 itself, add the dependency.
@@ -605,7 +609,8 @@ a program that only writes passes `Catalogues()`. See [Codecs: jsoniter-scala](#
   - `Message`: `Message.encoder(withText)`, `JsonEncoder`, `JsonDecoder`, `JsonCodec`;
   - `legacy.Message`: `JsonCodec`, and the codecs of `legacy.MessageArg`, which nothing outside
     Tsuji needs.
-- **Added**: the `JsonValueCodec` and `JsonKeyCodec` givens of the table above, and
+- **Added**: the `JsonValueCodec` and `JsonKeyCodec` givens listed under
+  [Codecs: jsoniter-scala](#codecs-jsoniter-scala), and
   `Message.codec(withText)`, which takes a `Catalogues`.
 - **Given names change** with the types, for code that names a given:
   `Language.given_JsonCodec_Language` becomes `Language.given_JsonValueCodec_Language`.

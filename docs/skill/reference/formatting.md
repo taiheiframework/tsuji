@@ -24,13 +24,15 @@ format through templates (`:number`, `:integer`, `:datetime`, `:date`, `:time`) 
 
 ```
 shared/src/dev/taihei/tsuji/          Language, MessageFamily, Message/Text, MessageArg, Catalogue(s), MessageFormat2, CoreMessages, the macro
-shared/src/dev/taihei/tsuji/legacy/   the 4.x Message, deprecated until 6.0.0
+shared/src/dev/taihei/tsuji/legacy/   the 4.x Message, deprecated until 7.0.0
 shared/resources/META-INF/taihei-tsuji/   CoreMessages' Dutch and French catalogues
 jvm/src, js/src                      platform formatters; ClasspathCatalogues (JVM), CatalogueLoader (JS)
 tools/src                            taihei-tsuji-tools: ExportCatalogues
+zio-json/src                         taihei-tsuji-zio-json: TsujiZioJson
 ```
 
 - `make validate`: scalafix, scalafmt, compile, tests on the JVM and Node, MiMa against the newest
   release of the current major line.
 - Released from the Makefile (`make release-prepare TYPE=...`, `make release-finalize`), the
-  version from the git tag; one release publishes `taihei-tsuji` and `taihei-tsuji-tools`.
+  version from the git tag; one release publishes `taihei-tsuji`, `taihei-tsuji-zio-json` and
+  `taihei-tsuji-tools`.

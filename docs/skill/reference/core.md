@@ -55,9 +55,10 @@ The class `Language` holds no platform locale type; on the JVM `java.util.Locale
 the companion (`fromLocale`, `locale`). In JavaScript an `Intl.Locale` is read by its tag:
 `Language.parse(intlLocale.toString)`.
 
-Codecs (given): `JsonCodec`, `JsonEncoder` and `JsonDecoder[Language]`, and
-`JsonFieldEncoder`/`JsonFieldDecoder` (so `Language` works as a JSON map key). A built-in is written by
-its name (`"English"`), any other language by its tag (`"de"`); both forms are read.
+Codecs (given, jsoniter-scala): `JsonValueCodec[Language]` and `JsonKeyCodec[Language]` (so
+`Language` works as a JSON map key). A built-in is written by its name (`"English"`), any other
+language by its tag (`"de"`); both forms are read. The zio-json codecs are in
+`taihei-tsuji-zio-json` (see JSON below).
 
 ## Message families
 
@@ -128,20 +129,72 @@ given MessageArg[OrderId] = MessageArg.as[OrderId, String](_.value, s => Right(O
 | `Message` | `{"key":"order.shipped","args":{"count":3,"on":"2026-10-23"},"text":"3 items shipped on October 23, 2026"}` |
 | `Text` | `{"text":"Disk full","language":"en"}` |
 
-- Encoders: `given JsonEncoder[Message]` writes `text` (the source-language rendering);
-  `Message.encoder(withText = false)` does not. `JsonEncoder[Text]`, `JsonEncoder[Displayable]`.
-- Decoders need `given Catalogues`: `JsonDecoder[Message]`, `JsonCodec[Message]`,
-  `JsonDecoder[Displayable]`. The key is looked up among the registry's families; an unknown key
-  reads as its `text` (shown as is, re-encoded unchanged), and is an error without one. A missing
-  argument is an error unless it is an `Option`. The 4.x shape reads as a legacy message.
+### jsoniter-scala codecs (the core)
+
+Givens in the companions, no import beyond `com.github.plokhotnyuk.jsoniter_scala.core.*`:
+
+| Type | Givens |
+| --- | --- |
+| `Language`, `MessageKey` | `JsonValueCodec`, `JsonKeyCodec` |
+| `Text` | `JsonValueCodec[Text]` |
+| `Message` | `given (using Catalogues): JsonValueCodec[Message]` (with `text`); `Message.codec(withText: Boolean = true)(using Catalogues)` |
+| `Displayable` | `given (using Catalogues): JsonValueCodec[Displayable]` |
+| `legacy.Message` | `JsonValueCodec[legacy.Message]` |
+
+```scala
+import com.github.plokhotnyuk.jsoniter_scala.core.*
+given Catalogues = Catalogues(Seq(Orders))
+writeToString(Orders.cancelled)                                         // {"key":"order.cancelled","text":"Your order was cancelled"}
+readFromString[Message](json)
+writeToString(Orders.cancelled)(using Message.codec(withText = false))  // {"key":"order.cancelled"}
+```
+
+- One codec type for both directions: writing a `Message` or `Displayable` also needs a
+  `Catalogues` (unused when writing); a program that only writes passes `Catalogues()`.
+- The key is looked up among the registry's families; an unknown key reads as its `text` (shown
+  as is, re-encoded unchanged), and is an error without one. A missing argument is an error unless
+  it is an `Option`. The 4.x shape reads as a legacy message.
+- A decoding error is a `JsonReaderException`, nothing else is thrown. `Catalogue.parse` returns
+  `Left`.
+- Written compactly always, whatever the caller's `WriterConfig` (indentation, `escapeUnicode`).
+  An unpaired surrogate in a string is written as U+FFFD; writing never throws.
+- Reading is strict RFC 8259: an escape of an unpaired surrogate, a number with a leading zero
+  (`01`) or a bare decimal point (`1.`, `-.5`) is an error. Content after the value and the
+  longest string are the caller's `ReaderConfig` (`checkForEndOfInput`, `maxCharBufSize`).
+  `readFromString` turns an unpaired surrogate character in the input `String` into `?`.
+
+### zio-json codecs: `taihei-tsuji-zio-json`
+
+```scala
+import zio.json.*
+import dev.taihei.tsuji.ziojson.TsujiZioJson.given   // or `export TsujiZioJson.given` in your codec object
+Orders.cancelled.toJson
+json.fromJson[Message]                                // needs a given Catalogues
+Orders.cancelled.toJson(using TsujiZioJson.messageEncoder(withText = false))
+```
+
+- `TsujiZioJson` holds `JsonEncoder`/`JsonDecoder`/`JsonCodec` for `Language`, `Text`, `Message`
+  (decoder and codec need a `Catalogues`), `JsonEncoder`/`JsonDecoder` for `Displayable` and
+  `MessageKey`, `JsonCodec[legacy.Message]`, `JsonFieldEncoder`/`JsonFieldDecoder` for `Language`
+  and `MessageKey`, and `messageEncoder(withText)`.
+- Same bytes as the core, read through the core: same bounds, same strict grammar. A zio-json AST
+  (`.as[Message]`) is checked against the same depth and number bounds (a scale within
+  ±1000001100) before it is decoded.
+- A value is read whole and held at a few times its length; strings have no length bound of their
+  own. Bound the input (request body limit, `take` on a stream).
+- zio-json's byte and stream readers turn malformed UTF-8 into U+FFFD before Tsuji sees it; the
+  core's codecs on the same bytes refuse it.
+
+### Bounds and rules
+
 - Limits: the JSON read at most 64 levels of arrays and objects deep and a number in it at most
   1100 characters long with an exponent of at most 9 digits, leading zeros not counted (beyond
-  either is a decoding error, on both platforms; a `Json` tree decoded with `.as` is held to the
-  same depth and to numbers of a scale within ±1000001100), 8 levels of nested messages, 10000 list
-  elements; the kept arguments of an unknown key at most 16 levels and 100000 values, with at most
-  16 names of one object sharing a hash code.
+  either is a decoding error, on both platforms, under any `ReaderConfig`), 8 levels of nested
+  messages, 10000 list elements; the kept arguments of an unknown key at most 16 levels and
+  100000 values, with at most 16 names of one object sharing a hash code. Members the decoder does
+  not use are read and checked too.
 - Rules on the wire: a key is a contract; adding an argument means a new key unless it is an
-  `Option`; removing or retyping one means a new key; the envelope is format 1 of 5.x.
+  `Option`; removing or retyping one means a new key; the envelope is format 1, in 5.x and 6.x.
 - Rule in Scala, for a family a library publishes: its definitions' arguments are API. Adding one
   (even an `Option`), removing, renaming or retyping one breaks code compiled against the older
   version at run time, which MiMa cannot see. Within a major, add a new val with a new key.

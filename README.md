@@ -13,18 +13,22 @@ taihei-i18n: see [Coming from taihei-i18n 4.x](#coming-from-taihei-i18n-4x).
 
 Published on Maven Central under `dev.taihei`:
 
-| Artifact                | Platform | Purpose                                                       |
-| ----------------------- | -------- | ------------------------------------------------------------- |
-| `taihei-tsuji`          | JVM      | The library on `java.time` / `java.text`.                     |
-| `taihei-tsuji_sjs1`     | Scala.js | The same API, formatting via the browser `Intl` API.          |
-| `taihei-tsuji-tools`    | JVM      | A program that exports catalogue files for translators and browsers. |
+| Artifact                     | Platform | Purpose                                                       |
+| ---------------------------- | -------- | ------------------------------------------------------------- |
+| `taihei-tsuji`               | JVM      | The library on `java.time` / `java.text`, with jsoniter-scala codecs. |
+| `taihei-tsuji_sjs1`          | Scala.js | The same API, formatting via the browser `Intl` API.          |
+| `taihei-tsuji-zio-json`      | JVM      | zio-json codecs for Tsuji's types, for applications that use zio-json. |
+| `taihei-tsuji-zio-json_sjs1` | Scala.js | The same codecs on Scala.js.                                  |
+| `taihei-tsuji-tools`         | JVM      | A program that exports catalogue files for translators and browsers. |
 
 ```scala
-mvn"dev.taihei::taihei-tsuji:5.0.2"          // Mill, JVM
-mvn"dev.taihei::taihei-tsuji::5.0.2"         // Mill, Scala.js
-mvn"dev.taihei::taihei-tsuji-tools:5.0.2"    // Mill, the export program
-"dev.taihei" %%% "taihei-tsuji" % "5.0.2"      // sbt
-"dev.taihei" %% "taihei-tsuji-tools" % "5.0.2" // sbt
+mvn"dev.taihei::taihei-tsuji:6.0.0"             // Mill, JVM
+mvn"dev.taihei::taihei-tsuji::6.0.0"            // Mill, Scala.js
+mvn"dev.taihei::taihei-tsuji-zio-json:6.0.0"    // Mill, zio-json codecs (JVM; :: for Scala.js)
+mvn"dev.taihei::taihei-tsuji-tools:6.0.0"       // Mill, the export program
+"dev.taihei" %%% "taihei-tsuji" % "6.0.0"          // sbt
+"dev.taihei" %%% "taihei-tsuji-zio-json" % "6.0.0" // sbt, zio-json codecs
+"dev.taihei" %% "taihei-tsuji-tools" % "6.0.0"     // sbt
 ```
 
 5.0.2 is a security release: if you use 5.0.0 or 5.0.1, upgrade. See the advisory
@@ -34,10 +38,15 @@ and the [release notes](RELEASE_5_0_2.md).
 The `shared/` sources compile on both platforms; `jvm/` and `js/` hold only the
 platform-specific formatters and the loading of catalogues.
 
-5.0.0 is the first release under the name Taihei Tsuji, and a major release: see
+6.0.0 is a major release: Tsuji's JSON codecs are jsoniter-scala's now, the zio-json codecs move
+to `taihei-tsuji-zio-json`, and ZIO leaves the core's dependencies. See
+[Coming from Tsuji 5.x](#coming-from-tsuji-5x). The 5.0.x line lives on branch `5.0.x` of this
+repository and receives security fixes for 12 months after the release of 6.0.0.
+
+5.0.0 was the first release under the name Taihei Tsuji: see
 [Coming from taihei-i18n 4.x](#coming-from-taihei-i18n-4x). The 4.x line keeps its name,
-`dev.taihei::taihei-i18n`, and lives on branch `4.0.x` of this repository: taihei-i18n 4.0.x
-receives security fixes for 12 months after the release of Taihei Tsuji 5.0.0.
+`dev.taihei::taihei-i18n`, and lives on branch `4.0.x`: taihei-i18n 4.0.x receives security fixes
+for 12 months after the release of Taihei Tsuji 5.0.0.
 
 ## Stack
 
@@ -45,7 +54,9 @@ receives security fixes for 12 months after the release of Taihei Tsuji 5.0.0.
   (`-java-output-version:17`), and CI runs the tests on Java 17 and on Java 25.
 - Mill 1.3.1
 - Scala 3.9.0 (LTS) · Scala.js 1.22.0
-- ZIO 2.1.27 (`zio-json` 1.1 for codecs, `zio-test`)
+- jsoniter-scala-core 2.x, the core's one runtime dependency (JSON), pinned to an exact version
+- zio-json 1.1.1, only in `taihei-tsuji-zio-json`
+- zio-test 2.1.27, in the tests only
 - scala-java-time 2.8 (JS `java.time` support)
 
 The build resolves from Coursier's defaults (the local Ivy repository, then Maven Central), then
@@ -100,8 +111,8 @@ repo1.maven.org answers 200 for it, push `main` and the tag; once its advisory i
 `make central-bundle` (the bundle from Central's own files), `make release-github` and
 `make publish-repo`.
 
-One release publishes `taihei-tsuji` (JVM and Scala.js) and `taihei-tsuji-tools` with the same
-version, as one signed bundle, built and signed once. Its zip and `SHA256SUMS`, the SHA-256 of
+One release publishes `taihei-tsuji` and `taihei-tsuji-zio-json` (each for the JVM and Scala.js)
+and `taihei-tsuji-tools` with the same version, as one signed bundle, built and signed once. Its zip and `SHA256SUMS`, the SHA-256 of
 every file, are kept on an immutable GitHub Release of the tag; that release publishes the
 version. The family's Maven repository is built from those releases alone, so nothing is ever
 uploaded to it, and the next release train takes the same files to Maven Central. Both serve
@@ -340,13 +351,13 @@ code cannot be exported). It is an ordinary run step, not a build plugin:
 
 ```scala
 // Mill: a module with the tools on its run classpath
-def runMvnDeps = Seq(mvn"dev.taihei::taihei-tsuji-tools:5.0.2")
+def runMvnDeps = Seq(mvn"dev.taihei::taihei-tsuji-tools:6.0.0")
 // ./mill app.runMain dev.taihei.tsuji.tools.ExportCatalogues --out out/tsuji --scan com.acme --scan dev.taihei.tsuji
 ```
 
 ```scala
 // sbt: run it forked, so that its classpath is the application's
-libraryDependencies += "dev.taihei" %% "taihei-tsuji-tools" % "5.0.2"
+libraryDependencies += "dev.taihei" %% "taihei-tsuji-tools" % "6.0.0"
 Compile / run / fork := true
 // sbt "runMain dev.taihei.tsuji.tools.ExportCatalogues --out target/tsuji --scan com.acme --scan dev.taihei.tsuji"
 ```
@@ -380,16 +391,103 @@ language:
 ```
 
 - A number is a number, a date an ISO 8601 string, a language its tag.
-- `Message.encoder(withText = false)` leaves out `text`.
-- Reading a message needs its definition: the decoder (`given` with a `Catalogues` in scope) looks
-  up the key among the registry's families to read the arguments with their types. **Register
-  every family whose messages you read** (`Catalogues(Seq(...))` or `register`): a key the
-  registry does not know reads as its `text`, shown as it is in every language, and is an error
-  without one.
+- Reading a message needs its definition: the decoder looks up the key among the families of the
+  `Catalogues` in scope to read the arguments with their types. **Register every family whose
+  messages you read** (`Catalogues(Seq(...))` or `register`): a key the registry does not know
+  reads as its `text`, shown as it is in every language, and is an error without one.
 - A `Text` is `{"text":"Disk full","language":"en"}`.
 - The 4.x shape (`args`, `namedArgs`, `translationTemplates`) is still read, as a legacy message
   under the key `legacy`, so stored 4.x JSON and a 4.x peer keep working.
-- Input is bounded: the JSON of a message or a text is read at most 64 levels of arrays and
+
+### Codecs: jsoniter-scala
+
+Tsuji's codecs are [jsoniter-scala](https://github.com/plokhotnyuk/jsoniter-scala)'s
+`JsonValueCodec` and `JsonKeyCodec`, as givens in the companions of the types, so no import is
+needed beyond jsoniter-scala's own `core.*`:
+
+| Type | Givens |
+| --- | --- |
+| `Language` | `JsonValueCodec[Language]`, `JsonKeyCodec[Language]` |
+| `MessageKey` | `JsonValueCodec[MessageKey]`, `JsonKeyCodec[MessageKey]` |
+| `Text` | `JsonValueCodec[Text]` |
+| `Message` | `JsonValueCodec[Message]` with a `Catalogues` in scope; `Message.codec(withText)` |
+| `Displayable` | `JsonValueCodec[Displayable]` with a `Catalogues` in scope |
+| `legacy.Message` | `JsonValueCodec[legacy.Message]` |
+
+```scala
+import com.github.plokhotnyuk.jsoniter_scala.core.*
+import dev.taihei.tsuji.*
+
+given Catalogues = Catalogues(Seq(Orders))
+
+val json    = writeToString(Orders.cancelled) // {"key":"order.cancelled","text":"Your order was cancelled"}
+val message = readFromString[Message](json)    // the same message
+writeToString(Orders.cancelled)(using Message.codec(withText = false)) // without "text"
+```
+
+- A codec is one type for both directions, so writing a `Message` or a `Displayable` also asks for
+  a `Catalogues`, although writing does not use it. A program that only writes passes
+  `Catalogues()`.
+- A decoding error is a `JsonReaderException`, as with every jsoniter-scala codec; the codecs
+  throw nothing else on any input. `Catalogue.parse` returns a `Left` instead.
+- Tsuji's values are always written compactly, inside your own codecs too: the indentation and
+  `escapeUnicode` of your `WriterConfig` do not reach inside them. A string with an unpaired
+  surrogate is written with U+FFFD, the replacement character, in its place, so writing never
+  throws.
+- Reading follows the JSON grammar of RFC 8259 strictly. Your `ReaderConfig` decides what
+  jsoniter-scala's entry points decide: whether content after the value is refused
+  (`checkForEndOfInput`, on by default) and how long a string may be (`maxCharBufSize`, 4,194,304
+  characters by default). `readFromString` encodes the `String` as UTF-8 before it reads it, so an
+  unpaired surrogate character in the `String` itself (not an escape) reads as `?`; input read
+  from bytes cannot hold such a character.
+
+### Codecs: zio-json
+
+`taihei-tsuji-zio-json` holds zio-json codecs for the same types in one object, `TsujiZioJson`.
+They write the same bytes as the jsoniter-scala codecs and read through them, with the same
+bounds:
+
+| Type | Givens in `TsujiZioJson` |
+| --- | --- |
+| `Language` | `JsonEncoder`, `JsonDecoder`, `JsonCodec`, `JsonFieldEncoder`, `JsonFieldDecoder` |
+| `MessageKey` | `JsonEncoder`, `JsonDecoder`, `JsonFieldEncoder`, `JsonFieldDecoder` |
+| `Text` | `JsonEncoder`, `JsonDecoder`, `JsonCodec` |
+| `Message` | `JsonEncoder`; `JsonDecoder` and `JsonCodec` with a `Catalogues` in scope; `messageEncoder(withText)` |
+| `Displayable` | `JsonEncoder`; `JsonDecoder` with a `Catalogues` in scope |
+| `legacy.Message` | `JsonCodec` |
+
+```scala
+import zio.json.*
+import dev.taihei.tsuji.*
+import dev.taihei.tsuji.ziojson.TsujiZioJson.given
+
+given Catalogues = Catalogues(Seq(Orders))
+
+Orders.cancelled.toJson // the same JSON as above
+json.fromJson[Message]  // Right(the message)
+Orders.cancelled.toJson(using TsujiZioJson.messageEncoder(withText = false))
+```
+
+- A codec object of your own makes them its own with `export TsujiZioJson.given`, so that derived
+  codecs of your types find them.
+- Decoding a `Message` or a `Displayable` needs a `Catalogues` in scope; encoding needs none.
+- A value that is already a zio-json AST (`.as[Message]`) is checked against the same bounds
+  before it is decoded.
+- A value is read whole, members it does not use included, and held at a few times its length
+  while it is decoded; no string in it has a length bound of its own, because no zio-json entry
+  point has a length setting. Bound the input you read: a limit on a request's body, or `take` on
+  a stream.
+- zio-json's readers of bytes and streams replace malformed UTF-8 with U+FFFD before any decoder
+  runs, so the module reads such input with U+FFFD in place, where the core's codecs reading the
+  same bytes refuse it. To refuse it with the module, decode the bytes to a `String` with a
+  decoder that reports errors first, or read the bytes with the core's codecs.
+
+### Bounds
+
+JSON of messages and texts is input your application did not compile, so reading it is bounded
+in Tsuji's own codecs, whatever `ReaderConfig` you read with:
+
+- The JSON of a message or a text is read at most 64 levels of arrays and
   objects deep (a catalogue 16), without recursion (a nested message takes two levels, a list
   around it one more, so the 8 levels of messages below fit with room to spare), and a number in
   a message, a text or a catalogue is at most 1100 characters long with an exponent of at most 9
@@ -402,6 +500,9 @@ language:
   object in the kept arguments of an unknown message, in which more than 16 keys share one hash
   code is refused: real keys almost never share one, and maps of keys that do cost time out of
   proportion to their size.
+- Every member is read and checked, also one the decoder does not use, and then dropped.
+- An escape of an unpaired surrogate (`"\ud800"`) is a decoding error, and so is a number with a
+  leading zero (`01`) or a decimal point without a digit on one side (`1.`, `-.5`).
 - On the JVM a registry looks a family's file for a language up on the classpath once and keeps
   it; of the languages without a file it remembers the latest 4096. Narrow a language from a
   request header to the languages you support before you show messages in it, or each new tag
@@ -415,7 +516,8 @@ Versioning rules for keys, on the wire:
 - Adding an argument means a new key, unless the new argument is an `Option`: a reader that does
   not have it sees `None`.
 - Removing or retyping an argument means a new key.
-- The envelope above is format 1 of taihei-tsuji 5.x. A change to it would be a major release.
+- The envelope above is format 1, the same in taihei-tsuji 5.x and 6.x. A change to it would be a
+  major release.
   There is no version field per message.
 
 And in Scala, for a family that a library publishes: a definition's arguments are its API. Code
@@ -463,6 +565,66 @@ In Scala.js the Dutch and French files reach the browser through the export, lik
 
 ## Coming from Tsuji 5.x
 
+6.0.0 changes three things: Tsuji's JSON codecs are jsoniter-scala's, with the zio-json codecs in
+a module of their own; ZIO leaves the dependencies of the core; and `Language.locale` leaves the
+shared class. The JSON itself does not change, apart from the cases listed under
+[JSON on the wire](#json-on-the-wire). `legacy.Message` stays, deprecated, until 7.0.0. Tsuji 5.0.x
+receives security fixes for 12 months after the release of 6.0.0.
+
+### Dependencies
+
+`taihei-tsuji` depends on jsoniter-scala-core and, on Scala.js, scala-java-time, and on nothing
+else at run time: zio-json, zio, zio-streams and the libraries they bring are no longer on your
+classpath through Tsuji. If your code uses ZIO, `zio.Chunk` or zio-json without depending on them
+itself, add the dependency.
+
+### If you use zio-json
+
+1. Add `dev.taihei::taihei-tsuji-zio-json:6.0.0` next to `taihei-tsuji`.
+2. Add `import dev.taihei.tsuji.ziojson.TsujiZioJson.given` where a zio-json codec of a Tsuji type
+   is summoned or derived, or `export TsujiZioJson.given` in a codec object of your own.
+3. `Message.encoder(withText = false)` becomes `TsujiZioJson.messageEncoder(withText = false)`.
+
+The module writes the bytes 5.x wrote and reads what 5.x read, with the differences below. Its
+givens have the same types as the 5.x givens, but they live in `TsujiZioJson`, not in the
+companions.
+
+### If you use jsoniter-scala, or start with JSON now
+
+The companions hold `JsonValueCodec` and `JsonKeyCodec` givens; no import is needed. Decoding a
+`Message` or a `Displayable` needs a `Catalogues` in scope, as before, and so does encoding one:
+a program that only writes passes `Catalogues()`. See [Codecs: jsoniter-scala](#codecs-jsoniter-scala).
+
+### What was removed or changed in the API
+
+- **Removed from the companions**, the zio-json givens:
+  - `Language`: `JsonEncoder`, `JsonDecoder`, `JsonCodec`, `JsonFieldEncoder`, `JsonFieldDecoder`;
+  - `MessageKey`: `JsonEncoder`, `JsonDecoder`, `JsonFieldEncoder`, `JsonFieldDecoder`;
+  - `Text`: `JsonEncoder`, `JsonDecoder`, `JsonCodec`;
+  - `Displayable`: `JsonEncoder`, `JsonDecoder`;
+  - `Message`: `Message.encoder(withText)`, `JsonEncoder`, `JsonDecoder`, `JsonCodec`;
+  - `legacy.Message`: `JsonCodec`, and the codecs of `legacy.MessageArg`, which nothing outside
+    Tsuji needs.
+- **Added**: the `JsonValueCodec` and `JsonKeyCodec` givens of the table above, and
+  `Message.codec(withText)`, which takes a `Catalogues`.
+- **Given names change** with the types, for code that names a given:
+  `Language.given_JsonCodec_Language` becomes `Language.given_JsonValueCodec_Language`.
+- **Decoding errors** are jsoniter-scala's `JsonReaderException`, with other texts than
+  zio-json's. Through the module they stay zio-json's `Left`.
+- **Writing**: Tsuji's values are written compactly, also inside a `WriterConfig` that indents.
+- **Binary**: a library compiled against Tsuji 5.x that uses any of the removed members fails
+  against 6.0.0 until it is compiled again (a `NoSuchMethodError` on the JVM, a linking error on
+  Scala.js).
+
+### JSON on the wire
+
+The JSON on the wire and in catalogue files does not change, and data written by 4.x or 5.x reads
+as before. The exceptions are unpaired surrogates, a `Long.MinValue` number written on the JVM,
+and input that is not strict JSON (a leading zero in a number, content after the value). The
+release notes of 6.0.0 list each one.
+
+### `Language.locale`
+
 6.0.0 takes the JDK's locale type out of the shared `Language`, so that the class is the same on
 every platform. `language.locale` moves from the class to an extension method in the JVM
 companion. What that means for a caller:
@@ -502,7 +664,7 @@ Tsuji 5 with its own taihei-i18n jar. Its `dev.taihei.i18n.Language` and the
 `dev.taihei.tsuji.Language` of 5.x are different types.
 
 5.0.0 also replaces the 4.x `Message`, which carried every translation, with typed families. The
-4.x type stays, unchanged and deprecated, as `dev.taihei.tsuji.legacy.Message` until 6.0.0.
+4.x type stays, unchanged and deprecated, as `dev.taihei.tsuji.legacy.Message` until 7.0.0.
 Moving to 5.0.0 starts with the new coordinates and a change of imports:
 
 ```sh
@@ -540,7 +702,7 @@ Then move the messages to families, one family at a time:
 | CoreMessages in Dutch and French on Scala.js, inline in 4.x | catalogue files now: export them (`--scan dev.taihei.tsuji`) and load them with `CatalogueLoader`, or a browser shows English |
 | the case class `Message(args, namedArgs, translationTemplates)`, `copy`, its fields | only on `legacy.Message` |
 | `message.nonEmpty` | `message.localize(language).nonEmpty` |
-| `given JsonCodec[Message]`, needing nothing | `JsonEncoder[Message]` as before; `JsonDecoder` and `JsonCodec[Message]` need a `given Catalogues` where they are summoned or derived |
+| `given JsonCodec[Message]`, needing nothing | `JsonEncoder[Message]` as before; `JsonDecoder` and `JsonCodec[Message]` need a `given Catalogues` where they are summoned or derived (in 6.0.0 these are in `taihei-tsuji-zio-json`: see [Coming from Tsuji 5.x](#coming-from-tsuji-5x)) |
 | `CoreMessages.Exceptions.revisionMismatch(expected, actual)` | `CoreMessages.Exceptions.revisionMismatchBetween(expected, actual)` |
 | `CoreMessages.Validation.formatErrors(Map[String, List[Message]])` | `formatErrors(Map[String, List[Displayable]])`; each field error is shown in the reader's language |
 | `!!unknown message!!` | gone: the source language always has the key |
@@ -563,7 +725,8 @@ application shows them in English until it exports them and loads them like its 
 taihei-i18n 4.x has the API of `com.edoframework::edo-i18n:3.0.0` under its new name, with the
 package `dev.taihei.i18n` where it was `com.edoframework.i18n`; coming from
 `fish.genius::genius-i18n:2.0.0`, the package was `genius.i18n`. Move to the newest
-taihei-i18n 4.0.x first, then to Taihei Tsuji 5.0.0 as [above](#coming-from-taihei-i18n-4x).
+taihei-i18n 4.0.x first, then to Taihei Tsuji 5 as [above](#coming-from-taihei-i18n-4x), and on to
+6.0.0 as [Coming from Tsuji 5.x](#coming-from-tsuji-5x) says.
 3.0.0 also moved to Scala 3.9 (LTS), so your build needs Scala 3.9 or later, to `zio-json` 1.1
 instead of 0.9, and to the Apache License 2.0.
 

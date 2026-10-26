@@ -1,9 +1,9 @@
 ---
 name: taihei-tsuji
-description: How to use Taihei Tsuji 5.x (dev.taihei::taihei-tsuji, formerly taihei-i18n, edo-i18n and genius-i18n), the type-safe internationalization library for Scala 3 on the JVM and Scala.js. Apply when writing or reviewing Scala that uses dev.taihei.tsuji.* - message families (MessageFamily, message[...]), Message, Text, Displayable, MessageArg, Catalogue and Catalogues, the fallback chain, catalogue files on the classpath or fetched with CatalogueLoader, Catalogues.verify in tests, the taihei-tsuji-tools export, the JSON wire format, ICU MessageFormat 2.0 templates, CoreMessages, Language, or migrating from taihei-i18n 4.x (dev.taihei.i18n) and its Message (now dev.taihei.tsuji.legacy.Message).
+description: How to use Taihei Tsuji 6.x (dev.taihei::taihei-tsuji, formerly taihei-i18n, edo-i18n and genius-i18n), the type-safe internationalization library for Scala 3 on the JVM and Scala.js. Apply when writing or reviewing Scala that uses dev.taihei.tsuji.* - message families (MessageFamily, message[...]), Message, Text, Displayable, MessageArg, Catalogue and Catalogues, the fallback chain, catalogue files on the classpath or fetched with CatalogueLoader, Catalogues.verify in tests, the taihei-tsuji-tools export, the JSON wire format and its jsoniter-scala codecs, the zio-json codecs of taihei-tsuji-zio-json (TsujiZioJson), ICU MessageFormat 2.0 templates, CoreMessages, Language, or migrating from Tsuji 5.x or from taihei-i18n 4.x (dev.taihei.i18n) and its Message (now dev.taihei.tsuji.legacy.Message).
 ---
 
-# Taihei Tsuji 5.x
+# Taihei Tsuji 6.x
 
 A type-safe i18n library for Scala 3, cross-compiled for the JVM and Scala.js. Messages are
 defined in Scala as typed **message families**, checked by a macro when the code compiles; their
@@ -11,11 +11,14 @@ translations live inline or in per-language **catalogue files**; a `Message` is 
 typed arguments, so only the reader's language travels and is loaded.
 
 Package `dev.taihei.tsuji`. Artifacts on Maven Central: `dev.taihei::taihei-tsuji` (`taihei-tsuji_3`
-on the JVM, `taihei-tsuji_sjs1_3` on Scala.js) and the JVM-only `dev.taihei::taihei-tsuji-tools`,
-version 5.0.0, Scala 3.9 (LTS), Apache 2.0. Source: <https://github.com/taiheiframework/tsuji>.
-Up to 4.x the library was `dev.taihei::taihei-i18n`, package `dev.taihei.i18n`; that line stays
-under its old name on branch `4.0.x` and gets security fixes for 12 months after Taihei Tsuji
-5.0.0. Use the newest taihei-i18n 4.0.x on the 4.x line.
+on the JVM, `taihei-tsuji_sjs1_3` on Scala.js), `dev.taihei::taihei-tsuji-zio-json` (zio-json
+codecs, package `dev.taihei.tsuji.ziojson`, JVM and Scala.js) and the JVM-only
+`dev.taihei::taihei-tsuji-tools`, version 6.0.0, Scala 3.9 (LTS), Apache 2.0. Source:
+<https://github.com/taiheiframework/tsuji>. The core's one runtime dependency is
+jsoniter-scala-core; ZIO and zio-json come only with `taihei-tsuji-zio-json`. Tsuji 5.0.x gets
+security fixes for 12 months after 6.0.0. Up to 4.x the library was `dev.taihei::taihei-i18n`,
+package `dev.taihei.i18n`; that line stays under its old name on branch `4.0.x` and gets security
+fixes for 12 months after Taihei Tsuji 5.0.0. Use the newest taihei-i18n 4.0.x on the 4.x line.
 
 ## When to use this skill
 
@@ -54,13 +57,15 @@ Orders.shipped(count = 3, on = today).localize(Dutch)  // falls back to English,
 ## Reference index - read the file that matches the task
 
 - **`reference/core.md`**: `Language`, `MessageFamily`, `message`, the macro's checks,
-  `MessageArg`, `Message`, `Text`, `Displayable`, `MessageKey`, the JSON format and key rules.
+  `MessageArg`, `Message`, `Text`, `Displayable`, `MessageKey`, the JSON format, the jsoniter-scala
+  and zio-json codecs, the bounds and the key rules.
 - **`reference/catalogues.md`**: catalogue files, the `Catalogues` registry and its chain, the
   classpath (JVM), `CatalogueLoader` (Scala.js), `verify`, the export tool.
 - **`reference/messageformat2.md`**: the template syntax, functions, `.match`, `validate`.
 - **`reference/coremessages.md`**: the ready-made families.
 - **`reference/formatting.md`**: platform behaviour, cross-platform rules, build and layout.
-- **`reference/migration.md`**: moving from 5.x to 6.0.0 (`Language.locale`), and from 4.x,
+- **`reference/migration.md`**: moving from 5.x to 6.0.0 (the JSON codecs, the zio-json module,
+  ZIO leaving the dependencies, `Language.locale`, the wire differences), and from 4.x,
   constructor by constructor.
 
 ## Top gotchas
@@ -74,7 +79,11 @@ Orders.shipped(count = 3, on = today).localize(Dutch)  // falls back to English,
   a new key unless it is an `Option`. In a family a library publishes, any change to a
   definition's arguments (an `Option` too) is a breaking change: add a new val instead.
 - Decoding a `Message` from JSON needs a `given Catalogues` that knows the family (`Catalogues(Seq(...))`
-  or `register`). An unknown key reads as its `text`.
+  or `register`). An unknown key reads as its `text`. The codecs are jsoniter-scala's
+  `JsonValueCodec` givens in the companions (encoding a `Message` asks for a `Catalogues` too;
+  pass `Catalogues()` when only writing). For zio-json, depend on `taihei-tsuji-zio-json` and
+  `import dev.taihei.tsuji.ziojson.TsujiZioJson.given`; Tsuji 6 has no zio-json givens in its
+  companions.
 - Inline translations are code and end up in the Scala.js bundle; a browser app with many
   languages serves exported files and loads them with `CatalogueLoader`.
 - Completeness of files is checked by `Catalogues.verify` (or `ClasspathCatalogues.verify`) in

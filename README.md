@@ -467,18 +467,21 @@ In Scala.js the Dutch and French files reach the browser through the export, lik
 every platform. `language.locale` moves from the class to an extension method in the JVM
 companion. What that means for a caller:
 
-- **Scala on the JVM:** nothing. `language.locale` compiles unchanged, with no new import.
+- **Scala on the JVM:** nothing, except the note on `import Language.*` below. `language.locale`
+  compiles unchanged, with no new import.
 - **Scala.js:** `language.locale` no longer compiles. Use `language.tag`, or
   `java.util.Locale.forLanguageTag(language.tag)` where the code really needs a
   `java.util.Locale` (scala-java-locales provides it on Scala.js).
 - **Java:** `language.locale()` becomes `Language.locale(language)`, a static method.
-- **Binary, JVM:** the instance method `Language.locale()` is gone, so a library compiled against
-  5.x that calls it fails with a `NoSuchMethodError` until it is compiled again against 6.0.0.
+- **Binary, JVM and Scala.js:** the instance method `Language.locale()` is gone, so a library
+  compiled against 5.x that calls it fails, with a `NoSuchMethodError` on the JVM and a linking
+  error on Scala.js, until it is compiled again against 6.0.0.
 
 `import Language.*`, the usual import for `English`, `Dutch` and `French`, now also brings the name
 `locale` into scope. Code in that scope that refers to a `locale` of its own without qualifying it
-(an inherited member or an outer definition) can get an ambiguity error; qualify that reference,
-for example `this.locale`, or import only the names you use (`import Language.{English, Dutch}`).
+(an inherited member or an outer definition) can get an ambiguity error. Qualify that reference,
+`this.locale` for an inherited member and the owner's name for an outer one, or import only the
+names you use (`import Language.{English, Dutch}`).
 
 ## Coming from taihei-i18n 4.x
 

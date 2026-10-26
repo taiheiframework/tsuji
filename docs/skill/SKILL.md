@@ -47,8 +47,8 @@ Orders.shipped(count = 3, on = today).localize(Dutch)  // falls back to English,
 - `Displayable#localize(language)(using Catalogues)` shows a `Message`, a `Text` or a legacy
   message. Fallback: exact, subtags removed, configured fallbacks, source language. Never throws.
 - A `Language` is a BCP 47 tag on every platform. `Language.fromLocale(java.util.Locale)` and
-  `language.locale` (JVM only) and `Language.preferred` (both platforms) meet the platform's
-  locale; see core.md.
+  `language.locale` (both JVM only) convert from and to the JDK's locale; `Language.preferred`
+  (both platforms) reads the platform's preferred languages. See core.md.
 - Translations: inline pairs (in the Scala.js bundle!) or JSON catalogue files.
 
 ## Reference index - read the file that matches the task

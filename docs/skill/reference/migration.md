@@ -7,14 +7,14 @@ in the companion.
 
 | Caller | 5.x | 6.0.0 |
 | --- | --- | --- |
-| Scala on the JVM | `language.locale` | unchanged, no import needed |
+| Scala on the JVM | `language.locale` | unchanged, no import needed (but see the note on `import Language.*`) |
 | Scala.js | `language.locale` | does not compile: `language.tag`, or `java.util.Locale.forLanguageTag(language.tag)` |
 | Java | `language.locale()` | `Language.locale(language)` |
-| Binary (JVM) | instance method `Language.locale()` | gone: a library compiled against 5.x that calls it needs a rebuild |
+| Binary (JVM and Scala.js) | instance method `Language.locale()` | gone: a library compiled against 5.x that calls it fails (`NoSuchMethodError` on the JVM, a linking error on Scala.js) until it is rebuilt |
 
 `import Language.*` also brings `locale` into scope; an unqualified `locale` of the caller's own
-(inherited, or from an outer scope) can become ambiguous there. Qualify it, or import only the
-names used.
+(inherited, or from an outer scope) can become ambiguous there. Qualify it (`this.locale` for an
+inherited member, the owner's name for an outer one), or import only the names used.
 
 ## Step 0: the new name
 

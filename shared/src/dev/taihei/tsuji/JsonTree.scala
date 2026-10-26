@@ -160,9 +160,9 @@ private[tsuji] object JsonTreeReader:
 
   end read
 
-  // A string as read, or a decoding error if it holds an unpaired surrogate. Neither valid UTF-8
-  // nor an escape the reader accepts can give one. This is Tsuji's own check, so that what a
-  // decoder sees as a string is Unicode whatever reader is underneath.
+  // A string as read, or a decoding error if it holds an unpaired surrogate: Tsuji refuses any
+  // string that holds one. The check is Tsuji's own, so that what a decoder sees as a string is
+  // Unicode whatever reader is underneath.
   private def unicode(s: String, in: JsonReader): String =
     var i = 0
     while i < s.length do

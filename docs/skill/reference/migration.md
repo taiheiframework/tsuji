@@ -1,4 +1,20 @@
-# migration - from taihei-i18n 4.x to Taihei Tsuji 5.x
+# migration - from Tsuji 5.x to 6.0.0, and from taihei-i18n 4.x to Tsuji 5.x
+
+## From Tsuji 5.x to 6.0.0: `Language.locale`
+
+The class `Language` holds no `java.util.Locale` any more; `locale` is a JVM-only extension method
+in the companion.
+
+| Caller | 5.x | 6.0.0 |
+| --- | --- | --- |
+| Scala on the JVM | `language.locale` | unchanged, no import needed |
+| Scala.js | `language.locale` | does not compile: `language.tag`, or `java.util.Locale.forLanguageTag(language.tag)` |
+| Java | `language.locale()` | `Language.locale(language)` |
+| Binary (JVM) | instance method `Language.locale()` | gone: a library compiled against 5.x that calls it needs a rebuild |
+
+`import Language.*` also brings `locale` into scope; an unqualified `locale` of the caller's own
+(inherited, or from an outer scope) can become ambiguous there. Qualify it, or import only the
+names used.
 
 ## Step 0: the new name
 

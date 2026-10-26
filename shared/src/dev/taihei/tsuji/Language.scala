@@ -1,7 +1,5 @@
 package dev.taihei.tsuji
 
-import java.util.Locale
-
 import com.github.plokhotnyuk.jsoniter_scala.core.*
 
 /**
@@ -29,13 +27,6 @@ final class Language private (val tag: String) extends Serializable:
   def base: Language =
     val primary = tag.takeWhile(_ != '-')
     if primary == tag then this else Language.fromCanonical(primary)
-
-  /** The JDK locale of this language's tag, `Locale.forLanguageTag(tag)`. */
-  @deprecated(
-    "Moves off the shared Language in 6.0.0: on the JVM it becomes an extension method that needs no import, on Scala.js it is gone. Locale.forLanguageTag(language.tag) works in 5.x and 6.x on both platforms",
-    "5.1.0",
-  )
-  def locale: Locale = Locale.forLanguageTag(tag)
 
   /**
    * The script subtag, if the tag has one: `zh-Hant-TW` gives `Some("Hant")`, `nl-BE` gives
@@ -74,9 +65,10 @@ final class Language private (val tag: String) extends Serializable:
 end Language
 
 /**
- * The companion. Beside the factories here, the JVM adds `Language.fromLocale(java.util.Locale)`;
- * a platform locale type only ever appears as the argument of such a factory, never in a return
- * type or a field, so `Language` and its JSON form stay the same on every platform.
+ * The companion. Beside the factories here, the JVM adds `Language.fromLocale(java.util.Locale)`
+ * and its inverse, the extension `language.locale`, which needs no import because it is in the
+ * companion. A platform locale type never appears in the shared class, so `Language` and its JSON
+ * form stay the same on every platform.
  */
 object Language extends LanguagePlatform:
 

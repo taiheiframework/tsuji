@@ -22,9 +22,9 @@ Language("en") == English  // equality and hash by tag
 - `.base: Language` - without script, region or variant (`nl-BE` gives `nl`).
 - `.script: Option[String]` / `.region: Option[String]` - the script and region subtags
   (`zh-Hant-TW`: `Hant`, `TW`; `es-419`: region `419`; `de-1996`, `en-x-us`: no region).
-- `.locale: java.util.Locale` - deprecated since 5.1.0. In 6.0.0 it becomes a JVM-only
-  extension method (no import needed) and is gone on Scala.js; write
-  `java.util.Locale.forLanguageTag(language.tag)`, which works on both platforms in 5.x and 6.x.
+- `.locale: java.util.Locale` - JVM only, since 6.0.0 an extension method in the companion (no
+  import needed): `Locale.forLanguageTag(language.tag)`, the way back from `fromLocale`. It does
+  not exist on Scala.js: use `.tag`. Java calls it as `Language.locale(language)`.
 - `.isDefault: Boolean` - true for `English`.
 - `.label: Message` - the language's name as a message of the family
   `CoreMessages.Languages`: hand translations for the built-ins, the platform's names
@@ -51,8 +51,9 @@ A `match` on `Language` is not checked for exhaustiveness: `case English =>` sti
 works, but add `case _` for every other language. `ordinal` and `fromOrdinal` are
 gone.
 
-A platform locale type is only ever a factory's argument. In JavaScript an
-`Intl.Locale` is read by its tag: `Language.parse(intlLocale.toString)`.
+The class `Language` holds no platform locale type; on the JVM `java.util.Locale` appears only in
+the companion (`fromLocale`, `locale`). In JavaScript an `Intl.Locale` is read by its tag:
+`Language.parse(intlLocale.toString)`.
 
 Codecs (given): `JsonCodec`, `JsonEncoder` and `JsonDecoder[Language]`, and
 `JsonFieldEncoder`/`JsonFieldDecoder` (so `Language` works as a JSON map key). A built-in is written by

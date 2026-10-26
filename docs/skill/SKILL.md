@@ -46,8 +46,9 @@ Orders.shipped(count = 3, on = today).localize(Dutch)  // falls back to English,
   position, checked by the compiler.
 - `Displayable#localize(language)(using Catalogues)` shows a `Message`, a `Text` or a legacy
   message. Fallback: exact, subtags removed, configured fallbacks, source language. Never throws.
-- A `Language` is a BCP 47 tag on every platform. `Language.fromLocale(java.util.Locale)` (JVM only,
-  since 5.1.0) and `Language.preferred` (both platforms) read the platform's locale; see core.md.
+- A `Language` is a BCP 47 tag on every platform. `Language.fromLocale(java.util.Locale)` and
+  `language.locale` (JVM only) and `Language.preferred` (both platforms) meet the platform's
+  locale; see core.md.
 - Translations: inline pairs (in the Scala.js bundle!) or JSON catalogue files.
 
 ## Reference index - read the file that matches the task
@@ -59,7 +60,8 @@ Orders.shipped(count = 3, on = today).localize(Dutch)  // falls back to English,
 - **`reference/messageformat2.md`**: the template syntax, functions, `.match`, `validate`.
 - **`reference/coremessages.md`**: the ready-made families.
 - **`reference/formatting.md`**: platform behaviour, cross-platform rules, build and layout.
-- **`reference/migration.md`**: moving from 4.x, constructor by constructor.
+- **`reference/migration.md`**: moving from 5.x to 6.0.0 (`Language.locale`), and from 4.x,
+  constructor by constructor.
 
 ## Top gotchas
 

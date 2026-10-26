@@ -177,8 +177,9 @@ shipped.localize(Language("de"))   // 3 items shipped on 23. Oktober 2026
 
 ## From the platform locale
 
-A `Language` is a BCP 47 tag on every platform, and its JSON form is that tag. A platform's
-locale type only appears as the argument of a factory, never in a return type or a field.
+A `Language` is a BCP 47 tag on every platform, and its JSON form is that tag. The class holds no
+platform locale type: on the JVM `java.util.Locale` appears only in the companion, as the argument
+of `fromLocale` and the result of `locale`.
 
 On the JVM, `Language.fromLocale` reads a `java.util.Locale`:
 
@@ -211,9 +212,18 @@ In JavaScript an `Intl.Locale` is read by its tag: `Language.parse(intlLocale.to
 `language.region` give the script and region subtags (`zh-Hant-TW`: `Some("Hant")`,
 `Some("TW")`).
 
-`language.locale` is deprecated since 5.1.0. In 6.0.0 it moves off the shared `Language`: on the
-JVM `language.locale` keeps working as an extension method that needs no import, on Scala.js it
-is gone. `java.util.Locale.forLanguageTag(language.tag)` works in 5.x and 6.x on both platforms.
+On the JVM only, `language.locale` goes the other way: it is
+`java.util.Locale.forLanguageTag(language.tag)`, and `Language.fromLocale(language.locale)` gives
+the language back. It is an extension method in the companion, so it needs no import:
+
+```scala
+import dev.taihei.tsuji.Language
+
+Language("nl-BE").locale // nl_BE, on the JVM only
+```
+
+On Scala.js `language.locale` does not exist: use `language.tag`, or
+`new Intl.Locale(language.tag)` where JavaScript needs a locale object.
 
 ## Messages
 
@@ -450,6 +460,25 @@ CoreMessages.Validation.formatErrors(Map("email" -> List(CoreMessages.Validation
 ```
 
 In Scala.js the Dutch and French files reach the browser through the export, like your own.
+
+## Coming from Tsuji 5.x
+
+6.0.0 takes the JDK's locale type out of the shared `Language`, so that the class is the same on
+every platform. `language.locale` moves from the class to an extension method in the JVM
+companion. What that means for a caller:
+
+- **Scala on the JVM:** nothing. `language.locale` compiles unchanged, with no new import.
+- **Scala.js:** `language.locale` no longer compiles. Use `language.tag`, or
+  `java.util.Locale.forLanguageTag(language.tag)` where the code really needs a
+  `java.util.Locale` (scala-java-locales provides it on Scala.js).
+- **Java:** `language.locale()` becomes `Language.locale(language)`, a static method.
+- **Binary, JVM:** the instance method `Language.locale()` is gone, so a library compiled against
+  5.x that calls it fails with a `NoSuchMethodError` until it is compiled again against 6.0.0.
+
+`import Language.*`, the usual import for `English`, `Dutch` and `French`, now also brings the name
+`locale` into scope. Code in that scope that refers to a `locale` of its own without qualifying it
+(an inherited member or an outer definition) can get an ambiguity error; qualify that reference,
+for example `this.locale`, or import only the names you use (`import Language.{English, Dutch}`).
 
 ## Coming from taihei-i18n 4.x
 

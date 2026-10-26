@@ -173,7 +173,7 @@ object Corpus:
       "shown message" -> Written.Msg(GoldenText.shown(GoldenText.plain), withText = true),
       "shown legacy" -> Written.Msg(GoldenText.shown(legacy.Message.of("old")), withText = true),
       "quoted" -> Written.Msg(GoldenText.quoted(Text("q", Language("nl-BE"))), withText = true),
-      "words empty" -> Written.Msg(GoldenText.words(Nil), withText = true),
+      "words none" -> Written.Msg(GoldenText.words(Nil), withText = true),
       "maybe none" -> Written.Msg(GoldenText.maybe(None), withText = true),
       "maybe some" -> Written.Msg(GoldenText.maybe(Some("x")), withText = true),
       "times" -> Written.Msg(
@@ -203,7 +203,7 @@ object Corpus:
         withText = false,
       ),
       "messages legacy" -> Written.Msg(GoldenArgs.messages(Nil, Some(legacy.Message.of("l"))), withText = false),
-      "legacy empty" -> Written.Legacy(legacy.Message(Nil, Map.empty, Map.empty)),
+      "legacy nothing" -> Written.Legacy(legacy.Message(Nil, Map.empty, Map.empty)),
       "legacy of" -> Written.Legacy(legacy.Message.of("Disk full")),
       "legacy args" -> Written.Legacy(
         legacy.Message(
@@ -220,7 +220,7 @@ object Corpus:
         )
       ),
       "displayable legacy" -> Written.Disp(legacy.Message.of("x")),
-      "catalogue empty" -> Written.Cat(Catalogue(Dutch, Map.empty)),
+      "catalogue no messages" -> Written.Cat(Catalogue(Dutch, Map.empty)),
       "catalogue sorted" -> Written.Cat(
         Catalogue(
           Language("nl-BE"),

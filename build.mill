@@ -414,3 +414,48 @@ object tsuji extends Module {
     }
   }
 }
+
+// ---------------------------------------------------------------------------
+// The wire format's golden files (ADR 0006, section 2): written by the released taihei-tsuji
+// 5.0.1 from the corpus in golden/corpus, which the tests compile too, and kept as Scala sources
+// in jvm/test and js/test, so that the Scala.js tests need no file system. Run once per platform
+// and committed with the files they wrote:
+//   ./mill --ticker false golden.jvm.run jvm > jvm/test/src/dev/taihei/tsuji/golden/Golden501.scala
+//   ./mill --ticker false golden.js.run js > js/test/src/dev/taihei/tsuji/golden/Golden501.scala
+// Neither is published; they resolve as every module does.
+// ---------------------------------------------------------------------------
+object golden extends Module {
+  val Released = "5.0.1"
+
+  trait Generator extends ScalaModule with TaiheiRepositories {
+    def scalaVersion  = V.scala
+    def scalacOptions = Seq("-deprecation", "-feature", "-unchecked") ++ LegacyInTests
+  }
+
+  object jvm extends Generator {
+    def sources = Task.Sources(
+      wsRoot / "golden" / "corpus",
+      wsRoot / "golden" / "generate" / "shared",
+      wsRoot / "golden" / "generate" / "jvm",
+    )
+
+    def mvnDeps = Seq(
+      mvn"dev.taihei::taihei-tsuji:$Released",
+      mvn"dev.taihei::taihei-tsuji-tools:$Released",
+    )
+  }
+
+  object js extends Generator with ScalaJSModule {
+    def scalaJSVersion = V.scalaJS
+
+    def sources = Task.Sources(
+      wsRoot / "golden" / "corpus",
+      wsRoot / "golden" / "generate" / "shared",
+      wsRoot / "golden" / "generate" / "js",
+    )
+
+    def mvnDeps = Seq(
+      mvn"dev.taihei::taihei-tsuji::$Released",
+    )
+  }
+}

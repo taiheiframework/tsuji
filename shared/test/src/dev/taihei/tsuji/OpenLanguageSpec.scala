@@ -11,7 +11,8 @@ import com.github.plokhotnyuk.jsoniter_scala.core.*
 /** Any BCP 47 language, beside the three built-ins (since 2.0.0). */
 object OpenLanguageSpec extends ZIOSpecDefault:
 
-  // Outside assertTrue, whose expansion is not covered by the object's @nowarn.
+  // A 4.x message shown in a language. The build silences legacy's deprecation in the tests
+  // (LegacyInTests in build.mill), so no @nowarn is needed here.
   private def tr(m: Message, l: Language): String = m.translate(l)
 
   private val German  = Language("de")

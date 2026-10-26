@@ -280,6 +280,10 @@ trait NoZio extends PublishModule with TaiheiRepositories {
 
   def zioAllowed: Boolean = false
 
+  // The dev.zio modules zio-json V.zioJson brings with it, itself included.
+  private val ZioJsonBrings =
+    Seq("zio-json", "zio", "zio-streams", "zio-internal-macros", "zio-stacktracer", "izumi-reflect", "izumi-reflect-thirdparty-boopickle-shaded")
+
   def noZio() = Task.Command {
     val zio   = pomModules().filter(_.startsWith("dev.zio:"))
     val inner = Task.sequence(moduleDeps.collect { case m: NoZio => m.pomModules })().flatten.filter(_.startsWith("dev.zio:"))
@@ -289,9 +293,13 @@ trait NoZio extends PublishModule with TaiheiRepositories {
       println(s"[no-zio] ${artifactId()}: ${pomModules().size} modules, none of dev.zio")
     } else {
       if (inner.nonEmpty) sys.error(s"${artifactId()}: a module of this library it depends on brings ${inner.mkString(", ")}")
-      if (!pins.toSeq.exists(_.matches(s"zio-json_(sjs1_)?3:${java.util.regex.Pattern.quote(V.zioJson)}")))
-        sys.error(s"${artifactId()}'s POM does not name zio-json ${V.zioJson}: ${pins.mkString(", ")}")
-      println(s"[no-zio] ${artifactId()}: the one artifact with dev.zio, zio-json ${V.zioJson}; its core holds none")
+      // zio-json, at the pin, is its one dev.zio dependency, and what that brings stays what
+      // zio-json brings: a new dev.zio module, direct or through zio-json, stops the check.
+      if (pins.size != 1 || !pins.head.matches(s"zio-json_(sjs1_)?3:${java.util.regex.Pattern.quote(V.zioJson)}"))
+        sys.error(s"${artifactId()}'s POM must name zio-json ${V.zioJson} and no other dev.zio module: ${pins.mkString(", ")}")
+      val beyond = zio.filterNot(_.matches(s"dev\\.zio:(${ZioJsonBrings.mkString("|")})_(sjs1_)?3"))
+      if (beyond.nonEmpty) sys.error(s"${artifactId()}'s POM brings dev.zio modules zio-json does not: ${beyond.mkString(", ")}")
+      println(s"[no-zio] ${artifactId()}: the one artifact with dev.zio, zio-json ${V.zioJson} (${zio.size} dev.zio modules); its core holds none")
     }
   }
 }
@@ -489,6 +497,16 @@ object ziojson extends Module {
 
   def zioJsonTestVersion = Task.Input(Task.env.get("ZIO_JSON_TEST_VERSION").map(_.trim).filter(_.nonEmpty))
 
+  // The zio-json the tests resolve must be the one asked for: Coursier takes the highest version
+  // of a module, so a version at or below the pin would test the pin, unseen.
+  def checkTested(resolved: Seq[PathRef], asked: Option[String]): Unit = {
+    val want = asked.getOrElse(V.zioJson)
+    val jars = resolved.map(_.path.last).filter(_.matches("zio-json_(sjs1_)?3-.*\\.jar"))
+    if (jars.size != 1 || !jars.head.endsWith(s"-$want.jar"))
+      sys.error(s"the tests resolve ${jars.mkString(", ")}, not zio-json $want")
+    println(s"[zio-json] the tests run against ${jars.head}")
+  }
+
   object jvm extends TaiheiModule {
     def artifactName       = "taihei-tsuji-zio-json"
     override def mimaFirstRelease = "6.0.0"
@@ -516,6 +534,8 @@ object ziojson extends Module {
       def mvnDeps = Task {
         super.mvnDeps() ++ zioJsonTestVersion().map(v => mvn"dev.zio::zio-json:$v")
       }
+
+      def zioJsonTested() = Task.Command(checkTested(resolvedMvnDeps(), zioJsonTestVersion()))
     }
   }
 
@@ -546,6 +566,8 @@ object ziojson extends Module {
       def mvnDeps = Task {
         super.mvnDeps() ++ zioJsonTestVersion().map(v => mvn"dev.zio::zio-json::$v")
       }
+
+      def zioJsonTested() = Task.Command(checkTested(resolvedMvnDeps(), zioJsonTestVersion()))
     }
   }
 }

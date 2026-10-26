@@ -228,6 +228,8 @@ private[ziojson] object Capture:
           if depth >= MaxDepth then found = Some(TooDeep)
           else elements.foreach(v => pending.push(v -> (depth + 1)))
         case Json.Num(n)        =>
+          // The bound is 5.0.x's for a built AST, the same either way; from text the lowest
+          // scale is a little higher, but nothing costs more for the difference.
           if math.abs(n.scale.toLong) > MaxScale then found = Some(ScaleBeyond)
           else if n.unscaledValue.bitLength >= MaxMantissaBits then found = Some(MantissaBeyond)
         case Json.Str(s)        => if !isUnicode(s) then found = Some(NotUnicode)

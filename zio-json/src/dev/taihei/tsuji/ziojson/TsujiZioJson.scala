@@ -31,6 +31,10 @@ import com.github.plokhotnyuk.jsoniter_scala.core.JsonValueCodec
  * decoded. Read from bytes, malformed UTF-8 reaches Tsuji as U+FFFD, the replacement character:
  * zio-json's reader of bytes replaces it before any decoder sees the text, where the core's codecs
  * refuse it. Values are always written compactly, whatever indentation the caller asks for.
+ *
+ * A value of Tsuji's types is read whole, members it does not use included, and held at a few
+ * times its length while it is decoded; no string in it has a length bound of its own. Bound the
+ * input you read: a limit on a request's body, or on what a stream may deliver.
  */
 object TsujiZioJson:
 

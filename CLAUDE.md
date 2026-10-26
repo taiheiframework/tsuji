@@ -46,8 +46,8 @@ command line; never read or print `~/.edo-release.env`.
 - `zio-json/src/…`: `taihei-tsuji-zio-json` (Mill module `ziojson`, JVM and Scala.js), the zio-json
   givens in `TsujiZioJson`, which write the core's bytes and read through the core; the one
   artifact whose POM may hold `dev.zio` (`make no-zio` checks both sides). Its tests in
-  `zio-json/test/src/…` compare it with the core; `ZIO_JSON_TEST_VERSION=x.y.z make test` runs
-  them against another zio-json, the newest on Central before a release.
+  `zio-json/test/src/…` compare it with the core; `make zio-json-newest ZIO_JSON_TEST_VERSION=x.y.z`
+  runs them against another zio-json, the newest on Central, before every release.
 - `shared/test/src/…`: zio-test specs, run on both platforms; `jvm/test` and `js/test` for what
   exists on one platform only.
 - `docs/skill/`: the API reference for the library's Claude Code skill.

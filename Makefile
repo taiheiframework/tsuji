@@ -240,7 +240,7 @@ RELEASE_ABSENT = RELEASES=$$(gh api --paginate "repos/$(GITHUB_REPO)/releases?pe
 		echo "[ERROR] a GitHub Release for $$VERSION exists already in $(GITHUB_REPO) (a draft counts): the version is not prepared again;"; \
 		echo "        the CTO and the CISO decide what follows"; exit 1; fi
 
-.PHONY: clean fix fmt lint compile prepare build test mima no-zio repo-guard release-test validate deps publishLocal publish \
+.PHONY: clean fix fmt lint compile prepare build test mima no-zio zio-json-newest repo-guard release-test validate deps publishLocal publish \
         publish-dry-run release-bundle central-bundle release-github publish-repo verify-repo \
         release-preflight release-prepare release-finalize release-abort release-status embargo-lift
 
@@ -360,9 +360,17 @@ release-test:
 	@bash scripts/test-mill-launcher
 
 # No dev.zio module in the published POMs or in anything they bring (ADR 0006, section 6; build.mill's
-# NoZio): ZIO stays in the tests.
+# NoZio), but for taihei-tsuji-zio-json, whose POM names zio-json at its pin and nothing else of
+# dev.zio. Elsewhere ZIO stays in the tests.
 no-zio:
 	./mill __.noZio
+
+# taihei-tsuji-zio-json's tests against another zio-json (ADR 0006, J10): before a release, the
+# newest on Central, since a user's build may evict the pin upward. The tests check that they ran
+# against the version asked for.
+zio-json-newest:
+	@[ -n "$(ZIO_JSON_TEST_VERSION)" ] || { echo "[zio-json-newest] set ZIO_JSON_TEST_VERSION=x.y.z, the newest zio-json on Maven Central"; exit 1; }
+	ZIO_JSON_TEST_VERSION="$(ZIO_JSON_TEST_VERSION)" ./mill '{ziojson.jvm,ziojson.js}.test.zioJsonTested' + '{ziojson.jvm,ziojson.js}.test.testForked'
 
 validate: repo-guard release-test fix fmt lint compile test mima no-zio
 

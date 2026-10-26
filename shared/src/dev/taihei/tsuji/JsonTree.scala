@@ -101,6 +101,8 @@ private[tsuji] object JsonTreeReader:
 
   def read(in: JsonReader): JsonTree =
     val open   = mutable.Stack.empty[Open]
+    // One buffer for the number tokens of this read.
+    val token  = new Array[Byte](MaxNumberLength)
     var result = Option.empty[JsonTree]
     while result.isEmpty do
       // One value. An array or an object that is not empty is opened, and the loop reads its
@@ -127,7 +129,7 @@ private[tsuji] object JsonTreeReader:
           completed = Some(JsonTree.Bool(in.readBoolean()))
         case 'n'                                     =>
           completed = Some(in.readNullOrError[JsonTree](JsonTree.Null, "expected a JSON value"))
-        case b if b == '-' || (b >= '0' && b <= '9') => completed = Some(number(b, in))
+        case b if b == '-' || (b >= '0' && b <= '9') => completed = Some(number(b, token, in))
         case _                                       => in.decodeError("expected a JSON value")
       end match
       // Hand a complete value to the array or object that holds it; one that is complete with it
@@ -178,8 +180,11 @@ private[tsuji] object JsonTreeReader:
   // A number: its bytes are collected first, at most MaxNumberLength of them, then checked and
   // read by jsoniter-scala as a number on its own, exactly (MathContext.UNLIMITED). In valid JSON
   // a number is followed by a byte that cannot be part of one, so the token is the whole number.
-  private def number(first: Byte, in: JsonReader): JsonTree =
-    val token  = new Array[Byte](MaxNumberLength)
+  private def number(
+    first: Byte,
+    token: Array[Byte],
+    in: JsonReader,
+  ): JsonTree =
     token(0) = first
     var length = 1
     var more   = true
@@ -196,16 +201,41 @@ private[tsuji] object JsonTreeReader:
     if exponentDigits(token, length) > MaxExponentDigits then
       in.decodeError(s"a number with an exponent of more than $MaxExponentDigits digits")
     val value  =
-      try
-        readFromArrayReentrant(java.util.Arrays.copyOf(token, length), NumberConfig)(
-          using OneNumber
-        )
-      catch case NonFatal(_) => in.decodeError("not a number")
+      if isPlainInteger(token, length) then java.math.BigDecimal.valueOf(plainInteger(token, length))
+      else
+        try
+          readFromArrayReentrant(java.util.Arrays.copyOf(token, length), NumberConfig)(
+            using OneNumber
+          )
+        catch case NonFatal(_) => in.decodeError("not a number")
     if value.unscaledValue.bitLength >= MaxMantissaBits then
       in.decodeError(s"a number with a mantissa of $MaxMantissaBits bits or more")
     JsonTree.Num(value)
 
   end number
+
+  // Most numbers in JSON are short integers, and reading each through a reader of its own costs
+  // more than the rest of the walk, on Scala.js several times as much. An optional minus and at
+  // most 18 digits, without a leading zero unless it is the only digit, is a JSON integer whose
+  // value fits a Long; it is read here, to the same value. Anything else goes to the reader.
+  private def isPlainInteger(token: Array[Byte], length: Int): Boolean =
+    val from   = if token(0) == '-' then 1 else 0
+    val digits = length - from
+    var plain  = digits >= 1 && digits <= 18 && (token(from) != '0' || digits == 1)
+    var i      = from
+    while plain && i < length do
+      plain = token(i) >= '0' && token(i) <= '9'
+      i += 1
+    plain
+
+  private def plainInteger(token: Array[Byte], length: Int): Long =
+    val negative = token(0) == '-'
+    var i        = if negative then 1 else 0
+    var value    = 0L
+    while i < length do
+      value = value * 10 + (token(i) - '0')
+      i += 1
+    if negative then -value else value
 
   // The digits of a number's exponent, without its sign and leading zeros: 0 for a number
   // without one.

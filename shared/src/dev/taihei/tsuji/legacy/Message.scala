@@ -86,7 +86,7 @@ object Message:
    * message read from JSON holds at most 1000 templates and 1000 arguments (positional and named
    * together), and no template, argument or argument name longer than 65536 characters; a larger
    * one is a decoding error, a `JsonReaderException`, as anything else wrong with the input is.
-   * The value is written compactly, whatever the `WriterConfig`'s indentation.
+   * The value is written compactly, whatever the `WriterConfig`'s indentation or `escapeUnicode`.
    */
   given JsonValueCodec[Message] = TreeCodec(fromTree, toTree)
 

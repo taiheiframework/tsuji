@@ -44,7 +44,7 @@ object Displayable:
    *
    * JSON nested deeper than 64 levels, or a number longer than 1100 characters or with an exponent
    * of more than 9 digits, is a decoding error. Every decoding error is a `JsonReaderException`.
-   * The value is written compactly, whatever the `WriterConfig`'s indentation.
+   * The value is written compactly, whatever the `WriterConfig`'s indentation or `escapeUnicode`.
    */
   given (
     using catalogues: Catalogues
@@ -94,7 +94,8 @@ object Text:
 
   /**
    * `{"text":...,"language":...}`, the language as its tag; a built-in's name is read too. Reading
-   * needs no registry, and is bounded as the codec of a [[Displayable]] is.
+   * needs no registry, and is bounded as the codec of a [[Displayable]] is. The value is written
+   * compactly, whatever the `WriterConfig`'s indentation or `escapeUnicode`.
    */
   given JsonValueCodec[Text] = TreeCodec(decode, toTree)
 
@@ -259,7 +260,7 @@ object Message:
    * default, also its text in the source language; `withText` applies to this message only:
    * messages nested in its arguments are always written with their text, so that a reader that
    * knows the outer key but not a nested one can still show it. The value is written compactly,
-   * whatever the `WriterConfig`'s indentation.
+   * whatever the `WriterConfig`'s indentation or `escapeUnicode`.
    *
    * Reading looks the key up in `catalogues` to read the arguments with their types. A key it does
    * not know reads as the message's `text`, and is an error without one. The 4.x shape is read

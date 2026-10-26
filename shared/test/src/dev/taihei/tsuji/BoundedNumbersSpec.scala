@@ -50,6 +50,15 @@ object BoundedNumbersSpec extends ZIOSpecDefault:
       val millis = (java.lang.System.nanoTime() - start) / 1000000
       assertTrue(input.length <= Catalogue.MaxLength, input.length > 4000000, result.isRight, millis < 5000)
     },
+    test("4M characters of short numbers are read quickly, on both platforms") {
+      // Many short tokens, rather than a few long ones: what each number costs dominates.
+      val small  = catalogue(List.fill((Catalogue.MaxLength - 200) / 2)("0").mkString("[", ",", "]"))
+      val mixed  = catalogue(List.fill((Catalogue.MaxLength - 200) / 6)("-12.5").mkString("[", ",", "]"))
+      val start  = java.lang.System.nanoTime()
+      val read   = List(small, mixed).map(c => guarded(Catalogue.parse(c)))
+      val millis = (java.lang.System.nanoTime() - start) / 1000000
+      assertTrue(small.length > 4000000, mixed.length > 4000000, read.forall(_.isRight), millis < 5000)
+    },
     test("a valid catalogue parses as before") {
       val parsed = Catalogue.parse(catalogue("1e999999999"))
       assertTrue(

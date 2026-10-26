@@ -134,6 +134,9 @@ object release extends Module {
 // Binary compatibility: MiMa compares the artifact with the baseline release on Central and
 // fails on a break (`make mima`, part of validate). No baseline, nothing to compare.
 // ---------------------------------------------------------------------------
+// taihei-tsuji-zio-json calls private[tsuji] members of the core (its tree, its readers and
+// decoders), which a user's build may pair with a newer core. So MiMa's report on the core covers
+// them too: never filter a private[tsuji] member that the module uses.
 trait TaiheiMima extends Mima with PublishModule {
   // The first release of this artifact: a baseline before it is a version that does not exist.
   def mimaFirstRelease: String = release.firstRelease

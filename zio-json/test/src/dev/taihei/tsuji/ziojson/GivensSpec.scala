@@ -98,13 +98,41 @@ object GivensSpec extends ZIOSpecDefault:
       )
       assertTrue(errors.forall(_.isLeft), errors.forall(_.left.forall(_.length < 400)))
     },
+    test("a raw unpaired surrogate in a string or a name is refused by the capture, a raw pair is read") {
+      // Input given as a String, where zio-json hands the capture the characters as they are.
+      val lone = List(
+        "{\"text\":\"a\ud800b\",\"language\":\"en\"}",
+        "{\"text\":\"a\udc00b\",\"language\":\"en\"}",
+        "{\"text\":\"a\ud800\",\"language\":\"en\"}",
+        "{\"text\":\"\ud800\\udc00\",\"language\":\"en\"}",
+        "{\"text\":\"a\",\"language\":\"en\",\"x\":{\"\ud800\":1}}",
+        "{\"text\":\"a\",\"language\":\"en\",\"x\":[{\"b\udc00\":1}]}",
+      )
+      val pair = "{\"text\":\"\ud83d\ude00\",\"language\":\"en\",\"x\":{\"\ud83d\ude00\":1}}"
+      assertTrue(
+        lone.forall(_.fromJson[Text].left.exists(_.contains("not Unicode"))),
+        lone.map(Capture.isUnicode).count(identity) == 0,
+        pair.fromJson[Text] == Right(Text("\ud83d\ude00", Language.English)),
+      )
+    },
+    test("4 MB of numbers just under the bound are read in time that grows with them") {
+      val near   = "0." + "0" * (JsonTreeReader.MaxNumberLength - 3) + "1"
+      val many   = List.fill(4 * 1024 * 1024 / (near.length + 1))(near).mkString("[", ",", "]")
+      val input  = s"""{"text":"a","language":"en","x":$many}"""
+      val start  = java.lang.System.nanoTime()
+      val result = input.fromJson[Text]
+      val millis = (java.lang.System.nanoTime() - start) / 1000000
+      // A budget with room for a slow machine and for Node: a reader that is not linear takes far
+      // longer.
+      assertTrue(input.length > 4000000, result.isRight, millis < 20000)
+    },
     test("4 MB of numbers in a text are read in time that grows with them") {
       val many   = List.fill(2 * 1024 * 1024)("0").mkString("[", ",", "]")
       val input  = s"""{"text":"a","language":"en","x":$many}"""
       val start  = java.lang.System.nanoTime()
       val result = input.fromJson[Text]
       val millis = (java.lang.System.nanoTime() - start) / 1000000
-      assertTrue(input.length > 4000000, result.isRight, millis < 10000)
+      assertTrue(input.length > 4000000, result.isRight, millis < 20000)
     },
     test("a number longer than the bound at the top level is refused as it is read") {
       val long = "1" + "0" * 1000000

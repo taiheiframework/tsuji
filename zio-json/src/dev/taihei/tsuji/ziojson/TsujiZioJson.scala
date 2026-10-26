@@ -28,7 +28,9 @@ import com.github.plokhotnyuk.jsoniter_scala.core.JsonValueCodec
  * Reading follows the JSON grammar strictly, as the core does. The value is read as it stands in
  * the input, and what follows it is the caller's: zio-json's `fromJson` ignores it. A value that
  * is already a zio-json AST (`.as[Message]`) is checked against the same bounds before it is
- * decoded. Values are always written compactly, whatever indentation the caller asks for.
+ * decoded. Read from bytes, malformed UTF-8 reaches Tsuji as U+FFFD, the replacement character:
+ * zio-json's reader of bytes replaces it before any decoder sees the text, where the core's codecs
+ * refuse it. Values are always written compactly, whatever indentation the caller asks for.
  */
 object TsujiZioJson:
 

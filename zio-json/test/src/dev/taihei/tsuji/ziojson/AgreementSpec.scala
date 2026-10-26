@@ -17,12 +17,21 @@ object AgreementSpec extends ZIOSpecDefault:
   // before it decodes a type.
   private val tree: JsonDecoder[JsonTree] = Capture.decoder(Capture.Route(TreeCodec.tree, Right(_)))
 
-  // A value as the module reads it, and as zio-json reads it, each written by the core's writer:
-  // zio-json's AST is taken into the core's tree through the module's AST route.
+  // A value as the module reads it, and as zio-json's own reader reads it, each written by the
+  // core's writer. zio-json's AST is copied into the core's tree as it is, with none of the
+  // module's checks, so that this side is zio-json's alone.
   private def module(input: String): Either[String, String] = tree.decodeJson(input).map(JsonTreeWriter.compact)
 
-  private def zio(input: String): Either[String, String] =
-    input.fromJson[Json].flatMap(tree.fromJsonAST).map(JsonTreeWriter.compact)
+  private def zio(input: String): Either[String, String] = input.fromJson[Json].map(plain).map(JsonTreeWriter.compact)
+
+  // The samples nest a few levels at most, so this recursion stays shallow.
+  private def plain(json: Json): JsonTree = json match
+    case Json.Obj(fields)   => JsonTree.Obj(fields.toVector.map((n, v) => n -> plain(v)))
+    case Json.Arr(elements) => JsonTree.Arr(elements.toVector.map(plain))
+    case Json.Str(s)        => JsonTree.Str(s)
+    case Json.Num(n)        => JsonTree.Num(n)
+    case Json.Bool(b)       => JsonTree.Bool(b)
+    case Json.Null          => JsonTree.Null
 
   private def agree(input: String): Boolean = (module(input), zio(input)) match
     case (Right(a), Right(b)) => a == b
@@ -89,7 +98,7 @@ object AgreementSpec extends ZIOSpecDefault:
     },
     test("an escape of an unpaired surrogate: zio-json reads it, the module refuses it") {
       val escapes = List("\"\\ud800\"", "\"\\udc00\"", "\"a\\ud800b\"", "\"\\udc00\\ud800\"", "{\"\\ud800\":1}")
-      assertTrue(escapes.forall(e => zio(e).isLeft && module(e).isLeft), escapes.forall(e => e.fromJson[Json].isRight))
+      assertTrue(escapes.forall(e => zio(e).isRight && module(e).isLeft))
     },
     test("short numbers with extreme exponents: the same within nine digits of exponent") {
       val agreeing = List("1.5e999999999", "-0e-999999999", "1e-999999999", "77e+000000123").map(n => s"[$n]")

@@ -7,7 +7,7 @@ import zio.test.*
 import dev.taihei.tsuji.Language
 import dev.taihei.tsuji.TestJson.*
 
-// The 4.x Message, kept as legacy.Message until 6.0.0, behaves as it does in 4.0.x, its JSON
+// The 4.x Message, kept as legacy.Message until 7.0.0, behaves as it does in 4.0.x, its JSON
 // codec included.
 object MessageSpec extends ZIOSpecDefault:
 

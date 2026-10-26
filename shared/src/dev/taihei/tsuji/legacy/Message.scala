@@ -8,18 +8,18 @@ import dev.taihei.tsuji.Language.*
 import com.github.plokhotnyuk.jsoniter_scala.core.*
 
 /** The argument values a 4.x message takes. */
-@deprecated("Use the typed arguments of a MessageFamily; legacy is removed in 6.0.0", "5.0.0")
+@deprecated("Use the typed arguments of a MessageFamily; legacy is removed in 7.0.0", "5.0.0")
 type MessageArg = String | Int | Long | Double | Float | Boolean | LocalDate | LocalDateTime |
   LocalTime
 
 /**
  * The message of taihei-i18n 4.x, unchanged: arguments and every translation in one value, with
  * the 4.x JSON codec. It stays in 5.x so that moving to 5.0.0 is a change of imports
- * (`import dev.taihei.tsuji.legacy.Message`); define new messages in a `MessageFamily`. Removed in
- * 6.0.0.
+ * (`import dev.taihei.tsuji.legacy.Message`); define new messages in a `MessageFamily`. It stays,
+ * deprecated, in 6.x, and is removed in 7.0.0.
  */
 @deprecated(
-  "Use a MessageFamily: typed messages with per-language catalogues; legacy is removed in 6.0.0",
+  "Use a MessageFamily: typed messages with per-language catalogues; legacy is removed in 7.0.0",
   "5.0.0",
 )
 case class Message(
@@ -75,7 +75,7 @@ case class Message(
 end Message
 
 @deprecated(
-  "Use a MessageFamily: typed messages with per-language catalogues; legacy is removed in 6.0.0",
+  "Use a MessageFamily: typed messages with per-language catalogues; legacy is removed in 7.0.0",
   "5.0.0",
 )
 object Message:

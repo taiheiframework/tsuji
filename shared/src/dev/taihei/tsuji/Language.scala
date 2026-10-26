@@ -280,14 +280,14 @@ object Language extends LanguagePlatform:
    */
   given JsonValueCodec[Language] = new JsonValueCodec[Language]:
     def decodeValue(in: JsonReader, default: Language): Language =
-      decode(in.readString(null)).fold(in.decodeError, identity)
+      TreeCodec.guarded(in)(decode(in.readString(null)).fold(in.decodeError, identity))
     def encodeValue(x: Language, out: JsonWriter): Unit          = out.writeVal(x.toString)
     def nullValue: Language                                      = null
 
   /** A language as the name of a JSON object's field, in the forms of its value codec. */
   given JsonKeyCodec[Language] = new JsonKeyCodec[Language]:
     def decodeKey(in: JsonReader): Language           =
-      decode(in.readKeyAsString()).fold(in.decodeError, identity)
+      TreeCodec.guarded(in)(decode(in.readKeyAsString()).fold(in.decodeError, identity))
     def encodeKey(x: Language, out: JsonWriter): Unit = out.writeKey(x.toString)
 
   private def fromCanonical(tag: String): Language =

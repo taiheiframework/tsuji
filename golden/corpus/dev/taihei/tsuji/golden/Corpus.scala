@@ -30,6 +30,13 @@ object GoldenText extends MessageFamily("golden.text"):
 
   val maybe = message[(o: Option[String])]("Maybe [{$o}]")
 
+  // A template that the files of taihei-tsuji-tools must escape: a quote, a backslash, non-ASCII,
+  // U+007F and U+2028.
+  val escaped = message(
+    "Say \"hi\" \\ caf\u00e9 \u007f\u2028 \ud83d\ude00",
+    Dutch -> "Zeg \"hoi\" \u00e9\u00e9n",
+  )
+
 end GoldenText
 
 final case class GoldenId(value: String)

@@ -20,7 +20,7 @@ object V {
   val scala         = "3.9.0"
   val scalaJS       = "1.22.0"
   val zio           = "2.1.27"
-  // Exact, never a range (ADR 0006, J2): re-pinned at release-prepare to the newest 2.x that has
+  // Exact, never a range (ADR 0006): re-pinned at release-prepare to the newest 2.x that has
   // been on Maven Central for 14 days, never below 2.41.7; the same as taihei-mihon's.
   val jsoniter      = "2.42.0"
   val scalaJavaTime = "2.8.0"
@@ -242,7 +242,7 @@ trait TaiheiPublishSettings extends PublishModule with TaiheiRepositories {
 }
 
 // ---------------------------------------------------------------------------
-// No ZIO in what a user gets (ADR 0006, condition J1): the dependencies of the published POM, in
+// No ZIO in what a user gets (ADR 0006, section 6): the dependencies of the published POM, in
 // every scope, and everything Coursier resolves from them, afresh, as a user's build would, hold
 // no dev.zio module. It reads the POM's own dependency list, not this build's classpath, which
 // has zio-test in the tests. A dependency on another module of this library (the same version)

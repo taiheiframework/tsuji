@@ -15,7 +15,7 @@ import com.github.plokhotnyuk.jsoniter_scala.core.*
 // The gate of the wire format (ADR 0006, sections 2 and 7): this version writes, byte for byte,
 // what the released 5.0.1 wrote for every value of the corpus, and reads what it read from every
 // input, on the JVM and on Scala.js (Golden501, written by golden/generate). The only differences
-// are those the ADR's amendment of 2026-10-26 lists, each named below; changing any other byte is
+// are those ADR 0006 lists, each named below; changing any other byte is
 // a wire break and needs the CTO's yes.
 @nowarn("cat=deprecation")
 object GoldenSpec extends ZIOSpecDefault:
@@ -77,7 +77,7 @@ object GoldenSpec extends ZIOSpecDefault:
 
   end actual
 
-  // The differences the amendment lists, by case.
+  // The differences ADR 0006 lists, by case.
 
   // 1. An unpaired surrogate is written as U+FFFD.
   private def unpaired(s: String, by: Char): String =
@@ -94,7 +94,7 @@ object GoldenSpec extends ZIOSpecDefault:
     out.toString
 
   // 2. A number whose unscaled value is Long.MinValue is written as java.math.BigDecimal.toString
-  // writes it; 5.0.1 wrote it wrong on the JVM, and on Scala.js at a scale other than 0.
+  // writes it; 5.0.1 wrote it differently on the JVM, and on Scala.js at a scale other than 0.
   private val LongMinValue = "(-0\\.0?)?-9223372036854775808(E[+-][0-9]+)?".r
 
   private def number(n: String): String = s"number ${Corpus.numbers.indexOf(n)} ($n)"

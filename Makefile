@@ -359,7 +359,7 @@ release-test:
 	@bash scripts/test-release.sh
 	@bash scripts/test-mill-launcher
 
-# No dev.zio module in the published POMs or in anything they bring (ADR 0006, J1; build.mill's
+# No dev.zio module in the published POMs or in anything they bring (ADR 0006, section 6; build.mill's
 # NoZio): ZIO stays in the tests.
 no-zio:
 	./mill __.noZio

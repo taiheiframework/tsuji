@@ -123,7 +123,7 @@ object DeepNestingSpec extends ZIOSpecDefault:
       )
     },
     test("a number that is not JSON is refused, also where 5.x read it") {
-      // 5.x read 01, 1. and their kind (ADR 0006, amendment of 2026-10-26); 6.0.0 reads RFC 8259.
+      // 5.x read 01, 1. and their kind (ADR 0006, section 2); 6.0.0 reads RFC 8259.
       val odd    = List(
         "-",
         "1-2",

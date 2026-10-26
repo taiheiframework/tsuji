@@ -10,7 +10,7 @@ import dev.taihei.tsuji.TestJson.{*, given}
 
 import com.github.plokhotnyuk.jsoniter_scala.core.*
 
-// The JSON core on jsoniter-scala (ADR 0006, section 1, and the conditions J4 to J7): the codecs
+// The JSON core on jsoniter-scala (ADR 0006, section 1): the codecs
 // throw nothing but JsonReaderException on any input, writing never throws and reads back, the
 // codecs compose in a caller's own, and a catalogue read in the middle of a caller's decode
 // leaves that decode intact.
@@ -151,10 +151,39 @@ object JsonCoreSpec extends ZIOSpecDefault:
           results.flatMap((i, rs) =>
             rs.collect { case (w, o) if o.startsWith("threw") => s"$w on ${i.take(60)}: $o" }
           ).isEmpty,
-          // The bounds hold: one past the limit is refused by the codec that reads that place.
-          outcomes(s"""{"text":"x","language":"en","j":${"[" * 64}1${"]" * 64}}""").toMap.get("Text").contains("refused"),
-          outcomes(s"""{"text":"x","language":"en","j":${"[" * 62}1${"]" * 62}}""").toMap.get("Text").contains("read"),
         )
+      },
+      test("each bound reads at its limit and refuses one past it, under any ReaderConfig") {
+        // Under an unused field of a text, whose own object is the first level of nesting.
+        def text(j: String) = s"""{"text":"x","language":"en","j":$j}"""
+        val pairs           = List(
+          ("[" * 63 + "1" + "]" * 63) -> ("[" * 64 + "1" + "]" * 64),
+          ("0." + "0" * 1097 + "1") -> ("0." + "0" * 1098 + "1"),
+          "1e999999999" -> "1e1000000000",
+          ("9" * 76) -> ("9" * 77),
+        )
+        // A caller's own configuration: no end-of-input check, small buffers, no hex dump. The
+        // bounds are counted in Tsuji's walk, so none of it moves them.
+        val configs         = List(
+          ReaderConfig,
+          ReaderConfig
+            .withCheckForEndOfInput(false)
+            .withPreferredBufSize(12)
+            .withPreferredCharBufSize(12)
+            .withAppendHexDumpToParseException(false),
+        )
+        val wrong           =
+          for
+            config            <- configs
+            (within, outside) <- pairs
+            read    = outcome(readFromString[Text](text(within), config))
+            refused = outcome(readFromString[Text](text(outside), config))
+            if read != "read" || refused != "refused"
+          yield s"${within.take(20)}: $read, ${outside.take(20)}: $refused"
+        val streamed        = pairs.map((_, outside) =>
+          outcome(readFromStream[Text](new java.io.ByteArrayInputStream(text(outside).getBytes(UTF_8)), configs(1)))
+        )
+        assertTrue(wrong.isEmpty, streamed.forall(_ == "refused"))
       },
       test("every prefix of valid input is refused, never thrown") {
         val valid  = List(
@@ -184,21 +213,18 @@ object JsonCoreSpec extends ZIOSpecDefault:
     suite("writing")(
       test("never throws, and what it writes reads back, an unpaired surrogate as U+FFFD") {
         val strings = List("a\ud800b", "\udc00", "\udc00\ud800", "x\ud83d", "ok \ud83d\ude00", "\u007f\u0000\u2028")
-        def fixed(s: String) = s.map(c => if Character.isSurrogate(c) then '\ufffd' else c)
-          .replace("\ufffd\ufffd!", "")
-        val texts            = strings.map(s => Text(s, Language.English))
-        val back             = texts.map(t => readFromString[Text](writeToString(t)))
-        val greets           = strings.map(s => Orders.greeting(s))
-        val again            = greets.map(m => readFromString[Message](writeToString(m)))
-        val olds             = strings.map(s => legacy.Message(List(s), Map(s -> s), Map(Language.English -> s)))
-        val oldBack          = olds.map(m => readFromString[legacy.Message](writeToString(m)))
-        val expect = List("a\ufffdb", "\ufffd", "\ufffd\ufffd", "x\ufffd", "ok \ud83d\ude00", "\u007f\u0000\u2028")
+        val texts   = strings.map(s => Text(s, Language.English))
+        val back    = texts.map(t => readFromString[Text](writeToString(t)))
+        val greets  = strings.map(s => Orders.greeting(s))
+        val again   = greets.map(m => readFromString[Message](writeToString(m)))
+        val olds    = strings.map(s => legacy.Message(List(s), Map(s -> s), Map(Language.English -> s)))
+        val oldBack = olds.map(m => readFromString[legacy.Message](writeToString(m)))
+        val expect  = List("a\ufffdb", "\ufffd", "\ufffd\ufffd", "x\ufffd", "ok \ud83d\ude00", "\u007f\u0000\u2028")
         assertTrue(
           back.map(_.value) == expect,
           again.map(_.toString) == expect.map("Hello " + _),
           oldBack.map(_.args) == expect.map(List(_)),
           oldBack.map(_.namedArgs.keys.toList) == expect.map(List(_)),
-          strings.map(fixed).size == strings.size,
         )
       },
       test("Tsuji's values compose in a caller's codec, as fields, elements and map values") {

@@ -189,9 +189,8 @@ Orders.cancelled.toJson(using TsujiZioJson.messageEncoder(withText = false))
 
 - Limits: the JSON read at most 64 levels of arrays and objects deep and a number in it at most
   1100 characters long with an exponent of at most 9 digits, leading zeros not counted, and a
-  mantissa below 256 bits (beyond
-  either is a decoding error, on both platforms, under any `ReaderConfig`), 8 levels of nested
-  messages, 10000 list elements; the kept arguments of an unknown key at most 16 levels and
+  mantissa below 256 bits (beyond any of them is a decoding error, on both platforms, under any
+  `ReaderConfig`), 8 levels of nested messages, 10000 list elements; the kept arguments of an unknown key at most 16 levels and
   100000 values, with at most 16 names of one object sharing a hash code. Members the decoder does
   not use are read and checked too.
 - Rules on the wire: a key is a contract; adding an argument means a new key unless it is an

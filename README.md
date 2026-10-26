@@ -625,8 +625,8 @@ a program that only writes passes `Catalogues()`. See [Codecs: jsoniter-scala](#
 
 The JSON on the wire and in catalogue files does not change, and data written by 4.x or 5.x reads
 as before. The exceptions are unpaired surrogates, a `Long.MinValue` number written on the JVM,
-and input that is not strict JSON (a leading zero in a number, content after the value). The
-release notes of 6.0.0 list each one.
+and input that is not strict JSON (a leading zero in a number, and content after the value in the
+core's codecs). The release notes of 6.0.0 list each one.
 
 ### `Language.locale`
 

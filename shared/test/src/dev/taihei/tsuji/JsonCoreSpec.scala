@@ -262,6 +262,7 @@ object JsonCoreSpec extends ZIOSpecDefault:
           using pair
         )
         val list       = List(Text("a", Language.English), Text("b", Language("nl-BE")))
+        val accented   = Text("caf\u00e9 \u2028\u2029 \ud83d\ude00", Language.French)
         val byLanguage =
           Map(Language.English -> Text("hi", Language.English), Language("de") -> Text("hallo", Language("de")))
         assertTrue(
@@ -280,6 +281,9 @@ object JsonCoreSpec extends ZIOSpecDefault:
           writeToString(byLanguage) ==
           """{"English":{"text":"hi","language":"en"},"de":{"text":"hallo","language":"de"}}""",
           writeToString(byLanguage).fromJson[Map[Language, Text]] == Right(byLanguage),
+          // Nor does the caller's escapeUnicode: non-ASCII, U+2028 and U+2029 stay as they are.
+          writeToString(accented, WriterConfig.withEscapeUnicode(true)) == writeToString(accented),
+          writeToString(accented).contains("caf\u00e9 \u2028\u2029 \ud83d\ude00"),
         )
       },
     ),

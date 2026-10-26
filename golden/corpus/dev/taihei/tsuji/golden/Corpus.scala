@@ -30,25 +30,37 @@ object GoldenText extends MessageFamily("golden.text"):
 
   val maybe = message[(o: Option[String])]("Maybe [{$o}]")
 
+end GoldenText
+
 final case class GoldenId(value: String)
 
 object GoldenId:
+
   given MessageArg[GoldenId] =
-    MessageArg.as[GoldenId, String](_.value, s => if s.isEmpty then Left("an empty id") else Right(GoldenId(s)))
+    MessageArg.as[GoldenId, String](
+      _.value,
+      s => if s.isEmpty then Left("an empty id") else Right(GoldenId(s)),
+    )
 
 // Every argument type. Its messages are written without their text, whose numbers, dates and
 // language names follow the platform's formatting.
 object GoldenArgs extends MessageFamily("golden.args"):
 
   val scalars =
-    message[(s: String, i: Int, l: Long, d: Double, f: Float, b: Boolean)]("{$s} {$i} {$l} {$d} {$f} {$b}")
+    message[(s: String, i: Int, l: Long, d: Double, f: Float, b: Boolean)](
+      "{$s} {$i} {$l} {$d} {$f} {$b}"
+    )
 
-  val times = message[(date: LocalDate, dateTime: LocalDateTime, time: LocalTime)]("{$date} {$dateTime} {$time}")
+  val times = message[(date: LocalDate, dateTime: LocalDateTime, time: LocalTime)](
+    "{$date} {$dateTime} {$time}"
+  )
 
   val language = message[(in: Language)]("{$in}")
 
   val options =
-    message[(i: Option[Int], d: Option[Double], s: Option[String], date: Option[LocalDate])]("{$i} {$d} {$s} {$date}")
+    message[(i: Option[Int], d: Option[Double], s: Option[String], date: Option[LocalDate])](
+      "{$i} {$d} {$s} {$date}"
+    )
 
   val lists = message[(
     ints: List[Int],
@@ -61,6 +73,8 @@ object GoldenArgs extends MessageFamily("golden.args"):
   val id = message[(id: GoldenId)]("{$id}")
 
   val messages = message[(ms: List[Message], d: Option[Displayable])]("{$ms} {$d}")
+
+end GoldenArgs
 
 // What is written: a value and the codec it is written with.
 enum Written:
@@ -139,27 +153,35 @@ object Corpus:
   )
 
   val writes: List[(String, Written)] =
-    val byString = strings.flatMap: (name, s) =>
+    val byString       = strings.flatMap: (name, s) =>
       List(
         s"say $name" -> Written.Msg(GoldenText.say(s), withText = true),
         s"text $name" -> Written.Txt(Text(s, English)),
         s"displayable text $name" -> Written.Disp(Text(s, Dutch)),
         s"legacy $name" -> Written.Legacy(legacy.Message(List(s), Map(s -> s), Map(English -> s))),
         s"words $name" -> Written.Msg(GoldenText.words(List(s, "x")), withText = true),
-        s"catalogue $name" -> Written.Cat(Catalogue(English, Map(MessageKey.parse("golden.s").toOption.get -> s))),
+        s"catalogue $name" ->
+        Written.Cat(Catalogue(English, Map(MessageKey.parse("golden.s").toOption.get -> s))),
       )
-    val scalars = for
-      (d, i) <- doubles.zipWithIndex
-      f       = floats(i % floats.size)
-    yield s"scalars $i" -> Written.Msg(
-      GoldenArgs.scalars("s", i * 1000003, i.toLong * 4000000000L, d, f, i % 2 == 0),
-      withText = false,
+    val scalars        =
+      for
+        (d, i) <- doubles.zipWithIndex
+        f = floats(i % floats.size)
+      yield s"scalars $i" -> Written.Msg(
+        GoldenArgs.scalars("s", i * 1000003, i.toLong * 4000000000L, d, f, i % 2 == 0),
+        withText = false,
+      )
+    val extremes       = List(
+      "scalars extremes" -> Written.Msg(
+        GoldenArgs.scalars("", Int.MinValue, Long.MaxValue, 0.0, 0.0f, false),
+        withText = false,
+      ),
+      "scalars other extremes" -> Written.Msg(
+        GoldenArgs.scalars("", Int.MaxValue, Long.MinValue, -0.0, -0.0f, true),
+        withText = false,
+      ),
     )
-    val extremes = List(
-      "scalars extremes" -> Written.Msg(GoldenArgs.scalars("", Int.MinValue, Long.MaxValue, 0.0, 0.0f, false), withText = false),
-      "scalars other extremes" -> Written.Msg(GoldenArgs.scalars("", Int.MaxValue, Long.MinValue, -0.0, -0.0f, true), withText = false),
-    )
-    val others = List(
+    val others         = List(
       "plain" -> Written.Msg(GoldenText.plain, withText = true),
       "plain without text" -> Written.Msg(GoldenText.plain, withText = false),
       "plain displayable" -> Written.Disp(GoldenText.plain),
@@ -181,11 +203,18 @@ object Corpus:
         withText = false,
       ),
       "times seconds" -> Written.Msg(
-        GoldenArgs.times(LocalDate.of(-1, 1, 1), LocalDateTime.of(10000, 12, 31, 23, 59, 59), LocalTime.of(23, 59, 59, 1)),
+        GoldenArgs.times(
+          LocalDate.of(-1, 1, 1),
+          LocalDateTime.of(10000, 12, 31, 23, 59, 59),
+          LocalTime.of(23, 59, 59, 1),
+        ),
         withText = false,
       ),
       "options none" -> Written.Msg(GoldenArgs.options(None, None, None, None), withText = false),
-      "options some" -> Written.Msg(GoldenArgs.options(Some(1), Some(Double.NaN), Some(""), Some(day)), withText = false),
+      "options some" -> Written.Msg(
+        GoldenArgs.options(Some(1), Some(Double.NaN), Some(""), Some(day)),
+        withText = false,
+      ),
       "lists" -> Written.Msg(
         GoldenArgs.lists(
           List(1, -2, 3),
@@ -202,21 +231,39 @@ object Corpus:
         GoldenArgs.messages(List(GoldenText.plain, GoldenText.say("x")), Some(Text("d", English))),
         withText = false,
       ),
-      "messages legacy" -> Written.Msg(GoldenArgs.messages(Nil, Some(legacy.Message.of("l"))), withText = false),
+      "messages legacy" ->
+      Written.Msg(GoldenArgs.messages(Nil, Some(legacy.Message.of("l"))), withText = false),
       "legacy nothing" -> Written.Legacy(legacy.Message(Nil, Map.empty, Map.empty)),
       "legacy of" -> Written.Legacy(legacy.Message.of("Disk full")),
       "legacy args" -> Written.Legacy(
         legacy.Message(
-          List("a", 1, 2L, 1.5, 2.5f, true, day, LocalDateTime.of(2026, 1, 2, 3, 4), LocalTime.of(5, 6)),
+          List(
+            "a",
+            1,
+            2L,
+            1.5,
+            2.5f,
+            true,
+            day,
+            LocalDateTime.of(2026, 1, 2, 3, 4),
+            LocalTime.of(5, 6),
+          ),
           Map("n" -> 1.0, "m" -> "v", "k" -> Double.NaN),
-          Map(English -> "{$0} {$n}", Dutch -> "nl", Language("nl-BE") -> "be", Language("de") -> "de"),
+          Map(
+            English -> "{$0} {$n}",
+            Dutch -> "nl",
+            Language("nl-BE") -> "be",
+            Language("de") -> "de",
+          ),
         )
       ),
       "legacy many" -> Written.Legacy(
         legacy.Message(
           Nil,
           (1 to 20).map(i => s"k$i" -> s"v$i").toMap,
-          List("en", "nl", "fr", "de", "es", "it", "pt", "nl-BE", "fr-CA").map(t => Language(t) -> t).toMap,
+          List("en", "nl", "fr", "de", "es", "it", "pt", "nl-BE", "fr-CA").map(t =>
+            Language(t) -> t
+          ).toMap,
         )
       ),
       "displayable legacy" -> Written.Disp(legacy.Message.of("x")),
@@ -231,23 +278,27 @@ object Corpus:
       ),
     )
     val languageWrites = languages.map((n, l) => s"language $n" -> Written.Lang(l))
-    val keyWrites      = List("order.shipped", "a.b_c.D9", "golden.text.plain").map(k => s"key $k" -> Written.Key(k))
+    val keyWrites      =
+      List("order.shipped", "a.b_c.D9", "golden.text.plain").map(k => s"key $k" -> Written.Key(k))
     byString ++ scalars ++ extremes ++ others ++ languageWrites ++ keyWrites
 
   end writes
 
   // A message nested `n` levels in GoldenText.wrapped, as JSON.
-  def wrappedJson(n: Int): String =
-    (1 to n).foldLeft("""{"key":"golden.text.plain"}""")((inner, _) =>
+  def wrappedJson(n: Int): String = (1 to n).foldLeft("""{"key":"golden.text.plain"}""")(
+    (inner, _) =>
       s"""{"key":"golden.text.wrapped","args":{"inner":$inner}}"""
-    )
+  )
 
   private def say(s: String)  = s"""{"key":"golden.text.say","args":{"s":$s}}"""
   private def kept(a: String) = s"""{"key":"no.such","args":{"a":$a},"text":"T"}"""
-  private def int(i: String)  =
+
+  private def int(i: String) =
     s"""{"key":"golden.args.scalars","args":{"s":"","i":$i,"l":0,"d":0,"f":0,"b":true}}"""
+
   private def double(d: String) =
     s"""{"key":"golden.args.scalars","args":{"s":"","i":0,"l":0,"d":$d,"f":0,"b":true}}"""
+
   private def text(s: String) = s"""{"text":$s,"language":"en"}"""
   private def nest(n: Int)    = "[" * n + "1" + "]" * n
 
@@ -284,6 +335,17 @@ object Corpus:
     "123456789012345678901234567890e-10",
     "1e999999999",
     "-1e-999999999",
+    "1e-999999999",
+    "1e0000000000005",
+    "1E+05",
+    "0e0",
+    "0." + "0" * 1097 + "1",
+    "-9223372036854775808",
+    "-922337203685477580.8",
+    "-92233720368547758.08",
+    "-9223372036854775808e2",
+    "9223372036854775807",
+    "-9223372036854775807",
     "01",
     "-01",
     "00",
@@ -309,7 +371,7 @@ object Corpus:
   // that 5.0.2 added (depth 64, numbers of 1100 characters or with an exponent of more than nine
   // digits); the bounds have their own tests.
   val reads: List[(String, String)] =
-    val messages = List(
+    val messages    = List(
       "plain" -> """{"key":"golden.text.plain"}""",
       "plain with text" -> """{"key":"golden.text.plain","text":"Plain"}""",
       "plain other text" -> """{"key":"golden.text.plain","text":"Something else"}""",
@@ -325,8 +387,10 @@ object Corpus:
       "plain key long" -> s"""{"key":"a.${"b" * 300}","text":"T"}""",
       "plain field order" -> """{"text":"t","args":{},"key":"golden.text.plain"}""",
       "plain whitespace" -> " \n\t{ \"key\" : \"golden.text.plain\" ,\r\n \"text\":\"x\" } \n",
-      "plain unknown fields" -> """{"key":"golden.text.plain","x":{"a":[1,2.5,{"b":null}],"c":true},"y":[]}""",
-      "plain duplicate key" -> """{"key":"golden.text.plain","key":"golden.text.say","args":{"s":"x"}}""",
+      "plain unknown fields" ->
+      """{"key":"golden.text.plain","x":{"a":[1,2.5,{"b":null}],"c":true},"y":[]}""",
+      "plain duplicate key" ->
+      """{"key":"golden.text.plain","key":"golden.text.say","args":{"s":"x"}}""",
       "plain duplicate args" -> """{"key":"golden.text.say","args":{},"args":{"s":"x"}}""",
       "say" -> say("\"x\""),
       "say missing" -> """{"key":"golden.text.say","args":{}}""",
@@ -362,21 +426,37 @@ object Corpus:
       "words empty" -> """{"key":"golden.text.words","args":{"xs":[]}}""",
       "words null element" -> """{"key":"golden.text.words","args":{"xs":["a",null]}}""",
       "words not array" -> """{"key":"golden.text.words","args":{"xs":"a"}}""",
-      "words 10000" -> s"""{"key":"golden.text.words","args":{"xs":${List.fill(10000)("\"w\"").mkString("[", ",", "]")}}}""",
-      "words 10001" -> s"""{"key":"golden.text.words","args":{"xs":${List.fill(10001)("\"w\"").mkString("[", ",", "]")}}}""",
+      "words 10000" ->
+      s"""{"key":"golden.text.words","args":{"xs":${List.fill(10000)("\"w\"").mkString(
+          "[",
+          ",",
+          "]",
+        )}}}""",
+      "words 10001" ->
+      s"""{"key":"golden.text.words","args":{"xs":${List.fill(10001)("\"w\"").mkString(
+          "[",
+          ",",
+          "]",
+        )}}}""",
       "wrapped" -> wrappedJson(1),
       "wrapped 8" -> wrappedJson(8),
       "wrapped 9" -> wrappedJson(9),
-      "wrapped unknown inner" -> """{"key":"golden.text.wrapped","args":{"inner":{"key":"no.such","text":"Kept"}}}""",
-      "wrapped text inner" -> """{"key":"golden.text.wrapped","args":{"inner":{"text":"t","language":"en"}}}""",
-      "wrapped legacy inner" -> """{"key":"golden.text.wrapped","args":{"inner":{"args":[],"translationTemplates":{"English":"L"}}}}""",
+      "wrapped unknown inner" ->
+      """{"key":"golden.text.wrapped","args":{"inner":{"key":"no.such","text":"Kept"}}}""",
+      "wrapped text inner" ->
+      """{"key":"golden.text.wrapped","args":{"inner":{"text":"t","language":"en"}}}""",
+      "wrapped legacy inner" ->
+      """{"key":"golden.text.wrapped","args":{"inner":{"args":[],"translationTemplates":{"English":"L"}}}}""",
       "shown text" -> """{"key":"golden.text.shown","args":{"d":{"text":"t","language":"fr"}}}""",
       "shown message" -> """{"key":"golden.text.shown","args":{"d":{"key":"golden.text.plain"}}}""",
-      "shown legacy" -> """{"key":"golden.text.shown","args":{"d":{"args":[],"translationTemplates":{"en":"L"}}}}""",
+      "shown legacy" ->
+      """{"key":"golden.text.shown","args":{"d":{"args":[],"translationTemplates":{"en":"L"}}}}""",
       "shown string" -> """{"key":"golden.text.shown","args":{"d":"t"}}""",
       "quoted" -> """{"key":"golden.text.quoted","args":{"t":{"text":"q","language":"nl-BE"}}}""",
-      "quoted message" -> """{"key":"golden.text.quoted","args":{"t":{"key":"golden.text.plain"}}}""",
-      "scalars" -> """{"key":"golden.args.scalars","args":{"s":"s","i":1,"l":2,"d":1.5,"f":2.5,"b":false}}""",
+      "quoted message" ->
+      """{"key":"golden.text.quoted","args":{"t":{"key":"golden.text.plain"}}}""",
+      "scalars" ->
+      """{"key":"golden.args.scalars","args":{"s":"s","i":1,"l":2,"d":1.5,"f":2.5,"b":false}}""",
       "int 1.0" -> int("1.0"),
       "int 1e2" -> int("1e2"),
       "int 1.5" -> int("1.5"),
@@ -388,7 +468,7 @@ object Corpus:
       "int leading zero" -> int("01"),
       "int null" -> int("null"),
       "long beyond" ->
-        """{"key":"golden.args.scalars","args":{"s":"","i":0,"l":9223372036854775808,"d":0,"f":0,"b":true}}""",
+      """{"key":"golden.args.scalars","args":{"s":"","i":0,"l":9223372036854775808,"d":0,"f":0,"b":true}}""",
       "double NaN" -> double("\"NaN\""),
       "double Infinity" -> double("\"Infinity\""),
       "double -Infinity" -> double("\"-Infinity\""),
@@ -398,36 +478,40 @@ object Corpus:
       "double precise" -> double("0.30000000000000004"),
       "double long" -> double("3.14159265358979323846264338327950288"),
       "float string" ->
-        """{"key":"golden.args.scalars","args":{"s":"","i":0,"l":0,"d":0,"f":"NaN","b":true}}""",
+      """{"key":"golden.args.scalars","args":{"s":"","i":0,"l":0,"d":0,"f":"NaN","b":true}}""",
       "boolean string" ->
-        """{"key":"golden.args.scalars","args":{"s":"","i":0,"l":0,"d":0,"f":0,"b":"true"}}""",
+      """{"key":"golden.args.scalars","args":{"s":"","i":0,"l":0,"d":0,"f":0,"b":"true"}}""",
       "times" ->
-        """{"key":"golden.args.times","args":{"date":"2026-10-26","dateTime":"2026-10-26T13:05:07.123","time":"00:00"}}""",
+      """{"key":"golden.args.times","args":{"date":"2026-10-26","dateTime":"2026-10-26T13:05:07.123","time":"00:00"}}""",
       "times bad date" ->
-        """{"key":"golden.args.times","args":{"date":"2026-13-01","dateTime":"2026-10-26T13:05","time":"00:00"}}""",
+      """{"key":"golden.args.times","args":{"date":"2026-13-01","dateTime":"2026-10-26T13:05","time":"00:00"}}""",
       "times long" ->
-        s"""{"key":"golden.args.times","args":{"date":"${"2" * 65}","dateTime":"2026-10-26T13:05","time":"00:00"}}""",
+      s"""{"key":"golden.args.times","args":{"date":"${"2" *
+        65}","dateTime":"2026-10-26T13:05","time":"00:00"}}""",
       "times number" ->
-        """{"key":"golden.args.times","args":{"date":20261026,"dateTime":"2026-10-26T13:05","time":"00:00"}}""",
+      """{"key":"golden.args.times","args":{"date":20261026,"dateTime":"2026-10-26T13:05","time":"00:00"}}""",
       "language tag" -> """{"key":"golden.args.language","args":{"in":"nl-BE"}}""",
       "language name" -> """{"key":"golden.args.language","args":{"in":"French"}}""",
       "language case" -> """{"key":"golden.args.language","args":{"in":"NL-be"}}""",
       "language bad" -> """{"key":"golden.args.language","args":{"in":"not a tag"}}""",
       "language number" -> """{"key":"golden.args.language","args":{"in":1}}""",
-      "options all null" -> """{"key":"golden.args.options","args":{"i":null,"d":null,"s":null,"date":null}}""",
+      "options all null" ->
+      """{"key":"golden.args.options","args":{"i":null,"d":null,"s":null,"date":null}}""",
       "options all missing" -> """{"key":"golden.args.options"}""",
-      "options set" -> """{"key":"golden.args.options","args":{"i":1,"d":"NaN","s":"","date":"2026-10-26"}}""",
+      "options set" ->
+      """{"key":"golden.args.options","args":{"i":1,"d":"NaN","s":"","date":"2026-10-26"}}""",
       "lists" ->
-        """{"key":"golden.args.lists","args":{"ints":[1,2],"doubles":[1.5,"Infinity"],"dates":[],"opts":[null,3],"nested":[[],["a"]]}}""",
+      """{"key":"golden.args.lists","args":{"ints":[1,2],"doubles":[1.5,"Infinity"],"dates":[],"opts":[null,3],"nested":[[],["a"]]}}""",
       "lists missing" -> """{"key":"golden.args.lists","args":{"ints":[1]}}""",
       "id" -> """{"key":"golden.args.id","args":{"id":"abc"}}""",
       "id empty" -> """{"key":"golden.args.id","args":{"id":""}}""",
       "messages" ->
-        """{"key":"golden.args.messages","args":{"ms":[{"key":"golden.text.plain"},{"key":"no.such","text":"K"}],"d":{"text":"x","language":"Dutch"}}}""",
+      """{"key":"golden.args.messages","args":{"ms":[{"key":"golden.text.plain"},{"key":"no.such","text":"K"}],"d":{"text":"x","language":"Dutch"}}}""",
       "unknown" -> """{"key":"no.such","text":"T"}""",
       "unknown no text" -> """{"key":"no.such"}""",
       "unknown no text with args" -> """{"key":"no.such","args":{"a":1}}""",
-      "unknown args" -> """{"key":"no.such","args":{"a":1,"b":[1,2.50,{"c":"d"}],"e":null,"f":true,"g":{}},"text":"T"}""",
+      "unknown args" ->
+      """{"key":"no.such","args":{"a":1,"b":[1,2.50,{"c":"d"}],"e":null,"f":true,"g":{}},"text":"T"}""",
       "unknown args empty" -> """{"key":"no.such","args":{},"text":"T"}""",
       "unknown args order" -> """{"text":"T","args":{"z":1,"a":2},"key":"no.such"}""",
       "unknown args duplicate" -> """{"key":"no.such","args":{"a":1,"a":2},"text":"T"}""",
@@ -436,32 +520,50 @@ object Corpus:
       "unknown args 17" -> kept(nest(16)),
       "unknown args strings" -> kept("\"\\u00e9\\u2028\\ud83d\\ude00\\u007f\""),
       "legacy" ->
-        """{"args":["a"],"namedArgs":{"n":"v"},"translationTemplates":{"English":"Hi {$n} {$0}","nl":"Hoi"}}""",
+      """{"args":["a"],"namedArgs":{"n":"v"},"translationTemplates":{"English":"Hi {$n} {$0}","nl":"Hoi"}}""",
       "legacy no named" -> """{"args":[],"translationTemplates":{"en":"x"}}""",
       "legacy no args" -> """{"namedArgs":{},"translationTemplates":{"en":"x"}}""",
       "legacy only templates" -> """{"translationTemplates":{"en":"x"}}""",
       "legacy empty templates" -> """{"args":[],"translationTemplates":{}}""",
       "legacy number arg" -> """{"args":[1],"translationTemplates":{"en":"x"}}""",
       "legacy null arg" -> """{"args":[null],"translationTemplates":{"en":"x"}}""",
-      "legacy number named" -> """{"args":[],"namedArgs":{"n":1},"translationTemplates":{"en":"x"}}""",
+      "legacy number named" ->
+      """{"args":[],"namedArgs":{"n":1},"translationTemplates":{"en":"x"}}""",
       "legacy bad language" -> """{"args":[],"translationTemplates":{"not a tag":"x"}}""",
       "legacy language names" ->
-        """{"args":[],"translationTemplates":{"Dutch":"nl","French":"fr","nl-BE":"be","DE":"de"}}""",
-      "legacy duplicate template" -> """{"args":[],"translationTemplates":{"en":"a","English":"b","en":"c"}}""",
-      "legacy duplicate named" -> """{"args":[],"namedArgs":{"n":"a","n":"b"},"translationTemplates":{"en":"x"}}""",
-      "legacy duplicate field" -> """{"args":["a"],"args":["b"],"translationTemplates":{"en":"x"}}""",
+      """{"args":[],"translationTemplates":{"Dutch":"nl","French":"fr","nl-BE":"be","DE":"de"}}""",
+      "legacy duplicate template" ->
+      """{"args":[],"translationTemplates":{"en":"a","English":"b","en":"c"}}""",
+      "legacy duplicate named" ->
+      """{"args":[],"namedArgs":{"n":"a","n":"b"},"translationTemplates":{"en":"x"}}""",
+      "legacy duplicate field" ->
+      """{"args":["a"],"args":["b"],"translationTemplates":{"en":"x"}}""",
       "legacy template number" -> """{"args":[],"translationTemplates":{"en":1}}""",
       "legacy templates null" -> """{"args":[],"translationTemplates":null}""",
       "legacy templates array" -> """{"args":[],"translationTemplates":[]}""",
       "legacy args null" -> """{"args":null,"translationTemplates":{"en":"x"}}""",
       "legacy named null" -> """{"args":[],"namedArgs":null,"translationTemplates":{"en":"x"}}""",
-      "legacy unknown field" -> """{"args":[],"translationTemplates":{"en":"x"},"z":[1,{"a":null}]}""",
-      "legacy with key" -> """{"key":"golden.text.plain","args":[],"translationTemplates":{"en":"x"}}""",
+      "legacy unknown field" ->
+      """{"args":[],"translationTemplates":{"en":"x"},"z":[1,{"a":null}]}""",
+      "legacy with key" ->
+      """{"key":"golden.text.plain","args":[],"translationTemplates":{"en":"x"}}""",
       "legacy 1000 templates" ->
-        (1 to 1000).map(i => s""""x-t$i":"t"""").mkString("""{"args":[],"translationTemplates":{""", ",", "}}"),
+      (1 to 1000).map(i => s""""x-t$i":"t"""").mkString(
+        """{"args":[],"translationTemplates":{""",
+        ",",
+        "}}",
+      ),
       "legacy 1001 templates" ->
-        (1 to 1001).map(i => s""""x-t$i":"t"""").mkString("""{"args":[],"translationTemplates":{""", ",", "}}"),
-      "legacy 1001 args" -> List.fill(1001)("\"a\"").mkString("""{"args":[""", ",", """],"translationTemplates":{"en":"x"}}"""),
+      (1 to 1001).map(i => s""""x-t$i":"t"""").mkString(
+        """{"args":[],"translationTemplates":{""",
+        ",",
+        "}}",
+      ),
+      "legacy 1001 args" -> List.fill(1001)("\"a\"").mkString(
+        """{"args":[""",
+        ",",
+        """],"translationTemplates":{"en":"x"}}""",
+      ),
       "legacy long template" -> s"""{"args":[],"translationTemplates":{"en":"${"t" * 65537}"}}""",
       "text" -> text("\"x\""),
       "text language name" -> """{"text":"x","language":"English"}""",
@@ -500,6 +602,9 @@ object Corpus:
       "nul literal" -> """{"key":"golden.text.plain","x":nul}""",
       "nested 30" -> s"""{"key":"golden.text.plain","x":${nest(30)}}""",
       "nested 63" -> s"""{"key":"golden.text.plain","x":${nest(62)}}""",
+      "bom" -> "\ufeff{\"key\":\"golden.text.plain\"}",
+      "long min" ->
+      """{"key":"golden.args.scalars","args":{"s":"","i":0,"l":-9223372036854775808,"d":0,"f":0,"b":true}}""",
     )
     val keptNumbers = numbers.zipWithIndex.map((n, i) => s"number $i ($n)" -> kept(s"[$n]"))
     messages ++ keptNumbers
@@ -554,20 +659,25 @@ object Corpus:
       "duplicate key" -> """{"format":1,"language":"de","messages":{"a.b":"x","a.b":"y"}}""",
       "template number" -> """{"format":1,"language":"de","messages":{"a.b":1,"a.c":"y"}}""",
       "template null" -> """{"format":1,"language":"de","messages":{"a.b":null}}""",
-      "template long" -> s"""{"format":1,"language":"de","messages":{"a.b":"${"t" * 65537}","a.c":"y"}}""",
-      "unknown fields" -> """{"format":1,"language":"de","note":{"a":[1,2]},"messages":{"a.b":"x"}}""",
+      "template long" ->
+      s"""{"format":1,"language":"de","messages":{"a.b":"${"t" * 65537}","a.c":"y"}}""",
+      "unknown fields" ->
+      """{"format":1,"language":"de","note":{"a":[1,2]},"messages":{"a.b":"x"}}""",
       "nested 15" -> nested(14),
       "nested 16" -> nested(15),
       "nested 17" -> nested(16),
-      "escapes" -> """{"format":1,"language":"de","messages":{"a.b":"\u00e9\n\ud83d\ude00\u2028"}}""",
+      "escapes" ->
+      """{"format":1,"language":"de","messages":{"a.b":"\u00e9\n\ud83d\ude00\u2028"}}""",
       "high escaped" -> """{"format":1,"language":"de","messages":{"a.b":"\ud800"}}""",
       "raw control" -> "{\"format\":1,\"language\":\"de\",\"messages\":{\"a.b\":\"\u0001\"}}",
-      "whitespace" -> " {\n  \"format\" : 1,\n  \"language\" : \"de\",\n  \"messages\" : {\n    \"a.b\" : \"x\"\n  }\n}\n",
+      "whitespace" ->
+      " {\n  \"format\" : 1,\n  \"language\" : \"de\",\n  \"messages\" : {\n    \"a.b\" : \"x\"\n  }\n}\n",
       "not object" -> "[]",
       "empty" -> "",
       "truncated" -> """{"format":1,"language":"de","messages":{"a.b":"x"""",
       "trailing" -> """{"format":1,"language":"de","messages":{}}x""",
       "number 01" -> """{"format":1,"language":"de","n":01,"messages":{}}""",
+      "bom" -> "\ufeff{\"format\":1,\"language\":\"de\",\"messages\":{}}",
     )
 
   end catalogueInputs

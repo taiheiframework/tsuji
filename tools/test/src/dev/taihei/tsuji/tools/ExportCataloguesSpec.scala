@@ -4,8 +4,6 @@ import java.io.{ByteArrayOutputStream, PrintStream}
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path}
 
-import zio.json.*
-import zio.json.ast.Json
 import zio.test.*
 
 import dev.taihei.tsuji.*
@@ -29,13 +27,9 @@ object ExportCataloguesSpec extends ZIOSpecDefault:
     (status, out.toString("UTF-8"), err.toString("UTF-8"))
 
   private def messages(dir: Path, tag: String): Map[String, String] =
-    Files
-      .readString(dir.resolve(s"$tag.json"), StandardCharsets.UTF_8)
-      .fromJson[Json]
-      .toOption
-      .flatMap(_.asObject)
-      .flatMap(_.get("messages"))
-      .flatMap(_.as[Map[String, String]].toOption)
+    Catalogue
+      .parse(Files.readString(dir.resolve(s"$tag.json"), StandardCharsets.UTF_8))
+      .map(_.messages.map((k, v) => k.value -> v))
       .getOrElse(Map.empty)
 
   def spec = suite("ExportCatalogues")(

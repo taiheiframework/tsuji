@@ -1,7 +1,8 @@
 package dev.taihei.tsuji
 
-import zio.json.*
 import zio.test.*
+
+import dev.taihei.tsuji.TestJson.*
 
 // A thread with a small stack exists on the JVM only.
 object UnknownKeySpec extends ZIOSpecDefault:

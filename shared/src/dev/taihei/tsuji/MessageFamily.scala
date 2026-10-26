@@ -4,8 +4,6 @@ import scala.NamedTuple.AnyNamedTuple
 import scala.annotation.publicInBinary
 import scala.collection.mutable
 
-import zio.json.ast.Json
-
 /**
  * A group of related messages under one key prefix, written in one source language (English
  * unless the family says otherwise). Each message is a `val` defined with [[message]]; its key is
@@ -141,7 +139,7 @@ final class MessageDefinition[A <: AnyNamedTuple] private[tsuji] (
       val (errors, _) = MessageFormat2.check(t, kinds)
       language -> (if errors.isEmpty then Right(MessageFormat2.parse(t).message) else Left(errors))
 
-  private[tsuji] def decodeArgs(args: Json.Obj, context: MessageArg.Context)
+  private[tsuji] def decodeArgs(args: JsonTree.Obj, context: MessageArg.Context)
     : Either[String, Vector[Any]] =
     arguments.foldLeft[Either[String, Vector[Any]]](Right(Vector.empty)):
       case (acc, (name, arg)) =>

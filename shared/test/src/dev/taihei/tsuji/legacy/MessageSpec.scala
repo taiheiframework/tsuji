@@ -2,10 +2,10 @@ package dev.taihei.tsuji.legacy
 
 import java.time.LocalDate
 
-import zio.json.*
 import zio.test.*
 
 import dev.taihei.tsuji.Language
+import dev.taihei.tsuji.TestJson.*
 
 // The 4.x Message, kept as legacy.Message until 6.0.0, behaves as it does in 4.0.x, its JSON
 // codec included.

@@ -1,10 +1,12 @@
 package dev.taihei.tsuji
 
-import zio.json.*
 import zio.test.*
 
 import dev.taihei.tsuji.Language.*
+import dev.taihei.tsuji.TestJson.{*, given}
 import dev.taihei.tsuji.legacy.Message
+
+import com.github.plokhotnyuk.jsoniter_scala.core.*
 
 /** Any BCP 47 language, beside the three built-ins (since 2.0.0). */
 object OpenLanguageSpec extends ZIOSpecDefault:
@@ -76,9 +78,13 @@ object OpenLanguageSpec extends ZIOSpecDefault:
       test("a language serializes and still equals itself") {
         assertTrue(German.isInstanceOf[java.io.Serializable])
       },
-      test("a JsonCodec can still be summoned") {
-        val codec = summon[JsonCodec[Language]]
-        assertTrue(codec.decoder.decodeJson(codec.encoder.encodeJson(German).toString) == Right(German))
+      test("a JsonValueCodec can be summoned") {
+        val codec = summon[JsonValueCodec[Language]]
+        assertTrue(readFromString(writeToString(German)(
+          using codec
+        ))(
+          using codec
+        ) == German)
       },
       test("what is not a language tag is refused, and of() falls back to English") {
         assertTrue(

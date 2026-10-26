@@ -1,9 +1,8 @@
 package dev.taihei.tsuji
 
-import zio.json.*
-import zio.json.ast.Json
+import scala.util.control.NonFatal
 
-import zio.Chunk
+import com.github.plokhotnyuk.jsoniter_scala.core.*
 
 /**
  * The MF2 templates of one language, by message key: one catalogue file, written by a translator
@@ -22,15 +21,17 @@ final class Catalogue private (
   val problems: List[CatalogueProblem]):
 
   /** The catalogue as a format 1 file, its keys in order. */
-  def toJson: String = toJsonAst.toJson
+  def toJson: String = JsonTreeWriter.compact(toTree)
 
-  private[tsuji] def toJsonAst: Json =
-    Json.Obj(
-      "format" -> Json.Num(Catalogue.Format),
-      "language" -> Json.Str(language.tag),
-      "messages" -> Json.Obj(
-        Chunk.fromIterable(messages.toList.sortBy(_._1.value).map((k, v) => k.value -> Json.Str(v)))
-      ),
+  // The layout of the files taihei-tsuji-tools writes: a field a line, indented.
+  private[tsuji] def toJsonPretty: String = JsonTreeWriter.pretty(toTree)
+
+  private def toTree: JsonTree =
+    JsonTree.Obj(
+      "format" -> JsonTree.Num(java.math.BigDecimal.valueOf(Catalogue.Format.toLong)),
+      "language" -> JsonTree.Str(language.tag),
+      "messages" ->
+      JsonTree.Obj(messages.toVector.sortBy(_._1.value).map((k, v) => k.value -> JsonTree.Str(v))),
     )
 
   // The entries of keys that start with `prefix` and a dot; the others become problems.
@@ -77,34 +78,54 @@ object Catalogue:
     else if JsonDepth.exceeds(json, MaxDepth) then
       Left(problem(s"a catalogue nests deeper than $MaxDepth"))
     else
-      // The reader of messages: its bounds on numbers hold for a catalogue too.
-      json.fromJson[Json](
-        using BoundedJson.decoder
-      ) match
-        case Left(error)          => Left(problem(s"not JSON: ${Printable(error)}"))
-        case Right(obj: Json.Obj) => fromAst(obj)
-        case Right(_)             => Left(problem("a catalogue is a JSON object"))
+      // The reader of messages, so its bounds hold for a catalogue too. Reentrant: a catalogue is
+      // loaded lazily, when a message is first shown, which may happen inside a caller's own
+      // jsoniter-scala decode on the same thread, whose pooled reader readFromString would reuse.
+      val read =
+        try
+          Right(readFromStringReentrant(json, ParseConfig)(
+            using TreeCodec.tree
+          ))
+        catch
+          case e: JsonReaderException => Left(problem(s"not JSON: ${Printable(e.getMessage)}"))
+          case NonFatal(_)            => Left(problem("not JSON"))
+      read.flatMap:
+        case obj: JsonTree.Obj => fromTree(obj)
+        case _                 => Left(problem("a catalogue is a JSON object"))
+    end if
 
-  private def fromAst(obj: Json.Obj): Either[CatalogueProblem, Catalogue] =
+  end parse
+
+  // No hex dump of the input in an error, the end of the input checked, and room for the longest
+  // string a catalogue of MaxLength can hold, so that a template that is too long is a problem
+  // of its entry, as it was in 5.x, not a refusal of the file.
+  private val ParseConfig = ReaderConfig
+    .withAppendHexDumpToParseException(false)
+    .withCheckForEndOfInput(true)
+    .withMaxCharBufSize(MaxLength)
+
+  private def fromTree(obj: JsonTree.Obj): Either[CatalogueProblem, Catalogue] =
     for
       _        <- obj.get("format") match
-        case Some(Json.Num(n)) if BigDecimal(n) == BigDecimal(Format) => Right(())
-        case Some(other)                                              =>
-          Left(CatalogueProblem(s"format ${Printable(other.toString)} is not format $Format"))
+        case Some(JsonTree.Num(n)) if BigDecimal(n) == BigDecimal(Format) => Right(())
+        case Some(other)                                                  =>
+          Left(CatalogueProblem(
+            s"format ${Printable(JsonTreeWriter.compact(other))} is not format $Format"
+          ))
         case None => Left(CatalogueProblem("a catalogue needs \"format\""))
       language <- obj.get("language") match
-        case Some(Json.Str(tag)) => Language.parse(tag).left.map(CatalogueProblem(_))
+        case Some(JsonTree.Str(tag)) => Language.parse(tag).left.map(CatalogueProblem(_))
         case _ => Left(CatalogueProblem("a catalogue needs \"language\", a language tag"))
       entries  <- obj.get("messages") match
-        case Some(Json.Obj(fields)) if fields.size > MaxMessages             =>
+        case Some(JsonTree.Obj(fields)) if fields.size > MaxMessages             =>
           Left(CatalogueProblem(s"a catalogue holds at most $MaxMessages messages", Some(language)))
-        case Some(Json.Obj(fields)) if SharedHashes.exceed(fields.map(_._1)) =>
+        case Some(JsonTree.Obj(fields)) if SharedHashes.exceed(fields.map(_._1)) =>
           Left(CatalogueProblem(
             s"more than ${SharedHashes.Max} keys of a catalogue share a hash code",
             Some(language),
           ))
-        case Some(Json.Obj(fields))                                          => Right(fields)
-        case _                                                               =>
+        case Some(JsonTree.Obj(fields))                                          => Right(fields)
+        case _                                                                   =>
           Left(CatalogueProblem("a catalogue needs \"messages\", an object", Some(language)))
     yield
       val messages = Map.newBuilder[MessageKey, String]
@@ -122,15 +143,15 @@ object Catalogue:
             else
               seen += k
               v match
-                case Json.Str(t) if t.length <= MessageFormat2.MaxTemplateLength =>
+                case JsonTree.Str(t) if t.length <= MessageFormat2.MaxTemplateLength =>
                   messages += key -> t
-                case Json.Str(_)                                                 =>
+                case JsonTree.Str(_)                                                 =>
                   problems += CatalogueProblem(
                     s"a template is at most ${MessageFormat2.MaxTemplateLength} characters",
                     Some(language),
                     Some(key),
                   )
-                case _                                                           =>
+                case _                                                               =>
                   problems += CatalogueProblem("a template is a string", Some(language), Some(key))
       new Catalogue(language, messages.result(), problems.result())
 

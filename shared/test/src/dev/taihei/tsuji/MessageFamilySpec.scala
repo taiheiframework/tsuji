@@ -2,10 +2,10 @@ package dev.taihei.tsuji
 
 import java.time.LocalDate
 
-import zio.json.*
 import zio.test.*
 
 import dev.taihei.tsuji.Language.*
+import dev.taihei.tsuji.TestJson.*
 
 object MessageFamilySpec extends ZIOSpecDefault:
 
@@ -218,13 +218,15 @@ object MessageFamilySpec extends ZIOSpecDefault:
     ),
     suite("JSON, format 1")(
       test("only the key and typed arguments travel, with the source text") {
+        // Writing needs no catalogue; a program that only writes gives the codec an empty one.
+        given Catalogues = Catalogues()
         val json = Orders.shipped(count = 3, on = date).toJson
         assertTrue(
           json ==
           """{"key":"order.shipped","args":{"count":3,"on":"2026-10-23"},"text":"3 items shipped on October 23, 2026"}""",
           Orders.cancelled.toJson == """{"key":"order.cancelled","text":"Your order was cancelled"}""",
           Orders.cancelled.toJson(
-            using Message.encoder(withText = false)
+            using Message.codec(withText = false)
           ) == """{"key":"order.cancelled"}""",
         )
       },

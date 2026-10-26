@@ -2,8 +2,9 @@ package dev.taihei.tsuji
 
 import java.util.Locale
 
-import zio.json.*
 import zio.test.*
+
+import dev.taihei.tsuji.TestJson.{*, given}
 
 // java.util.Locale exists on the JVM only. The locales are built with the Locale constructors,
 // because Locale.of needs Java 19 and the jar targets Java 17. The tests compile against the Java

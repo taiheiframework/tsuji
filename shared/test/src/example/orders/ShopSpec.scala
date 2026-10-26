@@ -2,11 +2,11 @@ package example.orders
 
 import java.time.LocalDate
 
-import zio.json.*
 import zio.test.*
 
 import dev.taihei.tsuji.*
 import dev.taihei.tsuji.Language.*
+import dev.taihei.tsuji.TestJson.*
 
 object ShopSpec extends ZIOSpecDefault:
 

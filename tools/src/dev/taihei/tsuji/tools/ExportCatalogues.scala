@@ -8,8 +8,6 @@ import java.util.jar.JarFile
 import scala.jdk.CollectionConverters.*
 import scala.util.control.NonFatal
 
-import zio.json.*
-
 import dev.taihei.tsuji.*
 
 /**
@@ -128,7 +126,7 @@ object ExportCatalogues:
       val file     = dir.resolve(s"${language.tag}.json")
       Files.writeString(
         file,
-        Catalogue(language, messages.toMap).toJsonAst.toJsonPretty + "\n",
+        Catalogue(language, messages.toMap).toJsonPretty + "\n",
         StandardCharsets.UTF_8,
       )
       out.println(s"${messages.size} messages in ${language.tag}: $file")

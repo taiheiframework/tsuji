@@ -4,9 +4,6 @@ import java.time.{LocalDate, LocalDateTime, LocalTime}
 
 import scala.util.Try
 
-import zio.json.*
-import zio.json.ast.Json
-
 /**
  * How a value of type `A` is a message argument: what a template sees of it, and how it is written
  * to and read from JSON. Instances exist for `String`, `Int`, `Long`, `Double`, `Float`,
@@ -26,8 +23,8 @@ import zio.json.ast.Json
 final class MessageArg[A] private[tsuji] (
   private[tsuji] val kind: ArgKind,
   private[tsuji] val toFormat: (A, Language, Catalogues, Budget) => Any,
-  private[tsuji] val encode: (A, Budget) => Json,
-  private[tsuji] val decode: (Json, MessageArg.Context) => Either[String, A],
+  private[tsuji] val encode: (A, Budget) => JsonTree,
+  private[tsuji] val decode: (JsonTree, MessageArg.Context) => Either[String, A],
   private[tsuji] val absent: Option[A] = None)
 
 object MessageArg:
@@ -45,8 +42,8 @@ object MessageArg:
 
   private def simple[A](
     kind: ArgKind,
-    encode: A => Json,
-    decode: Json => Either[String, A],
+    encode: A => JsonTree,
+    decode: JsonTree => Either[String, A],
   ): MessageArg[A] =
     new MessageArg[A](
       kind,
@@ -61,7 +58,7 @@ object MessageArg:
     )
 
   private def number[A](
-    encode: A => Json,
+    encode: A => JsonTree,
     decode: BigDecimal => Option[A],
     name: String,
     special: String => Option[A] = (_: String) => None,
@@ -70,16 +67,16 @@ object MessageArg:
       ArgKind.Number,
       encode,
       {
-        case Json.Num(n) => decode(BigDecimal(n)).toRight(s"not $name: $n")
-        case Json.Str(s) => special(s).toRight(s"expected a number, not a string")
-        case other       => Left(s"expected a number, not ${kindOf(other)}")
+        case JsonTree.Num(n) => decode(BigDecimal(n)).toRight(s"not $name: $n")
+        case JsonTree.Str(s) => special(s).toRight(s"expected a number, not a string")
+        case other           => Left(s"expected a number, not ${kindOf(other)}")
       },
     )
 
   // JSON has no NaN or infinity: they travel as the strings Java and JavaScript print for them.
-  private def finite(d: Double): Json =
-    if d.isNaN || d.isInfinite then Json.Str(d.toString)
-    else Json.Num(BigDecimal(d.toString).bigDecimal)
+  private def finite(d: Double): JsonTree =
+    if d.isNaN || d.isInfinite then JsonTree.Str(d.toString)
+    else JsonTree.Num(BigDecimal(d.toString).bigDecimal)
 
   private def nonFinite(s: String): Option[Double] = s match
     case "NaN"       => Some(Double.NaN)
@@ -94,40 +91,40 @@ object MessageArg:
   ): MessageArg[A] =
     simple(
       kind,
-      a => Json.Str(a.toString),
+      a => JsonTree.Str(a.toString),
       {
-        case Json.Str(s) if s.length <= MaxTemporalLength =>
+        case JsonTree.Str(s) if s.length <= MaxTemporalLength =>
           Try(parse(s)).toOption.toRight(s"not an ISO 8601 $name: '${Printable(s)}'")
-        case Json.Str(_) => Left(s"not an ISO 8601 $name: too long")
-        case other       => Left(s"expected an ISO 8601 $name, not ${kindOf(other)}")
+        case JsonTree.Str(_) => Left(s"not an ISO 8601 $name: too long")
+        case other           => Left(s"expected an ISO 8601 $name, not ${kindOf(other)}")
       },
     )
 
-  private def kindOf(json: Json): String = json match
-    case _: Json.Obj  => "an object"
-    case _: Json.Arr  => "an array"
-    case _: Json.Str  => "a string"
-    case _: Json.Num  => "a number"
-    case _: Json.Bool => "a boolean"
-    case Json.Null    => "null"
+  private def kindOf(json: JsonTree): String = json match
+    case _: JsonTree.Obj  => "an object"
+    case _: JsonTree.Arr  => "an array"
+    case _: JsonTree.Str  => "a string"
+    case _: JsonTree.Num  => "a number"
+    case _: JsonTree.Bool => "a boolean"
+    case JsonTree.Null    => "null"
 
   given MessageArg[String] = simple(
     ArgKind.Text,
-    Json.Str(_),
+    JsonTree.Str(_),
     {
-      case Json.Str(s) => Right(s)
-      case other       => Left(s"expected a string, not ${kindOf(other)}")
+      case JsonTree.Str(s) => Right(s)
+      case other           => Left(s"expected a string, not ${kindOf(other)}")
     },
   )
 
   given MessageArg[Int] = number[Int](
-    i => Json.Num(BigDecimal(i).bigDecimal),
+    i => JsonTree.Num(BigDecimal(i).bigDecimal),
     n => Option.when(n.isValidInt)(n.toInt),
     "an Int",
   )
 
   given MessageArg[Long] = number[Long](
-    l => Json.Num(BigDecimal(l).bigDecimal),
+    l => JsonTree.Num(BigDecimal(l).bigDecimal),
     n => Option.when(n.isValidLong)(n.toLong),
     "a Long",
   )
@@ -144,10 +141,10 @@ object MessageArg:
 
   given MessageArg[Boolean] = simple(
     ArgKind.Text,
-    Json.Bool(_),
+    JsonTree.Bool(_),
     {
-      case Json.Bool(b) => Right(b)
-      case other        => Left(s"expected a boolean, not ${kindOf(other)}")
+      case JsonTree.Bool(b) => Right(b)
+      case other            => Left(s"expected a boolean, not ${kindOf(other)}")
     },
   )
 
@@ -158,11 +155,11 @@ object MessageArg:
   /** A language travels as its tag (`"nl-BE"`) and shows as its name in the reader's language. */
   given MessageArg[Language] = simple(
     ArgKind.Text,
-    l => Json.Str(l.tag),
-    json => summon[JsonDecoder[Language]].fromJsonAST(json),
+    l => JsonTree.Str(l.tag),
+    Language.fromTree,
   )
 
-  private def nested[A <: Displayable](decodeNested: (Json, Context) => Either[String, A])
+  private def nested[A <: Displayable](decodeNested: (JsonTree, Context) => Either[String, A])
     : MessageArg[A] =
     new MessageArg[A](
       ArgKind.Text,
@@ -173,7 +170,7 @@ object MessageArg:
         budget,
       ) =>
         catalogues.renderWithin(a, language, budget),
-      (a, budget) => Displayable.toJsonAst(a, budget),
+      (a, budget) => Displayable.toTree(a, budget),
       (json, context) =>
         if context.depth >= MaxDepth then Left(s"messages nested deeper than $MaxDepth")
         else decodeNested(json, context.copy(depth = context.depth + 1)),
@@ -200,11 +197,11 @@ object MessageArg:
         catalogues,
         budget,
       ) => o.fold("")(a => base.toFormat(a, language, catalogues, budget)),
-      (o, budget) => o.fold(Json.Null)(a => base.encode(a, budget)),
+      (o, budget) => o.fold(JsonTree.Null)(a => base.encode(a, budget)),
       (json, context) =>
         json match
-          case Json.Null => Right(None)
-          case other     => base.decode(other, context).map(Some(_)),
+          case JsonTree.Null => Right(None)
+          case other         => base.decode(other, context).map(Some(_)),
       absent = Some(None),
     )
 
@@ -226,15 +223,15 @@ object MessageArg:
           ),
           budget,
         ),
-      (as, budget) => Json.Arr(as.map(a => base.encode(a, budget))*),
+      (as, budget) => JsonTree.Arr(as.iterator.map(a => base.encode(a, budget)).toVector),
       (json, context) =>
         json match
-          case Json.Arr(elements) if elements.size <= MaxElements =>
+          case JsonTree.Arr(elements) if elements.size <= MaxElements =>
             elements.foldLeft[Either[String, List[A]]](Right(Nil)): (acc, e) =>
               acc.flatMap(list => base.decode(e, context).map(_ :: list))
             .map(_.reverse)
-          case Json.Arr(_) => Left(s"a list longer than $MaxElements")
-          case other       => Left(s"expected an array, not ${kindOf(other)}"),
+          case JsonTree.Arr(_) => Left(s"a list longer than $MaxElements")
+          case other           => Left(s"expected an array, not ${kindOf(other)}"),
     )
 
   /**

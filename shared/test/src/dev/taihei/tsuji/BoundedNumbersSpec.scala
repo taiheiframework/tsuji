@@ -1,13 +1,8 @@
 package dev.taihei.tsuji
 
-import java.math.BigInteger
-
-import zio.json.*
-import zio.json.ast.Json
 import zio.test.*
 
-// Numbers beyond the reader's bounds, in a catalogue and in an AST built elsewhere: both are
-// refused as a decoding error, on both platforms.
+// Numbers beyond the reader's bounds in a catalogue are refused, on both platforms.
 object BoundedNumbersSpec extends ZIOSpecDefault:
 
   private val extreme = List(
@@ -47,7 +42,7 @@ object BoundedNumbersSpec extends ZIOSpecDefault:
       assertTrue(result.left.exists(_.contains("longer than 1100 characters")), millis < 1000)
     },
     test("4M characters of catalogue numbers just under the bound are read in time that grows with them") {
-      val near   = "0." + "0" * (BoundedJson.MaxNumberLength - 3) + "1"
+      val near   = "0." + "0" * (JsonTreeReader.MaxNumberLength - 3) + "1"
       val many   = List.fill((Catalogue.MaxLength - 200) / (near.length + 1))(near).mkString("[", ",", "]")
       val input  = catalogue(many)
       val start  = java.lang.System.nanoTime()
@@ -61,32 +56,6 @@ object BoundedNumbersSpec extends ZIOSpecDefault:
         parsed.map(_.language) == Right(Language("de")),
         parsed.map(_.messages.map((k, v) => k.value -> v)) == Right(Map("numbers.one" -> "Eins")),
         parsed.map(_.problems) == Right(Nil),
-      )
-    },
-    test("an AST built elsewhere with a number of an out-of-bounds scale is refused") {
-      given Catalogues = Catalogues(Seq(Orders))
-      // An AST from another reader, with a number beyond the bound.
-      val viaZio        = """{"text":"x","language":"en","n":7e-2147483648}""".fromJson[Json]
-      val built         = Json.Num(new java.math.BigDecimal(BigInteger.valueOf(7), Int.MinValue))
-      def text(n: Json) = Json.Obj("text" -> Json.Str("x"), "language" -> Json.Str("en"), "n" -> n)
-      def msg(n: Json)  = Json.Obj("key" -> Json.Str("no.such"), "args" -> Json.Obj("a" -> n), "text" -> Json.Str("t"))
-      val refused       = List(
-        viaZio.flatMap(_.as[Text]),
-        viaZio.flatMap(_.as[Displayable]),
-        text(built).as[Text],
-        text(built).as[Displayable],
-        msg(built).as[Message],
-        msg(built).as[Displayable],
-      )
-      val edge          = BoundedJson.MaxScale
-      val accepted      = List(edge, -edge).map: scale =>
-        msg(Json.Num(new java.math.BigDecimal(BigInteger.valueOf(7), scale))).as[Message]
-      val beyond        = msg(Json.Num(new java.math.BigDecimal(BigInteger.valueOf(7), edge + 1))).as[Message]
-      assertTrue(
-        viaZio.isRight,
-        refused.forall(_.left.exists(_.contains(s"scale beyond ${BoundedJson.MaxScale}"))),
-        accepted.forall(_.isRight),
-        beyond.left.exists(_.contains("scale beyond")),
       )
     },
   )

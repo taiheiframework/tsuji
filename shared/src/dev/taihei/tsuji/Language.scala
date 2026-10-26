@@ -2,7 +2,7 @@ package dev.taihei.tsuji
 
 import java.util.Locale
 
-import zio.json.*
+import com.github.plokhotnyuk.jsoniter_scala.core.*
 
 /**
  * A language, identified by its canonical BCP 47 tag (`en`, `nl-BE`, `de`, `zh-Hant-TW`).
@@ -268,16 +268,27 @@ object Language extends LanguagePlatform:
   private def decode(s: String): Either[String, Language] =
     byName.get(s).map(Right(_)).getOrElse(parse(s))
 
-  // A built-in is written by its name, as the enum was, so stored data and older readers keep
-  // working; any other language by its tag. Both forms are read.
-  given JsonEncoder[Language] = JsonEncoder.string.contramap(_.toString)
-  given JsonDecoder[Language] = JsonDecoder.string.mapOrFail(decode)
+  // The language in a JSON tree: a string, in either of the forms the codecs read.
+  private[tsuji] def fromTree(json: JsonTree): Either[String, Language] = json match
+    case JsonTree.Str(s) => decode(s)
+    case _               => Left("a language is a string")
 
-  // The enum derived a JsonCodec; code that summons one keeps compiling.
-  given JsonCodec[Language] = JsonCodec(summon[JsonEncoder[Language]], summon[JsonDecoder[Language]])
+  /**
+   * A language as a JSON string. A built-in is written by its name (`"English"`), as the enum of
+   * 1.x was, so stored data and older readers keep working; any other language by its tag
+   * (`"nl-BE"`). Both forms are read; anything else is a `JsonReaderException`.
+   */
+  given JsonValueCodec[Language] = new JsonValueCodec[Language]:
+    def decodeValue(in: JsonReader, default: Language): Language =
+      decode(in.readString(null)).fold(in.decodeError, identity)
+    def encodeValue(x: Language, out: JsonWriter): Unit          = out.writeVal(x.toString)
+    def nullValue: Language                                      = null
 
-  given JsonFieldEncoder[Language] = JsonFieldEncoder.string.contramap(_.toString)
-  given JsonFieldDecoder[Language] = JsonFieldDecoder.string.mapOrFail(decode)
+  /** A language as the name of a JSON object's field, in the forms of its value codec. */
+  given JsonKeyCodec[Language] = new JsonKeyCodec[Language]:
+    def decodeKey(in: JsonReader): Language           =
+      decode(in.readKeyAsString()).fold(in.decodeError, identity)
+    def encodeKey(x: Language, out: JsonWriter): Unit = out.writeKey(x.toString)
 
   private def fromCanonical(tag: String): Language =
     builtIns.find(_.tag == tag).getOrElse(new Language(tag))

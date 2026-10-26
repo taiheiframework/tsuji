@@ -2,10 +2,10 @@ package dev.taihei.tsuji.legacy
 
 import java.time.{LocalDate, LocalDateTime, LocalTime}
 
-import zio.json.*
-
 import dev.taihei.tsuji.*
 import dev.taihei.tsuji.Language.*
+
+import com.github.plokhotnyuk.jsoniter_scala.core.*
 
 /** The argument values a 4.x message takes. */
 @deprecated("Use the typed arguments of a MessageFamily; legacy is removed in 6.0.0", "5.0.0")
@@ -82,13 +82,13 @@ object Message:
 
   /**
    * Writes and reads a message as `{"args": [...], "namedArgs": {...}, "translationTemplates":
-   * {...}}`, as taihei-i18n 4.0.x does. A message read from JSON holds at most 1000 templates and
-   * 1000 arguments (positional and named together), and no template, argument or argument name
-   * longer than 65536 characters; a larger one is a decoding error.
+   * {...}}`, as taihei-i18n 4.0.x does: the arguments as strings, the templates by language. A
+   * message read from JSON holds at most 1000 templates and 1000 arguments (positional and named
+   * together), and no template, argument or argument name longer than 65536 characters; a larger
+   * one is a decoding error, a `JsonReaderException`, as anything else wrong with the input is.
+   * The value is written compactly, whatever the `WriterConfig`'s indentation.
    */
-  given JsonCodec[Message] =
-    val derived = DeriveJsonCodec.gen[Message]
-    JsonCodec(derived.encoder, derived.decoder.mapOrFail(withinBounds))
+  given JsonValueCodec[Message] = TreeCodec(fromTree, toTree)
 
   // JSON is where a message comes from outside the program. These bounds hold the size of what
   // is read, and with it the text formatting it makes, to what a real message needs.
@@ -115,30 +115,68 @@ object Message:
       Left(s"an argument name is longer than $MaxStringLength characters")
     else Right(m)
 
-  given JsonEncoder[MessageArg] = JsonEncoder[String].contramap(_.toString)
-  given JsonDecoder[MessageArg] = JsonDecoder[String].map(identity)
+  // The 4.x shape, as the codec 4.x derived wrote it: every field, the arguments as their text, a
+  // built-in language by its name.
+  private[tsuji] def toTree(m: Message): JsonTree =
+    JsonTree.Obj(
+      "args" -> JsonTree.Arr(m.args.iterator.map(a => JsonTree.Str(a.toString)).toVector),
+      "namedArgs" ->
+      JsonTree.Obj(m.namedArgs.iterator.map((k, v) => k -> JsonTree.Str(v.toString)).toVector),
+      "translationTemplates" ->
+      JsonTree.Obj(m.translationTemplates.iterator.map((l, t) =>
+        l.toString -> JsonTree.Str(t)
+      ).toVector),
+    )
 
-  // The two objects of a message are read as a list of pairs, counted, and only then made into a
-  // map: inserting many keys with the same hash into a map costs time quadratic in their number,
-  // so the count has to be known before any hashing. The derived codec above picks these up.
-  // A duplicate key keeps its last value, as the map decoder of zio-json does.
-  private given namedArgsDecoder: JsonDecoder[Map[String, MessageArg]] =
-    JsonDecoder.keyValueChunk[String, MessageArg].mapOrFail: pairs =>
-      if pairs.size > MaxArgs then Left(s"a message holds more than $MaxArgs arguments")
-      else Right(pairs.toMap)
-
-  private given templatesDecoder: JsonDecoder[Map[Language, String]] =
-    JsonDecoder.keyValueChunk[String, String].mapOrFail: pairs =>
-      if pairs.size > MaxTemplates then Left(s"a message holds more than $MaxTemplates templates")
+  // The 4.x shape, read as the codec 4.x derived read it: "args" and "translationTemplates" are
+  // required, "namedArgs" may be missing or null, a field given twice is an error, other fields
+  // are ignored, and within the two objects a name given twice keeps its last value.
+  private[tsuji] def fromTree(json: JsonTree): Either[String, Message] = json match
+    case JsonTree.Obj(fields) =>
+      val names   = Set("args", "namedArgs", "translationTemplates")
+      val present = fields.collect { case (n, v) if names.contains(n) => n -> v }
+      if present.map(_._1).distinct.size != present.size then Left("a field is given twice")
       else
-        // The keys are read as the codec of Language reads them; the error leaves the key out.
-        val languages = pairs.map((tag, template) => languageKey(tag).map(_ -> template))
-        if languages.exists(_.isEmpty) then Left("a template key is not a language")
-        else Right(languages.flatten.toMap)
+        val field = present.toMap
+        for
+          args      <- field.get("args").toRight("a 4.x message needs \"args\"").flatMap(strings)
+          named     <- field.get("namedArgs") match
+            case None | Some(JsonTree.Null) => Right(Map.empty[String, MessageArg])
+            case Some(o)                    => pairs(o, MaxArgs, "arguments").map(_.toMap)
+          templates <-
+            field.get("translationTemplates").toRight("a 4.x message needs \"translationTemplates\"")
+              .flatMap(pairs(_, MaxTemplates, "templates"))
+              .flatMap(languages)
+          message   <- withinBounds(Message(args, named, templates))
+        yield message
+    case _                    => Left("expected a 4.x message as an object")
 
-  private def languageKey(tag: String): Option[Language] =
-    try Some(summon[JsonFieldDecoder[Language]].unsafeDecodeField(Nil, tag))
-    catch case _: JsonDecoder.UnsafeJson => None
+  private def strings(json: JsonTree): Either[String, List[MessageArg]] = json match
+    case JsonTree.Arr(elements) =>
+      val read = elements.collect { case JsonTree.Str(s) => s }
+      if read.size == elements.size then Right(read.toList) else Left("an argument is not a string")
+    case _                      => Left("\"args\" is not an array")
+
+  // The pairs of an object of strings, counted before anything is hashed: inserting many keys with
+  // the same hash into a map costs time quadratic in their number.
+  private def pairs(
+    json: JsonTree,
+    max: Int,
+    what: String,
+  ): Either[String, Vector[(String, String)]] =
+    json match
+      case JsonTree.Obj(fields) if fields.size > max => Left(s"a message holds more than $max $what")
+      case JsonTree.Obj(fields) =>
+        val read = fields.collect { case (n, JsonTree.Str(s)) => n -> s }
+        if read.size == fields.size then Right(read) else Left(s"one of the $what is not a string")
+      case _                    => Left(s"the $what are not an object")
+
+  // The keys are read as the codec of Language reads them; the error leaves the key out.
+  private def languages(pairs: Vector[(String, String)]): Either[String, Map[Language, String]] =
+    val read =
+      pairs.map((tag, template) => Language.fromTree(JsonTree.Str(tag)).toOption.map(_ -> template))
+    if read.exists(_.isEmpty) then Left("a template key is not a language")
+    else Right(read.flatten.toMap)
 
   /**
    * The throwable's message, in English. A throwable without one (`new RuntimeException()`) gives

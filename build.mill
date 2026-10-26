@@ -20,7 +20,9 @@ object V {
   val scala         = "3.9.0"
   val scalaJS       = "1.22.0"
   val zio           = "2.1.27"
-  val zioJson       = "1.1.1"
+  // Exact, never a range (ADR 0006, J2): re-pinned at release-prepare to the newest 2.x that has
+  // been on Maven Central for 14 days, never below 2.41.7; the same as taihei-mihon's.
+  val jsoniter      = "2.42.0"
   val scalaJavaTime = "2.8.0"
 }
 
@@ -239,13 +241,42 @@ trait TaiheiPublishSettings extends PublishModule with TaiheiRepositories {
   )
 }
 
+// ---------------------------------------------------------------------------
+// No ZIO in what a user gets (ADR 0006, condition J1): the dependencies of the published POM, in
+// every scope, and everything Coursier resolves from them, afresh, as a user's build would, hold
+// no dev.zio module. It reads the POM's own dependency list, not this build's classpath, which
+// has zio-test in the tests. A dependency on another module of this library (the same version)
+// is checked through that module. `make no-zio`, part of validate.
+// ---------------------------------------------------------------------------
+trait NoZio extends PublishModule with TaiheiRepositories {
+  def pomModules: T[Seq[String]] = Task {
+    val ours                = (d: mill.javalib.publish.Dependency) =>
+      d.artifact.group == pomSettings().organization && d.artifact.version == publishVersion()
+    val (internal, outside) = publishXmlDeps().partition(ours)
+    val listed              = outside.map(d => s"${d.artifact.group}:${d.artifact.id}")
+    val resolution          = defaultResolver().resolution(
+      outside.map(d => Dep.parse(s"${d.artifact.group}:${d.artifact.id}:${d.artifact.version}"))
+    )
+    val resolved            = resolution.minDependencies.toSeq.map(d => s"${d.module.organization.value}:${d.module.name.value}")
+    val inner               = Task.sequence(moduleDeps.collect { case m: NoZio => m.pomModules })()
+    if (internal.size != inner.size) sys.error(s"${artifactId()}: a dependency on this library has no module here: $internal")
+    (listed ++ resolved ++ inner.flatten).distinct.sorted
+  }
+
+  def noZio() = Task.Command {
+    val zio = pomModules().filter(_.startsWith("dev.zio:"))
+    if (zio.nonEmpty) sys.error(s"${artifactId()}'s POM brings ${zio.mkString(", ")}")
+    println(s"[no-zio] ${artifactId()}: ${pomModules().size} modules, none of dev.zio")
+  }
+}
+
 // Silences the deprecation of dev.taihei.tsuji.legacy, which its tests use on purpose.
 val LegacyInTests = Seq("-Wconf:cat=deprecation&origin=dev\\.taihei\\.tsuji\\.legacy\\..*:s")
 
 // ---------------------------------------------------------------------------
 // Base trait for JVM modules
 // ---------------------------------------------------------------------------
-trait TaiheiModule extends ScalaModule with ScalafmtModule with TaiheiScalafix with TaiheiPublishSettings with TaiheiMima {
+trait TaiheiModule extends ScalaModule with ScalafmtModule with TaiheiScalafix with TaiheiPublishSettings with TaiheiMima with NoZio {
   def scalaVersion = V.scala
 
   def scalacOptions = Seq(
@@ -295,7 +326,7 @@ trait TaiheiModule extends ScalaModule with ScalafmtModule with TaiheiScalafix w
 // ---------------------------------------------------------------------------
 // Base trait for Scala.js modules
 // ---------------------------------------------------------------------------
-trait TaiheiJSModule extends ScalaJSModule with ScalafmtModule with TaiheiScalafix with TaiheiPublishSettings with TaiheiMima {
+trait TaiheiJSModule extends ScalaJSModule with ScalafmtModule with TaiheiScalafix with TaiheiPublishSettings with TaiheiMima with NoZio {
   def scalaVersion   = V.scala
   def scalaJSVersion = V.scalaJS
 
@@ -349,7 +380,7 @@ object tsuji extends Module {
     )
 
     def mvnDeps = Seq(
-      mvn"dev.zio::zio-json:${V.zioJson}",
+      mvn"com.github.plokhotnyuk.jsoniter-scala::jsoniter-scala-core:${V.jsoniter}",
     )
 
     // The catalogue files of CoreMessages, read from the classpath. Scala.js has no classpath:
@@ -362,6 +393,7 @@ object tsuji extends Module {
       def sources = Task.Sources(
         wsRoot / "shared" / "test" / "src",
         wsRoot / "jvm" / "test" / "src",
+        wsRoot / "golden" / "corpus",
       )
 
       def resources = Task.Sources(
@@ -379,13 +411,14 @@ object tsuji extends Module {
     )
 
     def mvnDeps = Seq(
-      mvn"dev.zio::zio-json::${V.zioJson}",
+      mvn"com.github.plokhotnyuk.jsoniter-scala::jsoniter-scala-core::${V.jsoniter}",
     ) ++ jsDeps
 
     object test extends TaiheiJSTests {
       def sources = Task.Sources(
         wsRoot / "shared" / "test" / "src",
         wsRoot / "js" / "test" / "src",
+        wsRoot / "golden" / "corpus",
       )
     }
   }
@@ -408,8 +441,11 @@ object tsuji extends Module {
     )
 
     object test extends TaiheiTests {
+      // The corpus and the JVM's golden files, for the catalogue files 5.0.1's tools exported.
       def sources = Task.Sources(
         wsRoot / "tools" / "test" / "src",
+        wsRoot / "golden" / "corpus",
+        wsRoot / "jvm" / "test" / "src" / "dev" / "taihei" / "tsuji" / "golden",
       )
     }
   }

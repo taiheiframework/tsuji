@@ -1,6 +1,6 @@
 package dev.taihei.tsuji
 
-import zio.json.*
+import dev.taihei.tsuji.TestJson.*
 
 // Inputs that nest arrays or objects far deeper than a message can, and the decodes that must
 // refuse them, shared by DeepNestingSpec (both platforms) and the JVM's SmallStackSpec.
@@ -39,7 +39,7 @@ object DeepNesting:
 
   // A refusal for depth, which names the bound, and not some other error the input also has.
   def refusedForDepth(result: Either[String, Any]): Boolean =
-    result.left.exists(_.contains(s"deeper than ${BoundedJson.MaxDepth}"))
+    result.left.exists(_.contains(s"deeper than ${JsonTreeReader.MaxDepth}"))
 
   // The decodes that did not refuse the input for its depth, by input and decoder: empty when all
   // did.

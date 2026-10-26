@@ -1,6 +1,6 @@
 package dev.taihei.tsuji
 
-import zio.json.*
+import com.github.plokhotnyuk.jsoniter_scala.core.*
 
 /**
  * The stable key of a message: its family's prefix and its name, joined by dots
@@ -39,11 +39,23 @@ object MessageKey:
   // For keys the library builds from a checked prefix and a checked name.
   private[tsuji] def trusted(value: String): MessageKey = value
 
-  /** A key travels as its text; reading checks it. */
-  given JsonEncoder[MessageKey] = JsonEncoder.string
-  given JsonDecoder[MessageKey] = JsonDecoder.string.mapOrFail(parse)
-  given JsonFieldEncoder[MessageKey] = JsonFieldEncoder.string
-  given JsonFieldDecoder[MessageKey] = JsonFieldDecoder.string.mapOrFail(parse)
+  // The key in a JSON tree: a string that parses as one.
+  private[tsuji] def fromTree(json: JsonTree): Either[String, MessageKey] = json match
+    case JsonTree.Str(s) => parse(s)
+    case _               => Left("a message key is a string")
+
+  /** A key travels as a JSON string of its text; reading checks it, as [[parse]] does. */
+  given JsonValueCodec[MessageKey] = new JsonValueCodec[MessageKey]:
+    def decodeValue(in: JsonReader, default: MessageKey): MessageKey =
+      parse(in.readString(null)).fold(in.decodeError, identity)
+    def encodeValue(x: MessageKey, out: JsonWriter): Unit            = out.writeVal(x)
+    def nullValue: MessageKey                                        = null.asInstanceOf[MessageKey]
+
+  /** A key as the name of a JSON object's field. */
+  given JsonKeyCodec[MessageKey] = new JsonKeyCodec[MessageKey]:
+    def decodeKey(in: JsonReader): MessageKey           =
+      parse(in.readKeyAsString()).fold(in.decodeError, identity)
+    def encodeKey(x: MessageKey, out: JsonWriter): Unit = out.writeKey(x)
 
   /** Keys in the order of their text. */
   given Ordering[MessageKey] = Ordering.String

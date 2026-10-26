@@ -1,7 +1,8 @@
 package dev.taihei.tsuji
 
-import zio.json.*
 import zio.test.*
+
+import dev.taihei.tsuji.TestJson.*
 
 object LanguageSpec extends ZIOSpecDefault:
 
@@ -76,7 +77,7 @@ object LanguageSpec extends ZIOSpecDefault:
       },
     ),
     suite("Language as Map key")(
-      test("Languages can be used as Map keys with JsonFieldEncoder") {
+      test("Languages can be used as Map keys") {
         val map = Map(
           Language.English -> "Hello",
           Language.Dutch -> "Dag",

@@ -2,8 +2,9 @@ package dev.taihei.tsuji
 
 import scala.util.Try
 
-import zio.json.*
 import zio.test.*
+
+import dev.taihei.tsuji.TestJson.{*, given}
 
 /**
  * Which strings `Language.parse` accepts as a BCP 47 tag. Up to 4.0.0 the check was the regular

@@ -20,12 +20,16 @@ Published on Maven Central under `dev.taihei`:
 | `taihei-tsuji-tools`    | JVM      | A program that exports catalogue files for translators and browsers. |
 
 ```scala
-mvn"dev.taihei::taihei-tsuji:5.0.0"          // Mill, JVM
-mvn"dev.taihei::taihei-tsuji::5.0.0"         // Mill, Scala.js
-mvn"dev.taihei::taihei-tsuji-tools:5.0.0"    // Mill, the export program
-"dev.taihei" %%% "taihei-tsuji" % "5.0.0"      // sbt
-"dev.taihei" %% "taihei-tsuji-tools" % "5.0.0" // sbt
+mvn"dev.taihei::taihei-tsuji:5.0.2"          // Mill, JVM
+mvn"dev.taihei::taihei-tsuji::5.0.2"         // Mill, Scala.js
+mvn"dev.taihei::taihei-tsuji-tools:5.0.2"    // Mill, the export program
+"dev.taihei" %%% "taihei-tsuji" % "5.0.2"      // sbt
+"dev.taihei" %% "taihei-tsuji-tools" % "5.0.2" // sbt
 ```
+
+5.0.2 is a security release: if you use 5.0.0 or 5.0.1, upgrade. See the advisory
+[GHSA-pjj4-5gjj-j2p8](https://github.com/taiheiframework/tsuji/security/advisories/GHSA-pjj4-5gjj-j2p8)
+and the [release notes](RELEASE_5_0_2.md).
 
 The `shared/` sources compile on both platforms; `jvm/` and `js/` hold only the
 platform-specific formatters and the loading of catalogues.
@@ -325,13 +329,13 @@ code cannot be exported). It is an ordinary run step, not a build plugin:
 
 ```scala
 // Mill: a module with the tools on its run classpath
-def runMvnDeps = Seq(mvn"dev.taihei::taihei-tsuji-tools:5.0.0")
+def runMvnDeps = Seq(mvn"dev.taihei::taihei-tsuji-tools:5.0.2")
 // ./mill app.runMain dev.taihei.tsuji.tools.ExportCatalogues --out out/tsuji --scan com.acme --scan dev.taihei.tsuji
 ```
 
 ```scala
 // sbt: run it forked, so that its classpath is the application's
-libraryDependencies += "dev.taihei" %% "taihei-tsuji-tools" % "5.0.0"
+libraryDependencies += "dev.taihei" %% "taihei-tsuji-tools" % "5.0.2"
 Compile / run / fork := true
 // sbt "runMain dev.taihei.tsuji.tools.ExportCatalogues --out target/tsuji --scan com.acme --scan dev.taihei.tsuji"
 ```

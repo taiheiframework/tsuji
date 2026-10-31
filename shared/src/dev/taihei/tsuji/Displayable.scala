@@ -42,11 +42,16 @@ object Displayable:
   /** Writes a message, with its source-language text, or a text. */
   given JsonEncoder[Displayable] = Json.encoder.contramap(d => toJsonAst(d))
 
-  /** Reads a message, a text or a 4.x message; a message's key is looked up in `catalogues`. */
+  /**
+   * Reads a message, a text or a 4.x message; a message's key is looked up in `catalogues`. JSON
+   * nested deeper than 64 levels, or a number longer than 1100 characters or with an exponent of
+   * more than 9 digits, is a decoding error; an AST built elsewhere is checked for depth and for
+   * the scale of its numbers.
+   */
   given (
     using catalogues: Catalogues
   ): JsonDecoder[Displayable] =
-    Json.decoder.mapOrFail(decode(_, MessageArg.Context(catalogues, 0)))
+    BoundedJson.decoder.mapOrFail(decode(_, MessageArg.Context(catalogues, 0)))
 
 end Displayable
 
@@ -94,8 +99,11 @@ object Text:
   /** `{"text":...,"language":...}`, the language as its tag; a built-in's name is read too. */
   given JsonEncoder[Text] = Json.encoder.contramap(toJsonAst)
 
-  /** Reads `{"text":...,"language":...}`; needs no registry. */
-  given JsonDecoder[Text] = Json.decoder.mapOrFail(decode)
+  /**
+   * Reads `{"text":...,"language":...}`; needs no registry. Bounded as the decoder of a
+   * [[Displayable]] is.
+   */
+  given JsonDecoder[Text] = BoundedJson.decoder.mapOrFail(decode)
 
   /** The encoder and decoder of a text together. */
   given JsonCodec[Text] = JsonCodec(summon[JsonEncoder[Text]], summon[JsonDecoder[Text]])
@@ -278,12 +286,12 @@ object Message:
   /**
    * Reads a message: its key is looked up in `catalogues` to read the arguments with their types.
    * A key it does not know reads as the message's `text`, and is an error without one. The 4.x
-   * shape is read too.
+   * shape is read too. Bounded as the decoder of a [[Displayable]] is.
    */
   given (
     using catalogues: Catalogues
   ): JsonDecoder[Message] =
-    Json.decoder.mapOrFail(decode(_, MessageArg.Context(catalogues, 0)))
+    BoundedJson.decoder.mapOrFail(decode(_, MessageArg.Context(catalogues, 0)))
 
   /** The encoder and the decoder together; like the decoder, it needs a `Catalogues` in scope. */
   given (

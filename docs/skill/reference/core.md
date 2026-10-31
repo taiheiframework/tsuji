@@ -133,9 +133,12 @@ given MessageArg[OrderId] = MessageArg.as[OrderId, String](_.value, s => Right(O
   `JsonDecoder[Displayable]`. The key is looked up among the registry's families; an unknown key
   reads as its `text` (shown as is, re-encoded unchanged), and is an error without one. A missing
   argument is an error unless it is an `Option`. The 4.x shape reads as a legacy message.
-- Limits: 8 levels of nested messages, 10000 list elements; the kept arguments of an unknown
-  key at most 16 levels and 100000 values, with at most 16 names of one object sharing a hash
-  code.
+- Limits: the JSON read at most 64 levels of arrays and objects deep and a number in it at most
+  1100 characters long with an exponent of at most 9 digits, leading zeros not counted (beyond
+  either is a decoding error, on both platforms; a `Json` tree decoded with `.as` is held to the
+  same depth and to numbers of a scale within ±1000001100), 8 levels of nested messages, 10000 list
+  elements; the kept arguments of an unknown key at most 16 levels and 100000 values, with at most
+  16 names of one object sharing a hash code.
 - Rules on the wire: a key is a contract; adding an argument means a new key unless it is an
   `Option`; removing or retyping one means a new key; the envelope is format 1 of 5.x.
 - Rule in Scala, for a family a library publishes: its definitions' arguments are API. Adding one

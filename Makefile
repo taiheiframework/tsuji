@@ -19,8 +19,9 @@ LEGACY_CENTRAL_PATH = dev/taihei/taihei-i18n_3
 # and a deterministic zip; it uploads nothing. Once main and the tag are pushed, release-github
 # keeps the zip and SHA256SUMS on an immutable GitHub Release of the tag, which publishes the
 # version. The family's Maven repository (REPO_URL) is built from those releases alone, and
-# publish-repo starts its deploy and reads every file back. The next release train in nakama
-# takes the same files to Maven Central. Nothing is ever built or signed a second time.
+# publish-repo starts its deploy and reads every file back. Maven Central is frozen (ADR 0009):
+# no new version goes there, apart from a security fix for a line whose users are on Central.
+# Nothing is ever built or signed a second time.
 # Plain assignments, not ?=: an environment variable of the same name does not point a release at
 # another repository, key or file. A command-line override still does (the tests use one), and
 # so does a MAKEFLAGS in the environment: these are guards against mistakes, not against someone
@@ -365,7 +366,7 @@ release-test:
 no-zio:
 	./mill __.noZio
 
-# taihei-tsuji-zio-json's tests against another zio-json (ADR 0006, J10): before a release, the
+# taihei-tsuji-zio-json's tests against another zio-json (ADR 0006): before a release, the
 # newest on Central, since a user's build may evict the pin upward. The tests check that they ran
 # against the version asked for.
 zio-json-newest:
@@ -575,13 +576,13 @@ central-bundle:
 	echo "[central-bundle] $$(cat "$$B/$(BUNDLE_PREFIX)-$$VERSION.zip.sha256")"
 
 # Publishes the version: keeps the bundle on an immutable GitHub Release of the pushed tag, the
-# source of truth the family's repository serves and the release train takes to Central (CISO
-# condition C17). It checks the bundle and its signatures once more, and that no GitHub Release
-# for the version exists yet; it creates the release as a draft with the zip and SHA256SUMS as
-# assets and the notes and the zip's SHA-256 as the body, downloads the assets back and compares
-# them with the bundle, and only then publishes it, checks that GitHub reports it immutable, and
-# reads the assets back once more. If any step fails, the draft stays unpublished, and the CTO and
-# the CISO decide what follows. The zip's SHA-256 goes on the release ticket, every time.
+# source of truth the family's repository serves (CISO condition C17). It checks the bundle and
+# its signatures once more, and that no GitHub Release for the version exists yet; it creates the
+# release as a draft with the zip and SHA256SUMS as assets and the notes and the zip's SHA-256 as
+# the body, downloads the assets back and compares them with the bundle, and only then publishes
+# it, checks that GitHub reports it immutable, and reads the assets back once more. If any step
+# fails, the draft stays unpublished, and the CTO and the CISO decide what follows. The zip's
+# SHA-256 goes on the release ticket, every time.
 release-github:
 	@set -eo pipefail; \
 	$(TAG_VERSION); \
@@ -603,7 +604,7 @@ release-github:
 	$(RELEASE_ABSENT); \
 	T=$$(mktemp -d "$$B/.release.XXXXXX"); trap 'rm -rf "$$T"' EXIT; \
 	{ cat "$$NOTES"; printf '\n## The signed bundle\n\n'; \
-	  printf 'This release is one signed bundle: the same files on %s and, after the next release train, on Maven Central.\n\n' "$(REPO_URL)"; \
+	  printf 'This release is one signed bundle, built and signed once.\n\n'; \
 	  printf -- '- `%s`, SHA-256 `%s`\n' "$$ZIP" "$$ZIPSUM"; \
 	  printf -- '- `SHA256SUMS` lists the SHA-256 of every file in it.\n'; \
 	  printf -- '- Every jar and POM is signed by the release key `%s`.\n' "$(RELEASE_KEY)"; } > "$$T/body.md"; \
@@ -635,7 +636,7 @@ release-github:
 # immutable, dispatches the site's deploy workflow on main, waits for that run, and then reads
 # every file back (verify-repo). The site is built from the immutable releases alone, so nothing
 # is uploaded and no token but gh's own is used. A failure here is a CISO incident about the site;
-# the version is final already and goes in the next release train.
+# the version is final already.
 publish-repo:
 	@set -eo pipefail; \
 	$(TAG_VERSION); \
@@ -710,12 +711,11 @@ verify-repo:
 #        git push origin main && git push origin vX.Y.Z   (or both in one push)
 #        make release-github     (the bundle on an immutable GitHub Release: the version is public)
 #        make publish-repo       (the site's deploy, then verify-repo reads every file back)
-#        Maven Central follows in the next release train (make release-train in nakama).
 #
 # Credentials never go on make's command line: they come from $(RELEASE_ENV) or the environment.
 # Until main and the tag are pushed nothing has left the machine: make release-abort, fix the
 # cause, then release-prepare the same version again. From the push of its tag the version is
-# final, and from its GitHub Release it is public; it goes to Central in the next train.
+# final, and from its GitHub Release it is public. It does not go to Maven Central (ADR 0009).
 # A security fix (EMBARGO=1) goes the other way: Maven Central first, with publish, and its GitHub
 # Release, built from Central's files (central-bundle), only after its advisory is published
 # (ADR 0004, section 8).
@@ -958,7 +958,6 @@ release-finalize:
 		echo "  git push origin main && git push origin v$$NEW"; \
 		echo "  make release-github   (publishes it: the immutable GitHub Release)"; \
 		echo "  make publish-repo     (the site's deploy, and the read-back of every file)"; \
-		echo "Maven Central follows in the next release train (make release-train in nakama)."; \
 	fi
 
 release-abort:

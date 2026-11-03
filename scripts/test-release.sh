@@ -585,7 +585,9 @@ gh_reset
 expect "release-github publishes the bundle" 0 "record on the release ticket: $PREFIX-$V.zip SHA-256 $ZIPSUM" "${M[@]}" release-github
 grep -q -- "release create v$V --repo .* --verify-tag --draft" "$GLOG" && [ "$(grep -n 'release create' "$GLOG" | cut -d: -f1)" -lt "$(grep -n 'release edit' "$GLOG" | cut -d: -f1)" ] \
   && pass "release-github creates a draft first and publishes it after the read-back" || fail "release-github's order: $(tr '\n' ';' < "$GLOG")"
-grep -qF "$ZIPSUM" "$GHS/body.md" && grep -qF "$SITE" "$GHS/body.md" && pass "the release body names the zip's SHA-256 and the repository" || fail "the release body"
+BUNDLE_TEXT=$(sed -n '/^## The signed bundle$/,$p' "$GHS/body.md")
+grep -qF "$ZIPSUM" <<< "$BUNDLE_TEXT" && ! grep -qF "$SITE" <<< "$BUNDLE_TEXT" && ! grep -qi 'central' <<< "$BUNDLE_TEXT" \
+  && pass "the release body names the zip's SHA-256, and neither the repository's address nor Maven Central" || fail "the release body"
 [ ! -e "$G/.release-state.json" ] && pass "release-github ends the release in progress" || fail "the release state stayed"
 
 # publish-repo and verify-repo, against the stand-in site, without credentials.

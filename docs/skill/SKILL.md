@@ -10,11 +10,11 @@ defined in Scala as typed **message families**, checked by a macro when the code
 translations live inline or in per-language **catalogue files**; a `Message` is only a key and
 typed arguments, so only the reader's language travels and is loaded.
 
-Package `dev.taihei.tsuji`. Artifacts on Maven Central: `dev.taihei::taihei-tsuji` (`taihei-tsuji_3`
-on the JVM, `taihei-tsuji_sjs1_3` on Scala.js), `dev.taihei::taihei-tsuji-zio-json` (zio-json
-codecs, package `dev.taihei.tsuji.ziojson`, JVM and Scala.js) and the JVM-only
-`dev.taihei::taihei-tsuji-tools`, version 6.0.0, Scala 3.9 (LTS), Apache 2.0. Source:
-<https://github.com/taiheiframework/tsuji>. The core's one runtime dependency is
+Package `dev.taihei.tsuji`. Artifacts: `dev.taihei::taihei-tsuji` (`taihei-tsuji_3` on the JVM,
+`taihei-tsuji_sjs1_3` on Scala.js), `dev.taihei::taihei-tsuji-zio-json` (zio-json codecs, package
+`dev.taihei.tsuji.ziojson`, JVM and Scala.js) and the JVM-only `dev.taihei::taihei-tsuji-tools`,
+version 6.0.0 (not on Maven Central, which has the versions up to 5.0.2), Scala 3.9 (LTS), Apache
+2.0. Source: <https://github.com/taiheiframework/tsuji>. The core's one runtime dependency is
 jsoniter-scala-core; ZIO and zio-json come only with `taihei-tsuji-zio-json`. Tsuji 5.0.x gets
 security fixes for 12 months after 6.0.0. Up to 4.x the library was `dev.taihei::taihei-i18n`,
 package `dev.taihei.i18n`; that line stays under its old name on branch `4.0.x` and gets security

@@ -8,7 +8,7 @@ import dev.taihei.tsuji.*
 import dev.taihei.tsuji.Language.*
 
 // The corpus of the wire-format golden files (ADR 0006, section 2). It is compiled twice: by the
-// generator in golden/generate against the released taihei-tsuji 5.0.1, which wrote the golden
+// generator in golden/generate against the released taihei-tsuji 5.0.2, which wrote the golden
 // files, and by the tests against this version, which must write the same bytes and read the
 // same values. So it uses only what both versions have: families, values and strings, no codec.
 

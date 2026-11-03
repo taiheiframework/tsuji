@@ -8,7 +8,7 @@ import scala.jdk.CollectionConverters.*
 
 import dev.taihei.tsuji.tools.ExportCatalogues
 
-// The golden files of the JVM, with the catalogue files 5.0.1's taihei-tsuji-tools exports for
+// The golden files of the JVM, with the catalogue files 5.0.2's taihei-tsuji-tools exports for
 // the corpus's families.
 object Main:
 

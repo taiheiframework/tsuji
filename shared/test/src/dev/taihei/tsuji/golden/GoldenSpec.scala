@@ -13,8 +13,8 @@ import dev.taihei.tsuji.TestJson.{*, given}
 import com.github.plokhotnyuk.jsoniter_scala.core.*
 
 // The gate of the wire format (ADR 0006, sections 2 and 7): this version writes, byte for byte,
-// what the released 5.0.1 wrote for every value of the corpus, and reads what it read from every
-// input, on the JVM and on Scala.js (Golden501, written by golden/generate). The only differences
+// what the released 5.0.2 wrote for every value of the corpus, and reads what it read from every
+// input, on the JVM and on Scala.js (Golden502, written by golden/generate). The only differences
 // are those ADR 0006 lists, each named below; changing any other byte is
 // a wire break and needs the CTO's yes.
 @nowarn("cat=deprecation")
@@ -94,7 +94,7 @@ object GoldenSpec extends ZIOSpecDefault:
     out.toString
 
   // 2. A number whose unscaled value is Long.MinValue is written as java.math.BigDecimal.toString
-  // writes it; 5.0.1 wrote it differently on the JVM, and on Scala.js at a scale other than 0.
+  // writes it; 5.0.2 wrote it differently on the JVM, and on Scala.js at a scale other than 0.
   private val LongMinValue = "(-0\\.0?)?-9223372036854775808(E[+-][0-9]+)?".r
 
   private def number(n: String): String = s"number ${Corpus.numbers.indexOf(n)} ($n)"
@@ -138,13 +138,13 @@ object GoldenSpec extends ZIOSpecDefault:
     else fixed
 
   // The JVM's catalogue export is compared in taihei-tsuji-tools' tests.
-  private val golden = Golden501.entries.filterNot(_._1.startsWith("export"))
+  private val golden = Golden502.entries.filterNot(_._1.startsWith("export"))
 
-  def spec = suite(s"The wire format of 5.0.1 on ${Golden501.platform}")(
+  def spec = suite(s"The wire format of 5.0.2 on ${Golden502.platform}")(
     test("every case of the corpus has its golden entry, and none is left over") {
       assertTrue(golden.size > 1000, golden.keySet == actual.keySet)
     },
-    test("writing gives 5.0.1's bytes, but for the listed differences") {
+    test("writing gives 5.0.2's bytes, but for the listed differences") {
       val writes = golden.filter(_._1.startsWith("write"))
       val wrong  = writes.collect {
         case (k, v) if actual(k) != expected(k, v) => s"$k:\n  want ${expected(k, v)}\n  got  ${actual(k)}"
@@ -154,7 +154,7 @@ object GoldenSpec extends ZIOSpecDefault:
           if writeToArray(t).toSeq != expected(s"write|$name", golden(s"write|$name")).getBytes(UTF_8).toSeq => name
       assertTrue(writes.size > 150, wrong.isEmpty, bytes.isEmpty)
     },
-    test("reading gives 5.0.1's values, but for the listed differences") {
+    test("reading gives 5.0.2's values, but for the listed differences") {
       val reads = golden.filterNot(_._1.startsWith("write"))
       val wrong = reads.collect {
         case (k, v) if actual(k) != expected(k, v) => s"$k:\n  want ${expected(k, v)}\n  got  ${actual(k)}"
@@ -169,8 +169,8 @@ object GoldenSpec extends ZIOSpecDefault:
         unpairedWrites,
         refusedNow.forall(n => differs(Set(n))),
         differs(rawSurrogate),
-        differs(longMinValue.keySet) || Golden501.platform == "Scala.js",
-        // On Scala.js 5.0.1 wrote Long.MinValue right at scale 0 and wrong at the others.
+        differs(longMinValue.keySet) || Golden502.platform == "Scala.js",
+        // On Scala.js 5.0.2 wrote Long.MinValue right at scale 0 and wrong at the others.
         differs(Set(number("-922337203685477580.8"))),
       )
     },

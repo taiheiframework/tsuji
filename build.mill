@@ -475,7 +475,7 @@ object tsuji extends Module {
     )
 
     object test extends TaiheiTests {
-      // The corpus and the JVM's golden files, for the catalogue files 5.0.1's tools exported.
+      // The corpus and the JVM's golden files, for the catalogue files 5.0.2's tools exported.
       def sources = Task.Sources(
         wsRoot / "tools" / "test" / "src",
         wsRoot / "golden" / "corpus",
@@ -574,15 +574,16 @@ object ziojson extends Module {
 
 // ---------------------------------------------------------------------------
 // The wire format's golden files (ADR 0006, section 2): written by the released taihei-tsuji
-// 5.0.1 from the corpus in golden/corpus, which the tests compile too, and kept as Scala sources
+// 5.0.2 from the corpus in golden/corpus, which the tests compile too, and kept as Scala sources
 // in jvm/test and js/test, so that the Scala.js tests need no file system. Run once per platform
 // and committed with the files they wrote:
-//   ./mill --ticker false golden.jvm.run jvm > jvm/test/src/dev/taihei/tsuji/golden/Golden501.scala
-//   ./mill --ticker false golden.js.run js > js/test/src/dev/taihei/tsuji/golden/Golden501.scala
-// Neither is published; they resolve as every module does.
+//   ./mill --ticker false golden.jvm.run jvm > jvm/test/src/dev/taihei/tsuji/golden/Golden502.scala
+//   ./mill --ticker false golden.js.run js > js/test/src/dev/taihei/tsuji/golden/Golden502.scala
+// Neither is published; they resolve as every module does. They were first written by 5.0.1;
+// 5.0.2, the last 5.x release, wrote byte-identical files and is the baseline since.
 // ---------------------------------------------------------------------------
 object golden extends Module {
-  val Released = "5.0.1"
+  val Released = "5.0.2"
 
   trait Generator extends ScalaModule with TaiheiRepositories {
     def scalaVersion  = V.scala

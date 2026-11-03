@@ -240,7 +240,7 @@ RELEASE_ABSENT = RELEASES=$$(gh api --paginate "repos/$(GITHUB_REPO)/releases?pe
 		echo "[ERROR] a GitHub Release for $$VERSION exists already in $(GITHUB_REPO) (a draft counts): the version is not prepared again;"; \
 		echo "        the CTO and the CISO decide what follows"; exit 1; fi
 
-.PHONY: clean fix fmt compile prepare build test mima repo-guard release-test validate deps publishLocal publish \
+.PHONY: clean fix fmt lint compile prepare build test mima repo-guard release-test validate deps publishLocal publish \
         publish-dry-run release-bundle central-bundle release-github publish-repo verify-repo \
         release-preflight release-prepare release-finalize release-abort release-status embargo-lift
 
@@ -256,6 +256,13 @@ fix:
 
 fmt:
 	./mill __.reformat
+
+# The checks CI runs, after fix and fmt have rewritten the sources: when scalafmt and scalafix
+# disagree on a line, the one that ran last wins locally and the other fails in CI, so validate
+# checks with both instead of trusting the rewrite.
+lint:
+	./mill __.checkFormat
+	./mill __.fix --check
 
 compile:
 	./mill __.compile
@@ -352,7 +359,7 @@ release-test:
 	@bash scripts/test-release.sh
 	@bash scripts/test-mill-launcher
 
-validate: repo-guard release-test fix fmt compile test mima
+validate: repo-guard release-test fix fmt lint compile test mima
 
 deps:
 	./mill mill.scalalib.Dependency/showUpdates

@@ -5,15 +5,9 @@ import scala.util.control.NonFatal
 
 import zio.json.*
 import zio.json.ast.Json
-import zio.json.internal.{
-  Lexer,
-  RetractReader,
-}
+import zio.json.internal.{Lexer, RetractReader}
 
-import zio.{
-  Chunk,
-  ChunkBuilder,
-}
+import zio.{Chunk, ChunkBuilder}
 
 // Reads a JSON value into zio-json's AST without recursion, refusing arrays and objects nested
 // deeper than MaxDepth and numbers longer than MaxNumberLength. Messages and texts are input the

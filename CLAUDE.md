@@ -15,6 +15,7 @@ make repo-guard        # Coursier's defaults (local Ivy, Central), then REPO_URL
 make mima              # against the newest 5.x tag, which must be on Central or REPO_URL
                        # (between a tag push and publish-repo it fails; MIMA_BASELINE=x.y.z)
 make test              # ./mill __.test.testForked (JS tests run under Node)
+make lint              # ./mill __.checkFormat, then __.fix --check: CI's lint steps
 TAIHEI_TEST_JAVA_HOME=<a JDK 17> ./mill tsuji.jvm.test.testForked   # the JVM tests on Java 17
 make publish-dry-run   # the bundle Maven Central would receive, written to out/
 make release-prepare TYPE=patch|minor|major EMBARGO=0|1   # then review RELEASE_x_y_z.md;

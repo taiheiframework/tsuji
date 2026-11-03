@@ -55,9 +55,12 @@ in the companion.
 | Java | `language.locale()` | `Language.locale(language)` |
 | Binary (JVM and Scala.js) | instance method `Language.locale()` | gone: a library compiled against 5.x that calls it fails (`NoSuchMethodError` on the JVM, a linking error on Scala.js) until it is rebuilt |
 
-`import Language.*` also brings `locale` into scope; an unqualified `locale` of the caller's own
-(inherited, or from an outer scope) can become ambiguous there. Qualify it (`this.locale` for an
-inherited member, the owner's name for an outer one), or import only the names used.
+`import Language.*` also brings `preferred` and, on the JVM, `locale` and `fromLocale` into scope;
+an unqualified name of the caller's own among these (inherited, or from an outer scope) can become
+ambiguous there. Qualify it (`this.locale` for an inherited member, the owner's name for an outer
+one), or import only the names used. `language.script` and `language.region` are new members: a
+caller's own extension method of either name is no longer called on a `Language`, since a member
+wins over an extension.
 
 ## Step 0: the new name
 

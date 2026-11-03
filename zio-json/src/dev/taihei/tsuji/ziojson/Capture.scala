@@ -7,7 +7,7 @@ import scala.util.control.NonFatal
 
 import zio.json.*
 import zio.json.ast.Json
-// The only symbols of zio.json.internal this module uses (ADR 0006, J10): a decoder of its own
+// The only symbols of zio.json.internal this module uses (ADR 0006): a decoder of its own
 // must read from a RetractReader, and an encoder of its own writes into a Write. Both are named
 // in the signatures of JsonDecoder.unsafeDecode and JsonEncoder.unsafeEncode, so no decoder or
 // encoder can avoid them. Through a RetractReader this module calls read, readChar and

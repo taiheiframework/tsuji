@@ -7,7 +7,7 @@ import dev.taihei.tsuji.golden.Corpus
 import dev.taihei.tsuji.ziojson.Sides.*
 import dev.taihei.tsuji.ziojson.TsujiZioJson.given
 
-// The differential test of ADR 0006 (J10): one corpus, valid and hostile, read as bytes by the
+// The differential test of ADR 0006: one corpus, valid and hostile, read as bytes by the
 // core's codecs and by this module's decoders. Each input reads to the same value on both sides,
 // or both refuse it. Two kinds of input differ, both properties of the entry point a caller reads
 // with rather than of Tsuji's grammar, and each is checked to differ exactly as described:

@@ -645,11 +645,14 @@ companion. What that means for a caller:
   compiled against 5.x that calls it fails, with a `NoSuchMethodError` on the JVM and a linking
   error on Scala.js, until it is compiled again against 6.0.0.
 
-`import Language.*`, the usual import for `English`, `Dutch` and `French`, now also brings the name
-`locale` into scope. Code in that scope that refers to a `locale` of its own without qualifying it
-(an inherited member or an outer definition) can get an ambiguity error. Qualify that reference,
-`this.locale` for an inherited member and the owner's name for an outer one, or import only the
-names you use (`import Language.{English, Dutch}`).
+`import Language.*`, the usual import for `English`, `Dutch` and `French`, now also brings the names
+`preferred` and, on the JVM, `locale` and `fromLocale` into scope. Code in that scope that refers
+to one of these names of its own without qualifying it (an inherited member or an outer definition)
+can get an ambiguity error. Qualify that reference, `this.locale` for an inherited member and the
+owner's name for an outer one, or import only the names you use (`import Language.{English, Dutch}`).
+`language.script` and `language.region` are new members of `Language`: an extension method of your
+own with either name is no longer called on a `Language`, because a member wins over an extension.
+Rename it, or use the new member.
 
 ## Coming from taihei-i18n 4.x
 

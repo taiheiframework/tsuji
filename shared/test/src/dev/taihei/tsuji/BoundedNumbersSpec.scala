@@ -14,9 +14,11 @@ object BoundedNumbersSpec extends ZIOSpecDefault:
     "1e+0001000000000",
   )
 
+  // A throw is a Left that names no reader error, so it fails a test that expects a refusal and
+  // one that expects a successful read alike.
   private def guarded[A](parse: => Either[A, Any]): Either[String, Any] =
     try parse.left.map(_.toString)
-    catch case t: Throwable => Right(s"threw $t")
+    catch case t: Throwable => Left(s"threw $t")
 
   private def catalogue(note: String, message: String = "\"Eins\""): String =
     s"""{"format":1,"language":"de","note":$note,"messages":{"numbers.one":$message}}"""

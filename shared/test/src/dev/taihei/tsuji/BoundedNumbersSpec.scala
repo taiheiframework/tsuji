@@ -35,29 +35,30 @@ object BoundedNumbersSpec extends ZIOSpecDefault:
         results.forall(_.left.exists(_.contains("exponent of more than 9 digits"))),
       )
     },
+    // The three timing tests retry a correct but slow run on a loaded machine (TimeBudget); the
+    // budgets stay as they are, and a wrong result fails at once.
     test("a catalogue with a number of a million digits is refused at once") {
-      val start  = java.lang.System.nanoTime()
-      val result = guarded(Catalogue.parse(catalogue("1" + "0" * 1000000)))
-      val millis = (java.lang.System.nanoTime() - start) / 1000000
-      assertTrue(result.left.exists(_.contains("longer than 1100 characters")), millis < 1000)
+      val input = catalogue("1" + "0" * 1000000)
+      TimeBudget.within("a million digits", 1000)(guarded(Catalogue.parse(input))): result =>
+        assertTrue(result.left.exists(_.contains("longer than 1100 characters")))
     },
     test("4M characters of catalogue numbers just under the bound are read in time that grows with them") {
-      val near   = "0." + "0" * (JsonTreeReader.MaxNumberLength - 3) + "1"
-      val many   = List.fill((Catalogue.MaxLength - 200) / (near.length + 1))(near).mkString("[", ",", "]")
-      val input  = catalogue(many)
-      val start  = java.lang.System.nanoTime()
-      val result = guarded(Catalogue.parse(input))
-      val millis = (java.lang.System.nanoTime() - start) / 1000000
-      assertTrue(input.length <= Catalogue.MaxLength, input.length > 4000000, result.isRight, millis < 5000)
+      val near  = "0." + "0" * (JsonTreeReader.MaxNumberLength - 3) + "1"
+      val many  = List.fill((Catalogue.MaxLength - 200) / (near.length + 1))(near).mkString("[", ",", "]")
+      val input = catalogue(many)
+      assertTrue(input.length <= Catalogue.MaxLength, input.length > 4000000) &&
+      TimeBudget.within("4M characters of long numbers", 5000)(guarded(Catalogue.parse(input))): result =>
+        assertTrue(result.isRight)
     },
     test("4M characters of short numbers are read quickly, on both platforms") {
       // Many short tokens, rather than a few long ones: what each number costs dominates.
-      val small  = catalogue(List.fill((Catalogue.MaxLength - 200) / 2)("0").mkString("[", ",", "]"))
-      val mixed  = catalogue(List.fill((Catalogue.MaxLength - 200) / 6)("-12.5").mkString("[", ",", "]"))
-      val start  = java.lang.System.nanoTime()
-      val read   = List(small, mixed).map(c => guarded(Catalogue.parse(c)))
-      val millis = (java.lang.System.nanoTime() - start) / 1000000
-      assertTrue(small.length > 4000000, mixed.length > 4000000, read.forall(_.isRight), millis < 5000)
+      val small = catalogue(List.fill((Catalogue.MaxLength - 200) / 2)("0").mkString("[", ",", "]"))
+      val mixed = catalogue(List.fill((Catalogue.MaxLength - 200) / 6)("-12.5").mkString("[", ",", "]"))
+      assertTrue(small.length > 4000000, mixed.length > 4000000) &&
+      TimeBudget.within("4M characters of short numbers", 5000)(List(small, mixed).map(c =>
+        guarded(Catalogue.parse(c))
+      )): read =>
+        assertTrue(read.forall(_.isRight))
     },
     test("a valid catalogue parses as before") {
       val parsed = Catalogue.parse(catalogue("1e999999999"))

@@ -15,8 +15,8 @@ import scala.collection.mutable
  *   val shipped   = message[(count: Int, on: LocalDate)](            // a MessageDefinition
  *     ".match {$count :plural} when one {One item shipped on {$on :date dateStyle=long}} " +
  *       "when * {{$count} items shipped on {$on :date dateStyle=long}}",
- *     Language.Dutch -> ".match {$count :plural} when one {Eén artikel verzonden op {$on :date dateStyle=long}} " +
- *       "when * {{$count} artikels verzonden op {$on :date dateStyle=long}}",
+ *     Language.Dutch -> (".match {$count :plural} when one {Eén artikel verzonden op {$on :date dateStyle=long}} " +
+ *       "when * {{$count} artikels verzonden op {$on :date dateStyle=long}}"),
  *   )
  *
  * Orders.shipped(count = 3, on = today)   // a Message: key "order.shipped" and two arguments

@@ -1,6 +1,7 @@
 package dev.taihei.tsuji
 
 import scala.concurrent.ExecutionContext
+import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.scalajs.js
 import scala.scalajs.js.JSConverters.*
 import scala.scalajs.js.URIUtils
@@ -24,6 +25,16 @@ object CatalogueLoaderSpec extends ZIOSpecDefault:
   ) =
     ZIO.fromFuture(ec =>
       CatalogueLoader.load(c, l, url)(
+        using ec: ExecutionContext
+      )
+    )
+
+  private def loadWithin(
+    c: Catalogues,
+    timeout: FiniteDuration,
+  ) =
+    ZIO.fromFuture(ec =>
+      CatalogueLoader.load(c, German, Url, timeout = Some(timeout))(
         using ec: ExecutionContext
       )
     )
@@ -67,6 +78,48 @@ object CatalogueLoaderSpec extends ZIOSpecDefault:
         cancel = (_: js.Any) => cancelled = true,
       )
     )
+
+  // A fetch that never answers, and keeps the init it was called with.
+  final private class Silent:
+    var inits = List.empty[js.Any]
+
+    val fetch: js.Function2[String, js.UndefOr[js.Any], js.Promise[js.Any]] = (_, init) =>
+      inits = init.toList ++ inits
+      new js.Promise[js.Any]((_, _) => ())
+
+    def aborted = inits.exists(_.asInstanceOf[js.Dynamic].signal.aborted.asInstanceOf[Boolean])
+
+  // A body that sends one space every `everyMillis`, forever, and records whether it was
+  // cancelled. A space is valid JSON whitespace, so only the time limit can stop it.
+  final private class Trickle(everyMillis: Double):
+    var cancelled = false
+    var sent      = 0
+
+    val stream = js.Dynamic.newInstance(js.Dynamic.global.ReadableStream)(
+      js.Dynamic.literal(
+        pull = (controller: js.Dynamic) =>
+          new js.Promise[Unit]((resolve, _) =>
+            js.timers.setTimeout(everyMillis):
+              // After a cancel the controller refuses bytes; the timer may still be pending.
+              if !cancelled then
+                controller.enqueue(bytes(0x20))
+                sent += 1
+              resolve(())
+            ()
+          ),
+        cancel = (_: js.Any) => cancelled = true,
+      )
+    )
+
+  end Trickle
+
+  // A fetch that answers with `response` after `millis`.
+  private def answeringAfter(millis: Double)(response: => js.Any): js.Function1[String, js.Promise[js.Any]] =
+    _ =>
+      new js.Promise[js.Any]((resolve, _) =>
+        js.timers.setTimeout(millis)(resolve(response))
+        ()
+      )
 
   // A TextDecoder as an old polyfill may be: it takes the options and ignores `fatal`.
   private class LenientDecoder extends js.Object:
@@ -308,6 +361,69 @@ object CatalogueLoaderSpec extends ZIOSpecDefault:
         )
       )
     },
+    test("with a timeout, a server that never answers is a problem, and the request is aborted") {
+      val c      = Catalogues(Seq(Orders))
+      val silent = Silent()
+      withFetch(silent.fetch)(
+        TimeBudget.withinZIO("a silent server, timeout 200 ms", 2000)(loadWithin(c, 200.millis)): problems =>
+          assertTrue(
+            problems.map(_.message) == List(s"cannot fetch $Url: timed out after 200 milliseconds"),
+            problems.forall(_.language.contains(German)),
+            silent.inits.nonEmpty,
+            silent.aborted,
+            c.languages.isEmpty,
+          )
+      )
+    } @@ TestAspect.timeout(zio.Duration.fromSeconds(30)),
+    test("with a timeout, a body that trickles in is a problem, and the stream is let go") {
+      val c       = Catalogues(Seq(Orders))
+      val trickle = Trickle(20)
+      withFetch(answering(js.Dynamic.newInstance(js.Dynamic.global.Response)(trickle.stream)))(
+        TimeBudget.withinZIO("a trickling body, timeout 300 ms", 2000)(loadWithin(c, 300.millis)): problems =>
+          assertTrue(
+            problems.map(_.message) == List(s"cannot fetch $Url: timed out after 300 milliseconds"),
+            trickle.sent > 0,
+            trickle.cancelled,
+            c.languages.isEmpty,
+          )
+      )
+    } @@ TestAspect.timeout(zio.Duration.fromSeconds(30)),
+    test("without AbortController, the timeout still ends the load") {
+      val c      = Catalogues(Seq(Orders))
+      val silent = Silent()
+      withGlobal("AbortController", js.undefined)(
+        withFetch(silent.fetch)(
+          TimeBudget.withinZIO("no AbortController, timeout 200 ms", 2000)(loadWithin(c, 200.millis)): problems =>
+            assertTrue(
+              problems.map(_.message) == List(s"cannot fetch $Url: timed out after 200 milliseconds"),
+              silent.inits.isEmpty, // fetch was called with the url alone
+              c.languages.isEmpty,
+            )
+        )
+      )
+    } @@ TestAspect.timeout(zio.Duration.fromSeconds(30)),
+    test("a response that arrives after the timeout has its body let go") {
+      val c    = Catalogues(Seq(Orders))
+      val body = Body(utf8(GermanFile))
+      withFetch(answeringAfter(200)(response(body)))(
+        for
+          problems <- loadWithin(c, 50.millis)
+          _        <- Live.live(ZIO.sleep(zio.Duration.fromMillis(400)))
+        yield assertTrue(
+          problems.map(_.message) == List(s"cannot fetch $Url: timed out after 50 milliseconds"),
+          body.cancelled,
+          c.languages.isEmpty,
+        )
+      )
+    } @@ TestAspect.timeout(zio.Duration.fromSeconds(30)),
+    test("a file that arrives in time loads, and a timeout beyond a timer's range does not fire at once") {
+      given c: Catalogues = Catalogues(Seq(Orders))
+      // A JavaScript timer fires a delay above 2^31 - 1 ms at once; 100 days used to be that.
+      for
+        quick <- withFetch(answering(response(Body(utf8(GermanFile)))))(loadWithin(c, 5.seconds))
+        long  <- withFetch(answeringAfter(100)(response(Body(utf8(GermanFile)))))(loadWithin(c, 100.days))
+      yield assertTrue(quick.isEmpty, long.isEmpty, Orders.cancelled.localize(German) == "Storniert")
+    } @@ TestAspect.timeout(zio.Duration.fromSeconds(30)),
   ) @@ TestAspect.sequential // one test replaces the global fetch for a while
 
 end CatalogueLoaderSpec

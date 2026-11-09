@@ -1,7 +1,9 @@
 package dev.taihei.tsuji
 
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.{ExecutionContext, Future, Promise}
+import scala.concurrent.duration.FiniteDuration
 import scala.scalajs.js
+import scala.scalajs.js.timers
 import scala.scalajs.js.typedarray.{ArrayBuffer, Uint8Array}
 import scala.util.{Failure, Success, Try}
 import scala.util.control.NonFatal
@@ -17,51 +19,47 @@ import scala.util.control.NonFatal
  * }}}
  *
  * Until the file arrives, messages show through the fallback chain. On a language switch, load
- * the next language; this library does not prefetch.
+ * the next language; this library does not prefetch. A server that answers slowly or not at all
+ * keeps the load waiting, unless it is given a timeout:
+ *
+ * {{{
+ * import scala.concurrent.duration.*
+ * CatalogueLoader.load(summon[Catalogues], Language("de"), "/i18n/de.json", timeout = Some(10.seconds))
+ * }}}
  */
 object CatalogueLoader:
 
   // UTF-8 takes at most four bytes per character of a catalogue.
   private val MaxBytes = Catalogue.MaxLength.toLong * 4
 
+  // The longest delay a JavaScript timer keeps; a longer one fires at once, so it is cut to this.
+  private val MaxTimerMillis = Int.MaxValue.toDouble
+
+  // What a load with a timeout gives up on: `expired` completes when the time is up, and `signal`
+  // is the AbortSignal handed to fetch, where the runtime has AbortController.
+  final private case class Cutoff(expired: Future[Unit], signal: Option[js.Dynamic])
+
+  private val NoCutoff = Cutoff(Future.never, None)
+
   /**
    * Fetches the file at `url`, checks that it is a catalogue of `language`, and adds it. The
    * `Future` never fails: what went wrong, from the network to a template, is in the list.
+   *
+   * With a `timeout`, a file that has not arrived in full by then is a problem: the request is
+   * aborted, its body is let go, and nothing is added. Without one, the load waits as long as the
+   * server and the runtime let it. A timeout above the longest delay a JavaScript timer keeps
+   * (about 24 days) counts as that delay.
    */
   def load(
     catalogues: Catalogues,
     language: Language,
     url: String,
+    timeout: Option[FiniteDuration] = None,
   )(
     using ExecutionContext
   ): Future[List[CatalogueProblem]] =
     def problem(message: String) = List(CatalogueProblem(message, Some(language)))
-    val fetched                  =
-      try
-        val fetch = js.Dynamic.global.fetch
-        if js.isUndefined(fetch) then
-          Future.failed(new IllegalStateException("there is no fetch here"))
-        else
-          fetch(url)
-            .asInstanceOf[js.Promise[js.Dynamic]]
-            .toFuture
-            .flatMap: response =>
-              // A declared length over the limit is refused before the body is read. The
-              // declared length is what travels, which a compressed body exceeds once decoded,
-              // so the body is also counted as it is read, and dropped past the limit.
-              val length   = response.headers.get("content-length")
-              val declared =
-                if js.isUndefined(length) || length == null then None
-                else String.valueOf(length).trim.toLongOption
-              if !response.ok.asInstanceOf[Boolean] then
-                cancel(response)
-                Future.failed(new IllegalStateException(s"HTTP ${response.status}"))
-              else if declared.exists(_ > MaxBytes) then
-                cancel(response)
-                Future.failed(tooLarge)
-              else readBounded(response)
-        end if
-      catch case NonFatal(e) => Future.failed(e)
+    val fetched = timeout.fold(fetchText(url, NoCutoff))(within(_)(fetchText(url, _)))
     fetched
       .map: text =>
         Catalogue
@@ -84,6 +82,80 @@ object CatalogueLoader:
         case NonFatal(e) =>
           problem(s"cannot fetch ${Printable(url)}: ${Printable(String.valueOf(e.getMessage))}")
   end load
+
+  // Code compiled against 6.0.x calls this signature; package-private keeps it in the binary
+  // and out of users' source, where the defaulted `timeout` above serves the same call.
+  private[tsuji] def load(
+    catalogues: Catalogues,
+    language: Language,
+    url: String,
+  )(
+    using ExecutionContext
+  ): Future[List[CatalogueProblem]] = load(catalogues, language, url, None)
+
+  // Gives up on the time limit first, so that the problem names it, then aborts the request
+  // and lets the timer go once the load ends either way.
+  private def within(
+    limit: FiniteDuration
+  )(
+    read: Cutoff => Future[String]
+  )(
+    using ExecutionContext
+  ): Future[String] =
+    val expired    = Promise[Unit]()
+    val result     = Promise[String]()
+    val controller = abortController()
+    val timer      = timers.setTimeout(limit.toMillis.max(0L).toDouble.min(MaxTimerMillis)):
+      result.tryFailure(new IllegalStateException(s"timed out after $limit"))
+      expired.trySuccess(())
+      controller.foreach(c => Try(c.abort()))
+    result.completeWith(read(Cutoff(expired.future, controller.map(_.signal))))
+    result.future.andThen(_ => timers.clearTimeout(timer))
+
+  end within
+
+  // A runtime without AbortController still has the timer: the load gives up and the body is
+  // let go, only the request itself is not aborted.
+  private def abortController(): Option[js.Dynamic] =
+    Option(js.Dynamic.global.AbortController)
+      .filterNot(js.isUndefined)
+      .flatMap(constructor => Try(js.Dynamic.newInstance(constructor)()).toOption)
+
+  private def fetchText(
+    url: String,
+    cutoff: Cutoff,
+  )(
+    using ExecutionContext
+  ): Future[String] =
+    try
+      val fetch = js.Dynamic.global.fetch
+      if js.isUndefined(fetch) then Future.failed(new IllegalStateException("there is no fetch here"))
+      else
+        cutoff
+          .signal
+          .fold(fetch(url))(signal => fetch(url, js.Dynamic.literal(signal = signal)))
+          .asInstanceOf[js.Promise[js.Dynamic]]
+          .toFuture
+          .flatMap: response =>
+            // A response that arrives after the time is up, or a body still being read then, is
+            // let go, so that its connection can close.
+            cutoff.expired.foreach(_ => cancel(response))
+            // A declared length over the limit is refused before the body is read. The
+            // declared length is what travels, which a compressed body exceeds once decoded,
+            // so the body is also counted as it is read, and dropped past the limit.
+            val length   = response.headers.get("content-length")
+            val declared =
+              if js.isUndefined(length) || length == null then None
+              else String.valueOf(length).trim.toLongOption
+            if !response.ok.asInstanceOf[Boolean] then
+              cancel(response)
+              Future.failed(new IllegalStateException(s"HTTP ${response.status}"))
+            else if declared.exists(_ > MaxBytes) then
+              cancel(response)
+              Future.failed(tooLarge)
+            else readBounded(response, cutoff)
+      end if
+    catch case NonFatal(e) => Future.failed(e)
 
   // A cancellation's promise may reject; nothing waits for it, so it is caught here.
   private def quietly(promise: js.Dynamic): Unit =
@@ -136,7 +208,8 @@ object CatalogueLoader:
   // The body as text, read chunk by chunk and given up as soon as it passes MaxBytes or holds a
   // byte that is not UTF-8.
   private def readBounded(
-    response: js.Dynamic
+    response: js.Dynamic,
+    cutoff: Cutoff,
   )(
     using ExecutionContext
   ): Future[String] =
@@ -148,6 +221,8 @@ object CatalogueLoader:
         .fromTry(strictDecoder())
         .flatMap: decoder =>
           val reader                              = body.getReader()
+          // A cancelled reader ends the pending read, so a body that trickles stops here.
+          cutoff.expired.foreach(_ => quietly(reader.cancel()))
           val out                                 = new StringBuilder
           def next(total: Double): Future[String] =
             reader

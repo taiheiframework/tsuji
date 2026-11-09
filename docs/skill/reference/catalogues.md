@@ -67,11 +67,15 @@ another family in a family's file are left out with a problem.
 
 ```scala
 CatalogueLoader.load(catalogues, Language("de"), "/i18n/de.json"): Future[List[CatalogueProblem]]
+CatalogueLoader.load(catalogues, Language("de"), "/i18n/de.json", timeout = Some(10.seconds)) // 6.1.0
 ```
 
 Takes a `given ExecutionContext`, uses the global `fetch`, never fails the `Future`. Needs a
 `TextDecoder` that honours `fatal` and `ignoreBOM` (every current browser and Node); with one that
-ignores them every load is a problem. Until a language is loaded, messages show through the
+ignores them every load is a problem. `timeout` (`Option[FiniteDuration]`, default `None`, since
+6.1.0): a file not arrived in full by then is the problem `cannot fetch <url>: timed out after
+<timeout>`, the request is aborted and its body let go; without it a slow server keeps the load
+waiting. Pass one in an application. Until a language is loaded, messages show through the
 chain; `onAdded` tells when to re-render. No dependency on Laminar or an effect library. Inline
 translations are in the bundle: a browser application with many languages uses files.
 

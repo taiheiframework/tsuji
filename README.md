@@ -329,11 +329,15 @@ with `CatalogueLoader.load(catalogues, language, url)`, which returns a `Future`
 wrong, if anything. Until a language arrives, its messages show through the fallback chain;
 `catalogues.onAdded` says when it did. `CatalogueLoader` needs a `TextDecoder` that honours
 `fatal` and `ignoreBOM`, as every current browser and Node do; with one that ignores them (an old
-polyfill) every load is a problem. The library has no dependency on Laminar or on an effect
-library. A Laminar application turns the callback into a signal:
+polyfill) every load is a problem. A server that answers slowly or not at all keeps a load
+waiting; since 6.1.0, `CatalogueLoader.load(catalogues, language, url, timeout = Some(10.seconds))`
+gives up after that time with a problem, aborts the request and lets its body go. Without a
+timeout it waits as long as the server and the runtime let it. The library has no dependency on
+Laminar or on an effect library. A Laminar application turns the callback into a signal:
 
 ```scala
 import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.duration.*
 import com.raquo.laminar.api.L.*
 
 val catalogues       = Catalogues(Seq(Orders) ++ CoreMessages.families)
@@ -344,7 +348,7 @@ catalogues.onAdded(_ => loaded.update(_ + 1))
 
 def switchTo(l: Language): Unit =
   language.set(l)
-  CatalogueLoader.load(catalogues, l, s"/i18n/${l.tag}.json")
+  CatalogueLoader.load(catalogues, l, s"/i18n/${l.tag}.json", timeout = Some(10.seconds))
 
 div(child.text <-- language.signal.combineWith(loaded.signal).map((l, _) => Orders.cancelled.localize(l)))
 ```

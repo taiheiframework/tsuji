@@ -339,7 +339,7 @@ object Language extends LanguagePlatform:
       TreeCodec.guarded(in)(decode(in.readKeyAsString()).fold(in.decodeError, identity))
     def encodeKey(x: Language, out: JsonWriter): Unit = out.writeKey(x.toString)
 
-  private def fromCanonical(tag: String): Language =
+  private[tsuji] def fromCanonical(tag: String): Language =
     builtIns.find(_.tag == tag).getOrElse(new Language(tag))
 
   // A well-formed tag is ASCII, so its case is changed by hand: String.toLowerCase and

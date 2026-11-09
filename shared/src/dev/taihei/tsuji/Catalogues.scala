@@ -2,7 +2,7 @@ package dev.taihei.tsuji
 
 import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
 
-import scala.annotation.{nowarn, tailrec}
+import scala.annotation.nowarn
 import scala.collection.mutable
 import scala.util.control.NonFatal
 
@@ -442,14 +442,13 @@ object Catalogues:
       else Language.parse(plain.mkString("-")).getOrElse(language)
     (language :: truncationsOf(base)).distinct
 
+  // `language` has no extension or private use, and in the grammar of such a tag every subtag
+  // after the language is optional, so each prefix is a well-formed tag, already canonical. It is
+  // built as it is rather than parsed again: a reader's tag can come from a request, and parsing
+  // each prefix of a 255-character tag costs time quadratic in its length.
   private def truncationsOf(language: Language): List[Language] =
-    @tailrec
-    def loop(parts: List[String], acc: List[Language]): List[Language] =
-      if parts.isEmpty then acc.reverse
-      else
-        val next = Language.parse(parts.reverse.mkString("-")).toOption.filterNot(acc.contains)
-        loop(parts.tail, next.fold(acc)(_ :: acc))
-    loop(language.tag.split('-').toList.reverse, Nil)
+    val parts = language.tag.split('-').toList
+    (parts.length to 1 by -1).toList.map(n => Language.fromCanonical(parts.take(n).mkString("-")))
 
   private enum Entry:
     case Raw(template: String)

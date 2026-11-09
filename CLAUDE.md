@@ -18,23 +18,20 @@ make test              # ./mill __.test.testForked (JS tests run under Node)
 make lint              # ./mill __.checkFormat, then __.fix --check: CI's lint steps
 TAIHEI_TEST_JAVA_HOME=<a JDK 17> ./mill tsuji.jvm.test.testForked   # the JVM tests on Java 17
 make publish-dry-run   # the bundle Maven Central would receive, written to out/
-make release-prepare TYPE=patch|minor|major EMBARGO=0|1   # then review RELEASE_x_y_z.md;
-                       # EMBARGO=1 when the ticket has the label embargo (read it with fude first)
-make release-finalize  # the signed bundle and its checks, tag local: only with the maintainer's yes
-make release-github    # after the push: the immutable GitHub Release, which publishes the version
-make publish-repo      # the family repository's deploy, then verify-repo reads every file back
 ```
 
-Releases follow ADR 0004: one signed bundle, built locally by release-finalize (nothing is
-uploaded), then main and the tag are pushed, release-github keeps it on an immutable GitHub
-Release, the family's Maven repository (`REPO_URL`, the same string as `release.repoUrl` in
-build.mill) serves it from there. Maven Central is frozen: no new version goes there, apart from a
-security fix for a line whose users are on Central.
-A security fix (`EMBARGO=1`) goes to Central first with `make publish`, and gets its GitHub
-Release from Central's files (`make central-bundle`) after its advisory. The machinery is shared
-with mihon: keep everything but the per-library lines identical. Credentials never go on make's
-command line and are not exported in the shell you build in; never read or print
-`~/.edo-release.env`.
+Only the maintainer releases. Until the family's release workflow takes over (ADR 0009), he
+does it on the interim route of ADR 0004 at his own terminal, as the README's Releasing section
+lists: `release-prepare TYPE=… EMBARGO=0|1 TICKET=<key>` (EMBARGO=1 when the ticket has the label
+embargo), `release-finalize` (the signed bundle, tag local), the push, `release-github` and
+`publish-repo`. An agent never runs these, nor creates or pushes a release tag; `publish-dry-run`
+and `release-test` upload nothing and stay open to it. The family's Maven repository
+(`REPO_URL`, the same string as `release.repoUrl` in build.mill) serves every release from its
+immutable GitHub Release. Maven Central is frozen: no version of this line goes there, and a
+security fix for a line whose users are on Central is released from its maintenance branch. The
+machinery is shared with mihon: keep everything but the per-library lines identical. Credentials
+never go on make's command line and are not exported in the shell you build in; never read or
+print `~/.edo-release.env`.
 
 ## Layout
 

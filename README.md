@@ -92,12 +92,16 @@ make publishLocal   # to ~/.ivy2/local (a SNAPSHOT only)
 The version is the git tag: an exact `v`-tag on a clean tree is the release,
 anything else a SNAPSHOT of the last tag.
 
+Until the family's release workflow takes over (ADR 0009), a release takes the interim route
+below, which only the maintainer runs, at his own terminal:
+
 ```sh
-make release-prepare TYPE=patch|minor|major EMBARGO=0|1
+make release-prepare TYPE=patch|minor|major EMBARGO=0|1 TICKET=<key>
                                                # validate, write RELEASE_x_y_z.md
-make release-finalize                          # repo-guard, commit the notes, tag locally,
-                                               # check Central, REPO_URL and GitHub, build
-                                               # and sign the bundle once; uploads nothing
+make release-finalize                          # repo-guard, commit the notes under the
+                                               # release's issue key, tag locally, check
+                                               # Central, REPO_URL and GitHub, build and
+                                               # sign the bundle once; uploads nothing
 git push origin main && git push origin vX.Y.Z # from here on the version is final
 make release-github                            # publishes it: the bundle on an immutable
                                                # GitHub Release, read back and compared
@@ -108,24 +112,22 @@ make release-abort                             # until the tag (and the notes co
 make publish-dry-run                           # the signed bundle, written to out/
 ```
 
-`release-prepare` refuses while the previous release is not on Maven Central yet: at most one
-version of a library waits for the release train.
+`release-prepare` refuses while the previous release has not finished: the family's Maven
+repository must serve it, or, for a version from before ADR 0009, Maven Central.
 
-A security fix (`make release-prepare … EMBARGO=1`) goes the other way: `release-finalize`
-publishes it to Maven Central with `make publish`. Once the Central Portal says PUBLISHED and
-repo1.maven.org answers 200 for it, push `main` and the tag; once its advisory is published,
-`make embargo-lift VERSION=x.y.z` records the lift, which nothing after it does without, then
-`make central-bundle` (the bundle from Central's own files), `make release-github` and
-`make publish-repo`.
+A security fix (`EMBARGO=1`) is built and signed the same way. Its embargo is the tag that is
+not pushed yet: `main` and the tag stay on the maintainer's machine until the time set for the
+advisory, then go out in one sitting, followed by `make release-github`, `make publish-repo` and
+the advisory. Its release notes say only that it is a security fix. Every release step refuses
+while a `.release-embargo` file exists, the earlier machinery's list of versions under embargo.
 
 One release publishes `taihei-tsuji` and `taihei-tsuji-zio-json` (each for the JVM and Scala.js) and
 `taihei-tsuji-tools` with the same version, as one signed bundle, built and signed once. Its zip and
 `SHA256SUMS`, the SHA-256 of every file, are kept on an immutable GitHub Release of the tag; that
 release publishes the version. The family's Maven repository is built from those releases alone, so
 nothing is ever uploaded to it, and it serves exactly the bytes `SHA256SUMS` lists. No new version
-goes to Maven Central, apart from a security fix for a line whose users are on Central: it goes to
-Central first (`EMBARGO=1`), and gets its GitHub Release, from Central's own files
-(`make central-bundle`), only after its advisory is published.
+of this line goes to Maven Central (ADR 0009). A security fix for a line whose users are on
+Central is released from that line's maintenance branch, which keeps the Central targets.
 
 `make validate` checks the build's repositories (`repo-guard`): Coursier's defaults (the local
 Ivy repository, then Maven Central), then `REPO_URL` for `dev.taihei` alone, and nothing else,
@@ -145,21 +147,18 @@ A release publishes only the commit `release-prepare` validated, and refuses whe
 does not track is in a source or resource folder, or a stray build file is in the tree.
 Credentials never go on make's command line (`make … VAR=value`): make hands such a value on to
 every command it runs, also after an `unset`. They come from `~/.edo-release.env` or the
-environment. From the file only `make publish` and the dry run's signing step (the key alone)
-get them; do not export them in the shell you build in, where every Mill call of a build target
+environment. From the file only the dry run's signing step gets them, and only the release
+key; do not export them in the shell you build in, where every Mill call of a build target
 and of `release-prepare` would see them (repo-guard, `release-preflight` and the dry run unset
 them first).
 
-`make publish` is only for a security fix under embargo, which goes to Central first; it refuses
-any other version, and a version whose Central upload it started before. It reads the Central
-Portal user token and the release key from `~/.edo-release.env` (a name from the Edo Framework
-days, kept because the maintainers' workstations write it for every library; `RELEASE_ENV=…` on
-the make command line points elsewhere, and the file must be yours, mode 600, not a link) or the
-environment (`MILL_SONATYPE_USERNAME`, `MILL_SONATYPE_PASSWORD`, `MILL_PGP_SECRET_BASE64`,
-`MILL_PGP_PASSPHRASE`). The dry run that builds the release bundle gets the release key but never
-the Central token, neither from that file nor from the shell. The `mill` launcher downloads Mill
-over HTTPS only, and runs Mill only when its SHA-256 matches the one pinned in the launcher: it
-checks a download before keeping it, and the file it is about to run before every run, so a
+The dry run that builds the release bundle reads the release key from `~/.edo-release.env` (a name
+from the Edo Framework days, kept because the maintainers' workstations write it for every
+library; `RELEASE_ENV=…` on the make command line points elsewhere, and the file must be yours,
+mode 600, not a link) or the environment (`MILL_PGP_SECRET_BASE64`, `MILL_PGP_PASSPHRASE`), and
+never the Central token, neither from that file nor from the shell. The `mill` launcher downloads
+Mill over HTTPS only, and runs Mill only when its SHA-256 matches the one pinned in the launcher:
+it checks a download before keeping it, and the file it is about to run before every run, so a
 tampered copy in Mill's cache is refused, as is a version without a pin. `release-preflight`
 (inside `release-finalize`), `release-github` and `publish-repo` use the maintainer's `gh` login;
 nothing else in a release needs a token.

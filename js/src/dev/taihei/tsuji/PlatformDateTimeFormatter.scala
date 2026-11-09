@@ -21,38 +21,28 @@ private[tsuji] object PlatformDateTimeFormatter:
   ): String =
     val jsLocale = PlatformLocales.jsLocale(locale)
 
-    value match
-      case ld: LocalDate =>
-        val jsDate    = toJsDate(ld)
-        val dateStyle = styleOf(options, "dateStyle")
-        val jsOptions = js.Dictionary[Any](
-          "dateStyle" -> dateStyle
+    // The style options each value shows, and the instant that stands for it. A value past the
+    // range of a JavaScript Date has no instant: it shows as its ISO text, as Intl would throw.
+    val (styles, instant) = value match
+      case ld: LocalDate      =>
+        (
+          Seq("dateStyle"),
+          toJsDate(ld.getYear, ld.getMonthValue, ld.getDayOfMonth, LocalTime.MIDNIGHT),
         )
-        new DateTimeFormat(jsLocale, jsOptions).format(jsDate)
-
       case ldt: LocalDateTime =>
-        val jsDate    = toJsDate(ldt)
-        val dateStyle = styleOf(options, "dateStyle")
-        val timeStyle = styleOf(options, "timeStyle")
-        val jsOptions = js.Dictionary[Any](
-          "dateStyle" -> dateStyle,
-          "timeStyle" -> timeStyle,
+        (
+          Seq("dateStyle", "timeStyle"),
+          toJsDate(ldt.getYear, ldt.getMonthValue, ldt.getDayOfMonth, ldt.toLocalTime),
         )
-        new DateTimeFormat(jsLocale, jsOptions).format(jsDate)
+      case lt: LocalTime      =>
+        (Seq("timeStyle"), toJsDate(ReferenceYear, 1, 1, lt))
+      case _                  => (Seq.empty, None)
 
-      case lt: LocalTime =>
-        // For LocalTime, use today's date with the given time
-        val jsDate    = toJsDate(lt)
-        val timeStyle = styleOf(options, "timeStyle")
-        val jsOptions = js.Dictionary[Any](
-          "timeStyle" -> timeStyle
-        )
-        new DateTimeFormat(jsLocale, jsOptions).format(jsDate)
-
-      case _ =>
-        // Fallback for non-date/time values
-        value.toString
-    end match
+    instant.fold(value.toString): date =>
+      val jsOptions = js.Dictionary[Any](
+        (("timeZone" -> "UTC") +: styles.map(key => key -> styleOf(options, key)))*
+      )
+      new DateTimeFormat(jsLocale, jsOptions).format(date)
 
   end formatDateTime
 
@@ -63,28 +53,23 @@ private[tsuji] object PlatformDateTimeFormatter:
   private def styleOf(options: Map[String, String], key: String): String =
     options.get(key).map(_.toLowerCase).filter(styles).getOrElse("medium")
 
-  private def toJsDate(ld: LocalDate): js.Date =
-    new js.Date(ld.getYear, ld.getMonthValue - 1, ld.getDayOfMonth)
+  // A LocalTime has no date; Intl needs one, so it gets a fixed one rather than today's.
+  private val ReferenceYear = 1970
 
-  private def toJsDate(ldt: LocalDateTime): js.Date =
-    new js.Date(
-      ldt.getYear,
-      ldt.getMonthValue - 1,
-      ldt.getDayOfMonth,
-      ldt.getHour,
-      ldt.getMinute,
-      ldt.getSecond,
+  // The fields go in as UTC and Intl formats them in UTC, so the runtime's zone never moves them:
+  // in the local zone a time in a daylight-saving gap would shift by an hour. setUTCFullYear sets
+  // year, month and day together, because the Date constructor and Date.UTC read years 0 to 99
+  // as 1900 to 1999. A year outside the Date range leaves the time value NaN.
+  private def toJsDate(
+    year: Int,
+    month: Int,
+    day: Int,
+    time: LocalTime,
+  ): Option[js.Date] =
+    val date = new js.Date(
+      js.Date.UTC(1970, 0, 1, time.getHour, time.getMinute, time.getSecond)
     )
-
-  private def toJsDate(lt: LocalTime): js.Date =
-    val now = new js.Date()
-    new js.Date(
-      now.getFullYear().toInt,
-      now.getMonth().toInt,
-      now.getDate().toInt,
-      lt.getHour,
-      lt.getMinute,
-      lt.getSecond,
-    )
+    date.setUTCFullYear(year, month - 1, day)
+    Option.unless(date.getTime().isNaN)(date)
 
 end PlatformDateTimeFormatter

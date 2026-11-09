@@ -1,6 +1,6 @@
 package dev.taihei.tsuji
 
-import java.time.{LocalDate, LocalTime}
+import java.time.{LocalDate, LocalDateTime, LocalTime}
 
 import zio.test.*
 
@@ -93,6 +93,27 @@ object PlatformFormatterSpec extends ZIOSpecDefault:
     },
     test("a valid tag the platform cannot format does not throw") {
       assertTrue(number("zh-cmn-Hans").nonEmpty, medium("zh-cmn-Hans").nonEmpty)
+    },
+    // Scala.js once built the Date in the runtime's zone and read years 0 to 99 as 19xx. The
+    // expectations are the JVM's output, which both platforms must write.
+    test("both platforms write year 50 as year 50") {
+      val year50 = LocalDate.of(50, 1, 1)
+      assertTrue(
+        PlatformDateTimeFormatter.formatDateTime(year50, Map.empty, "de") == "01.01.50",
+        PlatformDateTimeFormatter.formatDateTime(year50, Map("dateStyle" -> "long"), "en") ==
+        "January 1, 50",
+        MessageFormat2.format("{$d :date dateStyle=long}", Map("d" -> year50), "de") ==
+        "1. Januar 50",
+      )
+    },
+    test("both platforms write the date and time they are given") {
+      // 02:30 on 2026-03-29 does not exist in Central Europe: the clocks jump from 02:00 to 03:00.
+      val gap = LocalDateTime.of(2026, 3, 29, 2, 30)
+      assertTrue(
+        PlatformDateTimeFormatter.formatDateTime(gap, Map.empty, "de") == "29.03.2026, 02:30:00",
+        PlatformDateTimeFormatter.formatDateTime(gap.toLocalTime, Map("timeStyle" -> "short"), "de") ==
+        "02:30",
+      )
     },
     test("a region reaches the formatter") {
       val msg = Message.withNamedArgs(Language.Dutch -> "{$x :number}")("x" -> 1234.5)

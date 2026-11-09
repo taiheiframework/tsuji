@@ -116,6 +116,11 @@ final class Catalogues private (
   private[tsuji] def definition(key: MessageKey): Option[MessageDefinition[?]] =
     state.get.definitions.get(key)
 
+  // Whether the family's file for the language was looked for and is still remembered: a miss
+  // the registry forgot is looked for again. The tests of MaxMisses read it; nothing else does.
+  private[tsuji] def lookedFor(prefix: String, language: Language): Boolean =
+    state.get.attempted(prefix -> language)
+
   // A nested message or text, within the budget of the message it is an argument of.
   @nowarn("cat=deprecation")
   private[tsuji] def renderWithin(

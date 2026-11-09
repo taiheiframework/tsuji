@@ -64,6 +64,10 @@ The build resolves from Coursier's defaults (the local Ivy repository, then Mave
 from the family's Maven repository (`REPO_URL` in the Makefile, built from the immutable GitHub
 Releases) for `dev.taihei` alone, and from nothing else; none of them needs credentials.
 
+Coursier asks the local Ivy repository first, so a `publishLocal` copy of a `dev.taihei` version
+the build resolves is found before Maven Central and `REPO_URL`, and repo-guard refuses it ("not
+in the Coursier cache"). Remove it from `~/.ivy2/local/dev.taihei/` before `make validate`.
+
 ## Build
 
 ```sh

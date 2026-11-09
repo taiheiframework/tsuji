@@ -33,7 +33,8 @@ security fix for a line whose users are on Central.
 A security fix (`EMBARGO=1`) goes to Central first with `make publish`, and gets its GitHub
 Release from Central's files (`make central-bundle`) after its advisory. The machinery is shared
 with mihon: keep everything but the per-library lines identical. Credentials never go on make's
-command line; never read or print `~/.edo-release.env`.
+command line and are not exported in the shell you build in; never read or print
+`~/.edo-release.env`.
 
 ## Layout
 

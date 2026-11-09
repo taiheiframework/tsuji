@@ -617,10 +617,14 @@ object MessageFormat2:
   // Evaluation
   // ---------------------------------------------------------------------------------------------
 
+  // `pluralLocale` is the language the template is written in, when that is not the reader's:
+  // a plural category is grammar of the template's text, while numbers and dates are formatted
+  // for the reader. An English template shown to a Russian reader says "21 items", not "21 item".
   final private[tsuji] case class Context(
     variables: Map[String, Any] = Map.empty,
     locale: String = "en",
-    budget: Budget = Budget.fresh())
+    budget: Budget = Budget.fresh(),
+    pluralLocale: Option[String] = None)
 
   // None when evaluating threw, which no input should make it do; the caller decides what to show.
   private[tsuji] def tryFormat(
@@ -637,8 +641,9 @@ object MessageFormat2:
     args: Map[String, Any],
     locale: String,
     budget: Budget,
+    pluralLocale: Option[String] = None,
   ): Either[String, String] =
-    try Right(evaluate(message, Context(args, locale, budget)))
+    try Right(evaluate(message, Context(args, locale, budget, pluralLocale)))
     catch case NonFatal(e) => Left(failure(e))
 
   // The kind of cause only: an exception's message can hold text from the input, and a problem
@@ -690,7 +695,7 @@ object MessageFormat2:
           case t: LocalTime =>
             PlatformDateTimeFormatter.formatDateTime(t, options - "dateStyle", context.locale)
           case other        => other.toString
-      case "plural"   => PluralSelector(value, context.locale)
+      case "plural"   => PluralSelector(value, context.pluralLocale.getOrElse(context.locale))
       case "string"   => show(value, context.locale)
       case _          => value
 

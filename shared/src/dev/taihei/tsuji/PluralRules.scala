@@ -38,10 +38,11 @@ private[tsuji] object Operands:
   private val MaxBits = 3700
 
   /**
-   * The operands of a value given to `:plural`: an integer as it is, a `Double` or `Float` with
-   * no trailing fraction zeros (its scale says nothing, and differs between the platforms; a
-   * `Float` is read from its text, which Scala.js writes with more digits than the JVM), a
-   * `BigDecimal` and a numeric text with the fraction digits they show, so `"1.0"` has `v = 1`.
+   * The operands of a value given to `:plural`: an integer as it is, a `Float` or `Double` as the
+   * fewest digits that read back as the same value, without trailing fraction zeros (1.1f is 1.1,
+   * 1.0 is 1), a `BigDecimal` and a numeric text with the fraction digits they show, so `"1.0"`
+   * has `v = 1`. Scala.js has one type for both, so there a `Double` that is exactly a `Float`
+   * reads as that `Float`: the same for every value a program writes as a decimal.
    * None when the value is no finite number within [[MaxNumberText]] digits.
    */
   def of(value: Any): Option[Operands] = value match
@@ -51,8 +52,8 @@ private[tsuji] object Operands:
     case n: Byte   => parse(n.toString)
     case n: BigInt => Option.when(n.bitLength <= MaxBits)(n).flatMap(n => parse(n.toString))
     case n: java.math.BigInteger => of(BigInt(n))
+    case d: Float                => ofFloat(d)
     case d: Double               => ofDouble(d)
-    case d: Float                => ofDouble(d.toString.toDouble)
     case d: BigDecimal           => ofDecimal(d.bigDecimal)
     case d: java.math.BigDecimal => ofDecimal(d)
     case other                   => ofText(other.toString)
@@ -67,7 +68,28 @@ private[tsuji] object Operands:
   private def ofDouble(d: Double): Option[Operands] =
     Option
       .when(!d.isNaN && !d.isInfinite)(d)
-      .flatMap(d => ofDecimal(java.math.BigDecimal.valueOf(d).stripTrailingZeros))
+      .flatMap(d => ofDecimal(shortest(d, 17, _.toDouble == d)))
+
+  private def ofFloat(f: Float): Option[Operands] =
+    Option
+      .when(!f.isNaN && !f.isInfinite)(f)
+      .flatMap(f => ofDecimal(shortest(f.toDouble, 9, _.toDouble.toFloat == f)))
+
+  // The fewest significant digits that read back as the value, found by the same arithmetic on
+  // both platforms: Double.toString differs between them (Scala.js prints 1.0 as 1, and Java 17
+  // does not always print the shortest digits), and a Float's text even more. 17 digits always
+  // read back as a Double, 9 as a Float.
+  private def shortest(
+    d: Double,
+    maxDigits: Int,
+    readsBack: String => Boolean,
+  ): java.math.BigDecimal =
+    val exact = new java.math.BigDecimal(d)
+    (1 to maxDigits).iterator
+      .map(p => exact.round(new java.math.MathContext(p, java.math.RoundingMode.HALF_EVEN)))
+      .find(c => readsBack(c.toString))
+      .getOrElse(exact)
+      .stripTrailingZeros
 
   // Its digits are counted before the plain text is made: 1E+1000000000 is a billion digits.
   private def ofDecimal(d: java.math.BigDecimal): Option[Operands] =

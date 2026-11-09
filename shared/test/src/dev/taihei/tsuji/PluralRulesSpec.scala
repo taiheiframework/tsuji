@@ -174,6 +174,21 @@ object PluralRulesSpec extends ZIOSpecDefault:
           cat("0.1", "da") == "one", // Danish: t != 0 and i = 0,1
         )
       },
+      test("a Float and a Double are read as their shortest digits, the same on both platforms") {
+        def digits(v: Any) = Operands.of(v).map(o => (o.i, o.v, o.f))
+        assertTrue(
+          cat(1.1f, "hr") == "one", // f % 10 = 1
+          cat(2.3f, "hr") == "few",
+          cat(0.1f, "lv") == "one",
+          digits(1.1f).contains((BigInt(1), 1, BigInt(1))),
+          digits(0.3f).contains((BigInt(0), 1, BigInt(3))),
+          digits(2.0e-3).contains((BigInt(0), 3, BigInt(2))),
+          digits(1.0e23).contains((BigInt("100000000000000000000000"), 0, BigInt(0))),
+          digits(0.1 + 0.2).contains((BigInt(0), 17, BigInt("30000000000000004"))),
+          digits(-0.0).contains((BigInt(0), 0, BigInt(0))),
+          digits(Float.NaN).isEmpty,
+        )
+      },
       test("negative numbers take the category of their absolute value, as CLDR's n") {
         assertTrue(cat(-1, "en") == "one", cat(-2, "pl") == "few", cat(-5, "pl") == "many")
       },
@@ -197,6 +212,24 @@ object PluralRulesSpec extends ZIOSpecDefault:
           MessageFormat2.format(keys, Map("n" -> 1000000), "fr") == "other",
         )
       },
+    ),
+    suite("a message shown through the fallback chain")(
+      test("takes the plural rules of the template's language, and formats for the reader") {
+        object Items extends MessageFamily("items"):
+          val count = message[(n: Int)](
+            ".match {$n :plural} when one {{$n} item} when * {{$n} items}",
+            Language("pl") -> ".match {$n :plural} when one {{$n} rzecz} when few {{$n} rzeczy} when * {{$n} rzeczy!}",
+          )
+        given Catalogues = Catalogues()
+        assertTrue(
+          Items.count(21).localize(Language("ru")) == "21 items",
+          Items.count(5).localize(Language("fil")) == "5 items",
+          Items.count(0).localize(Language("hi")) == "0 items",
+          Items.count(1).localize(Language("ru")) == "1 item",
+          Items.count(3).localize(Language("pl-PL")) == "3 rzeczy",
+          Items.count(1).localize(Language("pl")) == "1 rzecz",
+        )
+      }
     ),
     suite("languages fall back as Tsuji's do")(
       test("a region or script falls back to its language, and pt-PT has its own rules") {

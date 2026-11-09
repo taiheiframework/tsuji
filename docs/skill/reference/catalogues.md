@@ -39,7 +39,8 @@ Orders.cancelled.localize(Language("lb-LU"))
 
 - The chain for language L: L, L without its extensions and private use, then without its last
   subtag step by step, the configured fallbacks of each of those (walked the same way), the
-  family's source language. Formatting always in L.
+  family's source language. Numbers and dates always formatted for L; a plural variant chosen by
+  the rules of the template's own language (since 6.1.0).
   `catalogues.fallbackChain(language, source)` shows it.
 - In a language, a catalogue file wins over an inline translation; in the source language the
   code's template wins.

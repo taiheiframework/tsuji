@@ -20,8 +20,8 @@ import scala.util.control.NonFatal
  *     (`lb` to `de`, or `pt-BR` to `pt` to `es`);
  *  1. the family's source language, which always has it.
  *
- * Numbers, dates and plurals are always formatted for L, also when the template comes from a
- * fallback. A template that does not pass the checks, or cannot be formatted, is skipped, with a
+ * Numbers and dates are always formatted for L, also when the template comes from a fallback;
+ * a plural variant is chosen by the rules of the language the template is written in. A template that does not pass the checks, or cannot be formatted, is skipped, with a
  * problem in [[problems]]. Showing a message never throws.
  *
  * In each language a template from a catalogue file wins over an inline translation; in the
@@ -184,7 +184,7 @@ final class Catalogues private (
     language: Language,
     budget: Budget,
   ): Option[String] =
-    MessageFormat2.formatted(t, values, language.tag, budget) match
+    MessageFormat2.formatted(t, values, language.tag, budget, Some(candidate.tag)) match
       case Right(text) => Some(text)
       case Left(cause) =>
         report(List(CatalogueProblem(cause, Some(candidate), Some(d.key))))

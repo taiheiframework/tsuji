@@ -243,6 +243,34 @@ Language("nl-BE").locale // nl_BE, on the JVM only
 On Scala.js `language.locale` does not exist: use `language.tag`, or
 `new Intl.Locale(language.tag)` where JavaScript needs a locale object.
 
+## From a request
+
+On a server the reader's languages come from the request instead, usually its `Accept-Language`
+header. Show messages in one of the languages your application supports, not in whatever tag a
+reader sends: `Language.fromAcceptLanguage` reads the header, most preferred first, and
+`Language.negotiate` picks the first supported language among them, or your default:
+
+```scala
+val supported = Seq(Language.Dutch, Language.French, Language.English)
+
+def readerLanguage(acceptLanguage: String): Language =
+  Language.negotiate(Language.fromAcceptLanguage(acceptLanguage), supported, Language.English)
+
+readerLanguage("nl-BE,nl;q=0.9,en;q=0.8") // Dutch
+readerLanguage("fr-CA, *;q=0.1")          // French
+readerLanguage("de, it;q=0.5")            // English
+```
+
+`fromAcceptLanguage` orders the entries by weight, leaves out those with `q=0` and those weighted
+below a `*` (which stands for your default), and skips an entry it cannot read; it never throws
+and reads at most 4096 characters and 32 entries of the header. `negotiate` walks each requested
+language down as a registry does to find a message, from `zh-Hant-TW` to `zh-Hant` to `zh`, so
+`nl-BE` chooses a supported `nl`. It never goes the other way: a request for `en` does not choose
+a supported `en-GB`, so list the plain languages you support too. The `fallbacks` of a
+`Catalogues` play no part: with `lb -> de` configured, list `lb` in `supported` to show it.
+The same works for a language from a URL parameter or a profile: `Language.parse(value).toSeq`
+gives the requested list.
+
 ## Messages
 
 A **message family** is an object that groups messages under a key prefix and names its
@@ -529,8 +557,8 @@ in Tsuji's own codecs, whatever `ReaderConfig` you read with:
   leading zero (`01`) or a decimal point without a digit on one side (`1.`, `-.5`).
 - On the JVM a registry looks a family's file for a language up on the classpath once and keeps
   it; of the languages without a file it remembers the latest 4096. Narrow a language from a
-  request header to the languages you support before you show messages in it, or each new tag
-  costs a lookup per family.
+  request header to the languages you support before you show messages in it
+  (`Language.negotiate`, see From a request), or each new tag costs a lookup per family.
 - One message, with its nested messages, list elements and fallbacks, produces at most four
   million characters; past that it shows its own template.
 

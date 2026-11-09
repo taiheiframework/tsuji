@@ -41,6 +41,8 @@ Companion:
 | `Language.of(isoCode: String): Language` | the language for a valid tag; `English` only for invalid input |
 | `Language.fromLocale(locale: java.util.Locale): Either[String, Language]` | JVM only: `parse(locale.toLanguageTag)`, `Left` for a locale without a language (`Locale.ROOT`, `und`) |
 | `Language.preferred: Vector[Language]` | the platform's preferred languages, most preferred first (JVM: the default display locale; JS: `navigator.languages`, `navigator.language`, `Intl`); `und`, invalid tags and repeats left out; may be empty |
+| `Language.fromAcceptLanguage(header: String): Vector[Language]` | an HTTP `Accept-Language` value, most preferred first: ordered by `q` (ties in header order), `q=0` and everything weighted below `*` left out, unreadable entries, `und` and repeats skipped, `null` as empty; cut to 4096 characters (at the last whole entry) and 32 entries; never throws (6.1.0) |
+| `Language.negotiate(requested: Seq[Language], supported: Seq[Language], default: Language): Language` | the first supported language for the first requested one that has one, each requested tag walked down as `Catalogues` walks it (exact, without extensions, last subtag removed: `zh-Hant-TW`, `zh-Hant`, `zh`); never broader to narrower (`en` does not pick `en-GB`); configured `Catalogues` fallbacks not consulted; else `default` (6.1.0) |
 | `Language.values: Array[Language]` | the built-ins (`English`, `Dutch`, `French`) |
 | `Language.valueOf(name: String): Language` | a built-in by name (`"Dutch"`) |
 | `Language.defaultLanguage: Language` | `English` |
@@ -59,6 +61,18 @@ Codecs (given, jsoniter-scala): `JsonValueCodec[Language]` and `JsonKeyCodec[Lan
 `Language` works as a JSON map key). A built-in is written by its name (`"English"`), any other
 language by its tag (`"de"`); both forms are read. The zio-json codecs are in
 `taihei-tsuji-zio-json` (see JSON below).
+
+### From a request
+
+```scala
+val supported = Seq(Language.Dutch, Language.French, Language.English)
+val language  = Language.negotiate(Language.fromAcceptLanguage(header), supported, Language.English)
+// "nl-BE,nl;q=0.9" gives Dutch, "fr-CA, *;q=0.1" French, "de" English
+```
+
+Narrow a request's language this way before showing messages in it: the output stays in a
+language the application supports, and on the JVM each unknown tag would otherwise cost a
+classpath lookup per family.
 
 ## Message families
 

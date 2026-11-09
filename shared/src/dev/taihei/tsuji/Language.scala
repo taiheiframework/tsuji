@@ -246,6 +246,48 @@ object Language extends LanguagePlatform:
   def preferred: Vector[Language] = fromPlatformTags(PlatformPreferredLanguages.tags)
 
   /**
+   * The languages of an HTTP `Accept-Language` value, most preferred first, for
+   * [[negotiate]]. Entries are ordered by their weight (`q`), equal weights in the header's order;
+   * an entry with `q=0` is left out. A `*` stands for the application's default, so the entries
+   * weighted below it are left out too. An entry that is not a well-formed tag or weight, a tag
+   * that names no language (`und`) and a repeat are skipped; `null` reads as no header.
+   *
+   * The value comes from a request, so it is bounded: past 4096 characters it is cut at the last
+   * whole entry, and only its first 32 entries are read. It never throws.
+   *
+   * {{{
+   * Language.fromAcceptLanguage("fr-CH, fr;q=0.9, en;q=0.8, *;q=0.5")
+   * // Vector(fr-CH, fr, English)
+   * }}}
+   */
+  def fromAcceptLanguage(header: String): Vector[Language] = AcceptLanguage.parse(header)
+
+  /**
+   * The first of `supported` that a reader asking for `requested`, most preferred first, can be
+   * shown, or `default` when there is none. Each requested language is walked down as a
+   * [[Catalogues]] walks it to find a message: the tag itself, then without its extensions and
+   * private use, then with its last subtag removed, step by step (`zh-Hant-TW`, `zh-Hant`, `zh`).
+   * The first step that is supported wins, before any less preferred language is tried. A
+   * supported language is never matched by a broader request: `en` does not choose `en-GB`, so
+   * list the plain languages you support too. The fallbacks configured on a `Catalogues` are not
+   * consulted; `default` is what a reader gets when nothing they asked for is supported.
+   *
+   * {{{
+   * val supported = Seq(Language("nl"), Language("fr"), Language.English)
+   * val requested = Language.fromAcceptLanguage(request.header("Accept-Language"))
+   * Language.negotiate(requested, supported, Language.English)
+   * // "nl-BE, fr;q=0.8" gives Dutch; "de, *;q=0.1" gives English
+   * }}}
+   */
+  def negotiate(
+    requested: Seq[Language],
+    supported: Seq[Language],
+    default: Language,
+  ): Language =
+    val offered = supported.toSet
+    requested.iterator.flatMap(Catalogues.truncations).find(offered).getOrElse(default)
+
+  /**
    * The language of a tag a platform locale gave: `parse`, except that a tag without a language
    * (`und`, `und-US`, the tag of `Locale.ROOT`) is refused instead of read as a language.
    */

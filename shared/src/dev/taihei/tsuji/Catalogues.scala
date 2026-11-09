@@ -342,6 +342,9 @@ object Catalogues:
    *  - every catalogue key belongs to a definition;
    *  - every language in `required` has every key, inline or in a catalogue; other languages may
    *    be partial and fall back;
+   *  - no key of a `:plural` selector is one the template's language can never select, such as
+   *    `few` in English ([[MessageFormat2.warnings]]); such a template is still shown, its
+   *    variant only stays unused;
    *  - keys are unique across the families, and no language is given twice inline.
    *
    * Empty means all is well. It works with any test framework:
@@ -369,6 +372,7 @@ object Catalogues:
           case _                         => definitions(d.key) = d
         val (errors, _) = MessageFormat2.check(d.template, d.kinds)
         found ++= errors.map(e => templateProblem(e, family.sourceLanguage, d.key))
+        found ++= unmatchable(d.template, family.sourceLanguage, d.key)
         d.translationPairs.groupBy(_._1).foreach: (language, pairs) =>
           if pairs.size > 1 then
             found += CatalogueProblem("translated inline twice", Some(language), Some(d.key))
@@ -380,6 +384,7 @@ object Catalogues:
             )
         d.translations.foreach: (language, t) =>
           found ++= MessageFormat2.check(t, d.kinds)._1.map(e => templateProblem(e, language, d.key))
+          found ++= unmatchable(t, language, d.key)
 
     catalogues.foreach: catalogue =>
       found ++= catalogue.problems
@@ -392,6 +397,7 @@ object Catalogues:
             found ++= MessageFormat2.check(t, d.kinds)._1.map(e =>
               templateProblem(e, catalogue.language, key)
             )
+            found ++= unmatchable(t, catalogue.language, key)
 
     required.toList.sortBy(_.tag).foreach: language =>
       val inFiles = catalogues.filter(_.language == language).flatMap(_.messages.keys).toSet
@@ -422,6 +428,15 @@ object Catalogues:
   private val MaxChain    = 32
   private val MaxChains   = 1024
   private val MaxProblems = 1000
+
+  // A plural key the language's rules never select: the template still formats and is kept, so
+  // only verify reports it, for the tests that would rather know.
+  private def unmatchable(
+    template: String,
+    language: Language,
+    key: MessageKey,
+  ): List[CatalogueProblem] =
+    MessageFormat2.warnings(template, language).map(e => templateProblem(e, language, key))
 
   private def templateProblem(
     e: TemplateError,

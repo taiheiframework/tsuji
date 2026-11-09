@@ -88,7 +88,8 @@ Catalogues.verify(families, catalogues, required = Set(Language.Dutch)): List[Ca
 Empty means all is well. It checks every template (code, inline, files) against its definition,
 user argument types included; keys without a definition; every required language complete (inline
 or file); duplicate prefixes and keys; a language given twice inline; an inline translation in the
-source language.
+source language; and (since 6.1.0) a `:plural` key the template's language never selects, such as
+`few` in English, which is reported but still shown.
 
 ## Export: taihei-tsuji-tools
 

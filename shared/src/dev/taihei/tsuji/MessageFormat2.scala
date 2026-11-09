@@ -755,41 +755,106 @@ object MessageFormat2:
     out.result()
 
   private def evaluateMatch(matchStmt: MatchStatement, context: Context): String =
-    val selectorValues = matchStmt.selectors.map(s => evaluateExpression(s, context))
+    val selectorValues = matchStmt.selectors.map(s => selected(evaluateExpression(s, context)))
     val matchedCase    = matchStmt.cases.find: mcase =>
       mcase.keys.size == selectorValues.size &&
       mcase.keys.zip(selectorValues).forall:
-        case (key, PluralSelector(value, locale)) => matchesPluralKey(value, key, locale)
-        case (key, l: Language)                   => key == "*" || key == l.tag
-        case (key, value)                         => key == value.toString || key == "*"
+        case (key, p: PluralChoice) => matchesPluralKey(p, key)
+        case (key, l: Language)     => key == "*" || key == l.tag
+        case (key, value)           => key == value.toString || key == "*"
     matchedCase match
       case Some(mcase) => evaluatePattern(mcase.pattern, context)
       case None        => "[no match]"
 
-  private def matchesPluralKey(
-    value: Any,
+  // A plural selector's number and category, worked out once for all the variants.
+  final private case class PluralChoice(operands: Option[Operands], category: String)
+
+  private def selected(value: Any): Any = value match
+    case PluralSelector(v, locale) =>
+      val operands = Operands.of(v)
+      PluralChoice(operands, operands.fold("other")(PluralRules.category(locale, _)))
+    case other                     => other
+
+  // Variants are tried in the order the template gives them, as before CLDR's rules: an exact
+  // key matches the number it names, a category key the category CLDR gives the number in the
+  // reader's language, and `other` and `*` any value, as the catch-all of ICU MessageFormat.
+  private def matchesPluralKey(choice: PluralChoice, key: String): Boolean =
+    key match
+      case "other" | "*" => true
+      case _             =>
+        exactKey(key) match
+          case Some(exact) => choice.operands.exists(_.equalsExactly(exact))
+          case None        => choice.operands.isDefined && choice.category == key
+
+  // The number an exact key names (`=0`, `0`, `=+1`), in Int range as it has always been; a key
+  // such as `=abc`, `-1` or `99999999999` names none and matches nothing.
+  private def exactKey(key: String): Option[BigInt] =
+    val number   = key.stripPrefix("=")
+    val unsigned = number.stripPrefix("-").stripPrefix("+")
+    Option
+      .when(
+        (key.startsWith("=") || number == unsigned) && unsigned.nonEmpty &&
+        unsigned.forall(c => c >= '0' && c <= '9')
+      )(number)
+      .flatMap(_.toIntOption)
+      .map(BigInt(_))
+
+  /**
+   * What `validate` does not refuse, but a reader of `language` would never see: a key of a
+   * `:plural` selector that cannot match a number there, because CLDR gives the language no such
+   * category (`few` in English) or because it is no category and no number at all (`ones`).
+   * These templates format, so 6.0's checks still pass them; the variant only stays unused.
+   * Empty when every key can match.
+   *
+   * {{{
+   * MessageFormat2.warnings(".match {$n :plural} when few {a few} when * {more}", Language.English)
+   * // List(at 20: the plural key few never matches in en, whose categories are one, other)
+   * }}}
+   */
+  def warnings(template: String, language: Language): List[TemplateError] =
+    Option
+      .when(template.length <= MaxTemplateLength)(parse(template).message)
+      .toList
+      .flatMap(m => pluralWarnings(m, language.tag))
+      .distinct
+      .take(MaxErrors)
+      .map(e => e.copy(message = Printable(e.message, MaxErrorLength)))
+
+  private def pluralWarnings(message: Message, locale: String): List[TemplateError] =
+    val declared                          = message.declarations.map(d => d.name -> d.expr).toMap
+    // One step through a declaration, never more: declarations can name each other in a circle.
+    def annotated(e: Expression): Boolean = e match
+      case FunctionAnnotation(_, "plural", _, _) => true
+      case _                                     => false
+    def plural(e: Expression): Boolean    = e match
+      case Variable(name, _) => declared.get(name).exists(annotated)
+      case other             => annotated(other)
+    val categories                        = PluralRules.categories(locale)
+    message.body.toOption.toList.flatMap: m =>
+      val pluralAt = m.selectors.zipWithIndex.collect { case (s, i) if plural(s) => i }.toSet
+      m.cases.flatMap: c =>
+        c.keys.zipWithIndex.collect:
+          case (key, i) if pluralAt(i) && neverMatches(key, categories) =>
+            TemplateError(c.position, neverMessage(key, locale, categories))
+
+  end pluralWarnings
+
+  private def neverMatches(key: String, categories: List[String]): Boolean =
+    key != "*" && !categories.contains(key) && exactKey(key).isEmpty
+
+  private def neverMessage(
     key: String,
     locale: String,
-  ): Boolean =
-    Try(value.toString.toDouble.toInt) match
-      case scala.util.Success(count) =>
-        key match
-          case "=0"                   => count == 0
-          case "=1"                   => count == 1
-          case "0"                    => count == 0
-          case "1"                    => count == 1
-          case "2"                    => count == 2
-          // A key that is not a number in Int range (`=abc`, `99999999999`) matches no count.
-          case s if s.startsWith("=") => s.drop(1).toIntOption.contains(count)
-          case s if s.matches("\\d+") => s.toIntOption.contains(count)
-          case "one"                  =>
-            locale.takeWhile(_ != '-').toLowerCase(java.util.Locale.ROOT) match
-              case "fr" => count == 0 || count == 1 // French (any region): one = 0 or 1
-              case _    => count == 1               // English/Dutch: one = 1
-          case "other"                => true
-          case "*"                    => true
-          case _                      => false
-      case _                         => key == "other" || key == "*"
+    categories: List[String],
+  ): String =
+    key match
+      case k if PluralRules.Categories.contains(k)       =>
+        s"the plural key $k never matches in $locale, whose categories are ${categories.mkString(", ")}"
+      case k if k.startsWith("=") || k.exists(_.isDigit) =>
+        s"the plural key $k is no exact number key in Int range, so it never matches"
+      case k                                             =>
+        s"the plural key $k is no plural category (${PluralRules.Categories.mkString(", ")}) " +
+        "and no number, so it never matches"
 
 end MessageFormat2
 

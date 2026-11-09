@@ -95,4 +95,6 @@ Orders.shipped(count = 3, on = today).localize(Dutch)  // falls back to English,
 - `legacy.Message` and `dev.taihei.tsuji.Message` share a simple name: an explicit
   `import dev.taihei.tsuji.legacy.Message` wins over `dev.taihei.tsuji.*`.
 - `shared/` compiles on Scala.js too: no JVM-only API there.
-- French plural `one` is 0 and 1; English and Dutch only 1.
+- `:plural` follows CLDR's rules for every language (since 6.1.0): Polish and Russian have `few`
+  and `many`, Arabic and Welsh `zero` and `two`; 1.5 is `other` in English. Put `other` and `*`
+  last; `MessageFormat2.warnings` and `verify` name a key the language never selects.

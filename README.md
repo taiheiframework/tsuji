@@ -427,8 +427,9 @@ assertTrue(ClasspathCatalogues.verify(Seq(Orders), Seq(Dutch, French), required 
 
 `verify` checks every template in the code and in the catalogues against the definition of its
 key, that no catalogue has a key without a definition, that every **required** language has every
-key (inline or in a file; other languages may be partial and fall back), and that keys are unique
-across families. Completeness of files is a test-time check: checking files when the code compiles
+key (inline or in a file; other languages may be partial and fall back), that keys are unique
+across families, and, since 6.1.0, that no `:plural` key is one its template's language can never
+select (`few` in an English template). Completeness of files is a test-time check: checking files when the code compiles
 would make the build read files a compiler cannot track.
 
 ## On the wire
@@ -605,6 +606,44 @@ range (after year 275760 or before year -271821) shows as its ISO text, such as 
 Formats come from the platform's locale data (the JDK's CLDR version, or `Intl` in the JavaScript
 runtime), so a detail can differ between them: a medium Dutch date is `20 okt. 2026` on Java 17
 and `20 okt 2026` on later JDKs.
+
+### Plurals
+
+Since 6.1.0, `:plural` follows CLDR's cardinal plural rules for every language, from one table
+that the JVM and Scala.js share (CLDR 49), so a variant is chosen the same way on both:
+
+```scala
+val files = ".match {$n :plural} when one {{$n} plik} when few {{$n} pliki} when many {{$n} plików} " +
+  "when * {{$n} pliku}"
+
+MessageFormat2.format(files, Map("n" -> 1), "pl")    // 1 plik
+MessageFormat2.format(files, Map("n" -> 3), "pl")    // 3 pliki
+MessageFormat2.format(files, Map("n" -> 5), "pl")    // 5 plików
+MessageFormat2.format(files, Map("n" -> 1.5), "pl")  // 1.5 pliku
+```
+
+- The keys are CLDR's categories `zero`, `one`, `two`, `few`, `many` and `other`, and exact numbers
+  (`=0`, `=1`, `2`). Variants are tried in the order of the template, so an exact key written
+  before a category wins over it. `other` and `*` match any value, as the catch-all; write them
+  last.
+- A language is found as the fallback chain walks a tag: `pt-PT` has rules of its own, `pt-BR`
+  falls back to `pt`, `sr-Latn-RS` to `sr`. A language CLDR has no rules for takes CLDR's root,
+  where every number is `other`.
+- The number is read as CLDR reads it: `1.5` is `other` in English and `one` in French, and the
+  text `"1.0"` or a `BigDecimal` of `1.0` shows a fraction digit, so it is `other` in English. An
+  `Int`, a `Long` and a `Double` are read as their value (`1.0` as a `Double` is `1`). A negative
+  number takes the category of its absolute value, and a text of more than 1100 characters counts
+  as no number, so only `other` and `*` match it.
+- Whole numbers that are not negative keep the variant 6.0 chose in English, Dutch and French. A
+  template that names `many` now gets it in French, Spanish, Italian and Portuguese for a
+  million and its multiples; one without `many` still falls to `other`.
+- `MessageFormat2.warnings(template, language)` names a `:plural` key that `language` can never
+  select, such as `few` in English, or a key that is no category and no number. Such a template
+  still formats, so `validate` and the macro accept it as before; `Catalogues.verify` reports it.
+
+The rules come from CLDR's `common/supplemental/plurals.xml` (Unicode License v3, see NOTICE).
+`cldr/plurals.py` writes them into `CldrPlurals.scala`, and CLDR's own samples for every locale
+into the tests; its header says how to move to another CLDR release.
 
 ## Pre-built messages
 
@@ -840,4 +879,5 @@ Apache License 2.0, see [LICENSE](LICENSE) and [NOTICE](NOTICE). Copyright
 Innovenso BV. Versions up to and including 2.0.0 were published as
 `fish.genius::genius-i18n` under the MIT License and remain available under it. The library was
 published as `fish.genius::genius-i18n` (up to 2.0.0), `com.edoframework::edo-i18n` (3.0.0),
-`dev.taihei::taihei-i18n` (4.x) and, from 5.0.0, `dev.taihei::taihei-tsuji`.
+`dev.taihei::taihei-i18n` (4.x) and, from 5.0.0, `dev.taihei::taihei-tsuji`. The plural rules
+are Unicode CLDR data, Copyright Unicode, Inc., under the Unicode License v3, as NOTICE says.

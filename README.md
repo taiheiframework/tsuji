@@ -550,10 +550,11 @@ Functions: `{$n :number}` (with `style=percent` or `style=currency`), `{$n :inte
 `:select` as `.match` selectors, `:string`. Declarations: `.input {$n :number}` and
 `.local $x = {$n :number}` (or `.let`). `.match` variants are `when <keys> {pattern}`, and one of
 them must be `when * {...}`. On the JVM a long or full `timeStyle` on a value without a time zone
-formats as medium; Scala.js prints `UTC` instead. A date past the JavaScript Date range (about
-year 275760 either way) shows as its ISO text on Scala.js, `+300000-01-01`. Formats come from the platform's
-locale data (the JDK's CLDR version, or `Intl` in the JavaScript runtime), so a detail can differ
-between them: a medium Dutch date is `20 okt. 2026` on Java 17 and `20 okt 2026` on later JDKs.
+formats as medium; Scala.js prints `UTC` instead. On Scala.js a date outside the JavaScript Date
+range (after year 275760 or before year -271821) shows as its ISO text, such as `+300000-01-01`.
+Formats come from the platform's locale data (the JDK's CLDR version, or `Intl` in the JavaScript
+runtime), so a detail can differ between them: a medium Dutch date is `20 okt. 2026` on Java 17
+and `20 okt 2026` on later JDKs.
 
 ## Pre-built messages
 

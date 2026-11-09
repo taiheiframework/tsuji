@@ -60,4 +60,5 @@ After declarations, a simple pattern ends at the line break.
 ## Platform notes
 
 On the JVM a long or full `timeStyle` on a value without a time zone formats as medium; Scala.js
-prints the runtime's zone. Bare `en`, `nl`, `fr` format as US, NL and FR.
+prints `UTC`. On Scala.js a date after year 275760 or before year -271821 (outside the JavaScript
+Date range) formats as its ISO text, such as `+300000-01-01`. Bare `en`, `nl`, `fr` format as US, NL and FR.

@@ -49,8 +49,8 @@ object RuntimeZoneSpec extends ZIOSpecDefault:
       assertTrue(
         show(LocalDate.of(275760, 9, 13)) == "13.09.275760",
         show(LocalDate.of(275760, 9, 14)) == "+275760-09-14",
-        show(LocalDate.of(-271821, 4, 20)).nonEmpty,
-        show(LocalDate.of(-271821, 4, 20)) != "-271821-04-20",
+        // Intl writes the year of the era without the era, as the JVM's year-of-era pattern does.
+        show(LocalDate.of(-271821, 4, 20)) == "20.04.271822",
         show(LocalDate.of(-271821, 4, 19)) == "-271821-04-19",
       )
     },

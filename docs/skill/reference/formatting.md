@@ -12,7 +12,9 @@ format through templates (`:number`, `:integer`, `:datetime`, `:date`, `:time`) 
 - Bare `en`, `nl`, `fr` format as `en-US`, `nl-NL`, `fr-FR`; any other valid tag as written; a tag
   the platform cannot use formats as `en-US`.
 - On the JVM a long or full `timeStyle` on `LocalTime`/`LocalDateTime` formats as medium (they have
-  no zone); Scala.js prints the runtime's zone.
+  no zone); Scala.js prints `UTC`.
+- On Scala.js a date after year 275760 or before year -271821 (outside the JavaScript Date range)
+  formats as its ISO text, such as `+300000-01-01`; the JVM formats it in the style asked.
 - `:number style=currency` always formats USD.
 
 ## Cross-platform rules

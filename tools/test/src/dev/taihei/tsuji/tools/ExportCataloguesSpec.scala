@@ -42,7 +42,7 @@ object ExportCataloguesSpec extends ZIOSpecDefault:
       val de                 = messages(dir, "de")
       assertTrue(
         en.get("shop.items").contains("{$n} items"),
-        en.get("taihei.validation.stringMinLength").contains("length should be greater than {$min}"),
+        en.get("taihei.validation.stringMinLength").contains("length should be at least {$min}"),
         nl.get("shop.items").contains("{$n} artikels"),
         nl.get("taihei.validation.stringMinLength").contains("lengte moet minimaal {$min} zijn"),
         de == Map("shop.open" -> "Geöffnet"),

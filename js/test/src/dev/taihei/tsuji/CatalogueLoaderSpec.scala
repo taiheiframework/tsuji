@@ -119,7 +119,7 @@ object CatalogueLoaderSpec extends ZIOSpecDefault:
       for problems <- load(c, Language.Dutch, dataUrl(file))
       yield assertTrue(
         problems.isEmpty,
-        before == "length should be greater than 8",
+        before == "length should be at least 8",
         min.localize(Language.Dutch) == "lengte moet minimaal 8 zijn",
       )
     },

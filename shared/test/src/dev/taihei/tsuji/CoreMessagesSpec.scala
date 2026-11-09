@@ -31,10 +31,20 @@ object CoreMessagesSpec extends ZIOSpecDefault:
       assertTrue(
         General.helloWorld(name = "Alice").localize(English) == "Hello Alice",
         Validation.stringLengthBetween(min = 5, max = 20).localize(English) == "length should be between 5 and 20",
-        Validation.dateMinimum(min = LocalDate.of(2024, 1, 15)).localize(English) == "should be after Jan 15, 2024",
         Exceptions.revisionMismatchBetween(expected = 3L, actual = 4L).localize(English) ==
         "Revision mismatch: expected revision 3, but current revision is 4",
         Authentication.locked.toString == "Too many failed attempts; please try again later",
+      )
+    },
+    test("the length and date bounds read as inclusive in English, as the checks that use them are") {
+      given Catalogues = Catalogues(CoreMessages.families)
+      assertTrue(
+        Validation.stringMinLength(min = 8).localize(English) == "length should be at least 8",
+        Validation.stringMaxLength(max = 100).localize(English) == "length should be at most 100",
+        Validation.dateMinimum(min = LocalDate.of(2024, 1, 15)).localize(English) ==
+        "should be on or after Jan 15, 2024",
+        Validation.dateMaximum(max = LocalDate.of(2024, 12, 31)).localize(English) ==
+        "should be on or before Dec 31, 2024",
       )
     },
     test("formatErrors makes one message of the fields' errors, in field order") {

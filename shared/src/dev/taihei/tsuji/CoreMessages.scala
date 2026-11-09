@@ -115,9 +115,9 @@ object CoreMessages:
     val stringLengthBetween =
       message[(min: Int, max: Int)]("length should be between {$min} and {$max}")
 
-    val stringMinLength = message[(min: Int)]("length should be greater than {$min}")
+    val stringMinLength = message[(min: Int)]("length should be at least {$min}")
 
-    val stringMaxLength = message[(max: Int)]("length should be lower than {$max}")
+    val stringMaxLength = message[(max: Int)]("length should be at most {$max}")
 
     val stringShouldEqual = message[(otherName: String)]("should equal {$otherName}")
 
@@ -129,9 +129,9 @@ object CoreMessages:
 
     val longMaximum = message[(max: Long)]("should be maximum {$max}")
 
-    val dateMinimum = message[(min: LocalDate)]("should be after {$min :date}")
+    val dateMinimum = message[(min: LocalDate)]("should be on or after {$min :date}")
 
-    val dateMaximum = message[(max: LocalDate)]("should be before {$max :date}")
+    val dateMaximum = message[(max: LocalDate)]("should be on or before {$max :date}")
 
     val dateFuture = message("should be in the future")
 

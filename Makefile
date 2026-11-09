@@ -437,8 +437,9 @@ release-preflight:
 
 # ---------------------------------------------------------------------------
 # The release (ADR 0004, the interim route of ADR 0009 section 11): one signed bundle, kept on an
-# immutable GitHub Release, from which the family's repository serves it. release-finalize runs release-bundle; release-github runs once
-# main and the tag are pushed, then publish-repo, which runs verify-repo.
+# immutable GitHub Release, from which the family's repository serves it. release-finalize runs
+# release-bundle; release-github runs once main and the tag are pushed, then publish-repo, which
+# runs verify-repo.
 # ---------------------------------------------------------------------------
 
 # Builds and signs the release at HEAD's tag once (the dry run's bundle mode, so exactly what
@@ -628,7 +629,7 @@ release-prepare:
 	case "$(EMBARGO)" in 0|1) ;; *) \
 		echo "[ERROR] EMBARGO=1 for a security fix whose advisory is not published yet (the ticket's label embargo),"; \
 		echo "        EMBARGO=0 for every other release: it is decided at each release, never a default"; exit 1;; esac; \
-	TICKET="$(TICKET)"; \
+	TICKET="$${TICKET-}"; \
 	if ! [[ "$$TICKET" =~ ^[A-Z][A-Z0-9]*-[0-9]+$$ ]]; then \
 		echo "[ERROR] TICKET=<key>, the release ticket, which the notes commit names: not '$$TICKET'"; exit 1; fi; \
 	$(EMBARGO_GUARD); \
@@ -860,6 +861,7 @@ release-abort:
 		if ! [[ "$$NEW" =~ ^[0-9]+\.[0-9]+\.[0-9]+$$ ]]; then echo "[ERROR] Not a version: $$NEW"; exit 1; fi; \
 		B="$(BUNDLES)/$(BUNDLE_PREFIX)-$$NEW"; \
 		SUBJECT="$$(python3 -I -B -c 'import json, sys; print(json.load(open(sys.argv[1])).get("ticket", ""))' "$(RELEASE_STATE)"): add the release notes of $$NEW"; \
+		case "$$SUBJECT" in :*) SUBJECT="Add release notes for version $$NEW";; esac; \
 		REMOTE=$$(git ls-remote --tags "$(GITHUB_GIT)" "refs/tags/v$$NEW") || { \
 			echo "[ERROR] cannot read the tags of $(GITHUB_REPO), so cannot tell whether v$$NEW is final: nothing was undone"; exit 1; }; \
 		if [ -n "$$REMOTE" ]; then \

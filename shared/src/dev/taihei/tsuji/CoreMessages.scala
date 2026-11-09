@@ -149,7 +149,28 @@ object CoreMessages:
 
     val dateRangeInvalid = message("start date must be before or equal to end date")
 
+    /**
+     * The languages as one string the caller joined, shown as it is: a reader of another language
+     * sees them named the caller's way. Kept for 6.x; removed in 7.0.0.
+     */
+    @deprecated(
+      "Use missingTranslations(languages: List[Language]), which names each language in the reader's language; removed in 7.0.0",
+      "6.1.0",
+    )
     val missingTranslations = message[(languages: String)]("missing translations for: {$languages}")
+
+    // The message behind missingTranslations(languages: List[Language]). Its own key, because a
+    // message written by 6.0 under the old key carries a string, which a list cannot read.
+    private val missingTranslationsFor =
+      message[(languages: List[Language])]("missing translations for: {$languages}")
+
+    /**
+     * Translations are missing in these languages, each named in the reader's language and joined
+     * as a list: `missing translations for: Dutch, French`, and `ontbrekende vertalingen voor:
+     * Nederlands, Frans` to a Dutch reader.
+     */
+    def missingTranslations(languages: List[Language]): Message =
+      missingTranslationsFor(languages = languages)
 
     val failed = message[(errors: List[Message])]("Validation failed: {$errors}")
 

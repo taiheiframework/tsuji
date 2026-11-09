@@ -2,6 +2,8 @@ package dev.taihei.tsuji
 
 import java.time.LocalDate
 
+import scala.annotation.nowarn
+
 import zio.test.*
 
 import dev.taihei.tsuji.CoreMessages.*
@@ -69,6 +71,33 @@ object CoreMessagesSpec extends ZIOSpecDefault:
         "Validation failed: email (should be a valid email address), email (taken), name (should not be blank)",
         Validation.formatErrors(Map.empty) == Validation.invalid,
         errors.toJson.fromJson[Message] == Right(errors),
+      )
+    },
+    test("missingTranslations names each language in the reader's language") {
+      given Catalogues = Catalogues(CoreMessages.families)
+      val missing = Validation.missingTranslations(languages = List(Language("de"), French))
+      // The template comes from the catalogue on the JVM and falls back to English in Scala.js,
+      // which loads no catalogue here; the names are the reader's on both.
+      assertTrue(
+        missing.localize(English) == "missing translations for: German, French",
+        missing.localize(Dutch).endsWith(": Duits, Frans"),
+        Validation.missingTranslations(List(Language("de"), Language("es"))).localize(French)
+          .endsWith(": allemand, espagnol"),
+        missing.key.value == "taihei.validation.missingTranslationsFor",
+        missing.toJson.fromJson[Message] == Right(missing),
+        Validation.missingTranslations(List(Dutch)).localize(English) ==
+        "missing translations for: Dutch",
+      )
+    },
+    test("a message written with the joined string still reads, under its own key") {
+      given Catalogues = Catalogues(CoreMessages.families)
+      @nowarn("cat=deprecation")
+      val joined = Validation.missingTranslations(languages = "nl, fr")
+      val read   = joined.toJson.fromJson[Message]
+      assertTrue(
+        joined.key.value == "taihei.validation.missingTranslations",
+        read == Right(joined),
+        read.map(_.localize(English)) == Right("missing translations for: nl, fr"),
       )
     },
     test("every template and translation passes verify") {

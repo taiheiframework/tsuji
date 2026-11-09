@@ -68,6 +68,15 @@ object CoreMessagesCatalogueSpec extends ZIOSpecDefault:
         Exceptions.forbidden.localize(Dutch) == "Verboden: toegang geweigerd",
       )
     },
+    test("missingTranslations names the languages in Dutch for a Dutch reader, in French for a French one") {
+      given Catalogues = Catalogues(CoreMessages.families)
+      val missing         = Validation.missingTranslations(languages = List(Language("de"), French))
+      val missingInFrench = Validation.missingTranslations(languages = List(Language("de"), Language("es")))
+      assertTrue(
+        missing.localize(Dutch) == "ontbrekende vertalingen voor: Duits, Frans",
+        missingInFrench.localize(French) == "traductions manquantes pour\u00a0: allemand, espagnol",
+      )
+    },
     test("formatErrors shows each field's error in the reader's language") {
       given Catalogues = Catalogues(CoreMessages.families)
       val errors = Validation.formatErrors(Map("email" -> List(Validation.stringValidEmail)))

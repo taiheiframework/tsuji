@@ -623,6 +623,15 @@ CoreMessages.Validation.formatErrors(Map("email" -> List(CoreMessages.Validation
 
 In Scala.js the Dutch and French files reach the browser through the export, like your own.
 
+Since 6.1.0, `CoreMessages.Validation.missingTranslations` takes the languages themselves and
+names each one in the reader's language: `missingTranslations(languages = List(Language("de"),
+Language.French))` shows as `missing translations for: German, French` in English and as
+`ontbrekende vertalingen voor: Duits, Frans` in Dutch. The form that takes one joined `String`
+still compiles, with a deprecation warning, and shows that string as it is; it is removed in
+7.0.0. The list form is a message of its own, `taihei.validation.missingTranslationsFor`, so a
+message written by 6.0 with the string still reads. To move, pass the `Language` values instead
+of their joined names; a catalogue of your own that translates CoreMessages adds the new key.
+
 ## Coming from Tsuji 5.x
 
 6.0.0 changes three things: Tsuji's JSON codecs are jsoniter-scala's, with the zio-json codecs in

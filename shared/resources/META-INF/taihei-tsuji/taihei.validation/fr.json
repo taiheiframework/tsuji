@@ -18,6 +18,7 @@
     "taihei.validation.longMaximum": "doit valoir au plus {$max}",
     "taihei.validation.longMinimum": "doit valoir au moins {$min}",
     "taihei.validation.missingTranslations": "traductions manquantes pour\u00a0: {$languages}",
+    "taihei.validation.missingTranslationsFor": "traductions manquantes pour\u00a0: {$languages}",
     "taihei.validation.nonEmpty": "ne doit pas être vide",
     "taihei.validation.shouldNotEqual": "ne doit pas être identique",
     "taihei.validation.stringLengthBetween": "la longueur doit être comprise entre {$min} et {$max}",

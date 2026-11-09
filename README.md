@@ -266,14 +266,14 @@ readerLanguage("de, it;q=0.5")            // English
 ```
 
 `fromAcceptLanguage` orders the entries by weight, leaves out those with `q=0` and those weighted
-below a `*` (which stands for any language no other entry names, so for your default), and skips an entry it cannot read; it never throws
-and reads at most 4096 characters and 32 entries of the header. `negotiate` walks each requested
-language down as a registry does to find a message, from `zh-Hant-TW` to `zh-Hant` to `zh`, so
-`nl-BE` chooses a supported `nl`. It never goes the other way: a request for `en` does not choose
-a supported `en-GB`, so list the plain languages you support too. The `fallbacks` of a
-`Catalogues` play no part: with `lb -> de` configured, list `lb` in `supported` to show it.
-The same works for a language from a URL parameter or a profile: `Language.parse(value).toSeq`
-gives the requested list.
+below a `*` (which stands for any language no other entry names, so for your default), and skips an
+entry it cannot read; it never throws and reads at most 4096 characters and 32 entries of the
+header. `negotiate` walks each requested language down as a registry does to find a message, from
+`zh-Hant-TW` to `zh-Hant` to `zh`, so `nl-BE` chooses a supported `nl`. It never goes the other way:
+a request for `en` does not choose a supported `en-GB`, so list the plain languages you support too.
+The `fallbacks` of a `Catalogues` play no part: with `lb -> de` configured, list `lb` in `supported`
+to show it. The same works for a language from a URL parameter or a profile:
+`Language.parse(value).toSeq` gives the requested list.
 
 ## Messages
 

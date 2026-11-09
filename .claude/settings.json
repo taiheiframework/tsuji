@@ -3,5 +3,33 @@
   "enabledPlugins": {
     "taihei-standards@taiheiframework": true
   },
-  "agent": "taihei-developer"
+  "agent": "taihei-developer",
+  "permissions": {
+    "deny": [
+      "Read(~/.edo-release.env)",
+      "Edit(~/.edo-release.env)",
+      "Write(~/.edo-release.env)",
+      "Read(~/.taihei-*.env)",
+      "Edit(~/.taihei-*.env)",
+      "Write(~/.taihei-*.env)",
+      "Read(~/.gnupg/**)",
+      "Edit(~/.gnupg/**)",
+      "Write(~/.gnupg/**)",
+      "Read(~/.ssh/**)",
+      "Edit(~/.ssh/**)",
+      "Write(~/.ssh/**)",
+      "Read(**/*.pem)",
+      "Edit(**/*.pem)",
+      "Write(**/*.pem)",
+      "Read(**/*.key)",
+      "Edit(**/*.key)",
+      "Write(**/*.key)",
+      "Read(**/*.p12)",
+      "Edit(**/*.p12)",
+      "Write(**/*.p12)",
+      "Read(**/secring.*)",
+      "Edit(**/secring.*)",
+      "Write(**/secring.*)"
+    ]
+  }
 }

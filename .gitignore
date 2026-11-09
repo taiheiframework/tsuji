@@ -51,3 +51,6 @@ reviews/
 # Python bytecode of the scripts
 __pycache__/
 *.pyc
+
+# Claude Code's per-user settings stay on the machine.
+.claude/settings.local.json

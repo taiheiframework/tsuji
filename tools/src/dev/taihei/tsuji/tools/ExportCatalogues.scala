@@ -212,9 +212,13 @@ private object Classpath:
       .map(_.stripSuffix(".class").replace('/', '.'))
       .flatMap: binaryName =>
         instance(binaryName, loader) match
-          case Left(e)        => List(Left(s"$binaryName: $e"))
+          case Left(e)        => List(Left(s"${objectName(binaryName)}: $e"))
           case Right(Some(f)) => List(Right(f))
           case Right(None)    => Nil
+
+  // The class a.b.C$D$ is the object `a.b.C.D`, the name --family takes.
+  private def objectName(binaryName: String): String =
+    binaryName.stripSuffix("$").replace('$', '.')
 
   // An object `a.b.C.D` is the class a.b.C$D$; try the dots from the right as nesting.
   def family(name: String, loader: ClassLoader): Either[String, MessageFamily] =
@@ -241,19 +245,17 @@ private object Classpath:
           case _                => Right(None)
       catch
         case _: NoSuchFieldException        => Right(None)
+        // The first use of a failing initialiser throws ExceptionInInitializerError, every later
+        // one NoClassDefFoundError: both are the same fault.
         case e: ExceptionInInitializerError =>
           Left(s"cannot initialise: ${describe(Option(e.getCause).getOrElse(e))}")
-        case e: LinkageError                => Left(describe(e))
+        case e: LinkageError                => Left(s"cannot initialise: ${describe(e)}")
         case NonFatal(e)                    => Left(describe(e))
 
   // A class that cannot be loaded or linked is not known to be a family, so it is not one.
   private def familyClass(binaryName: String, loader: ClassLoader): Option[Class[?]] =
     try
-      Option(Class.forName(
-        binaryName,
-        false,
-        loader,
-      )).filter(classOf[MessageFamily].isAssignableFrom)
+      Some(Class.forName(binaryName, false, loader)).filter(classOf[MessageFamily].isAssignableFrom)
     catch
       case _: LinkageError => None
       case NonFatal(_)     => None

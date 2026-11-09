@@ -373,7 +373,8 @@ Compile / run / fork := true
 ```
 
 `--scan <package>` finds every family object in a package; `--family <object>` names one.
-Templates that fail their checks are left out and printed, and make the exit status 1.
+Templates that fail their checks are left out and printed, and make the exit status 1; so does
+a family object that cannot be loaded, such as one whose initialiser throws.
 
 ### Checking catalogues in your tests
 

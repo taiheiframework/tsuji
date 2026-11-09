@@ -48,9 +48,11 @@ object ExportCataloguesSpec extends ZIOSpecDefault:
         de == Map("shop.open" -> "Geöffnet"),
         Catalogue.parse(Files.readString(dir.resolve("fr.json"))).isRight,
         out.contains("messages in nl"),
-        // Broken is found by the scan of dev.taihei.tsuji: its bad translation is a problem, and left out.
+        // The scan of dev.taihei.tsuji finds Broken, whose bad translation is a problem and left
+        // out, and Exploding, which cannot be loaded: both make the status 1.
         status == 1,
         err.contains("broken.a"),
+        err.contains("dev.taihei.tsuji.tools.exploding.Exploding: cannot initialise: "),
         !nl.contains("broken.a"),
       )
     },
@@ -99,9 +101,21 @@ object ExportCataloguesSpec extends ZIOSpecDefault:
       )
       assertTrue(
         status == 1,
-        err.contains("dev.taihei.tsuji.tools.exploding: dev.taihei.tsuji.tools.exploding.Exploding$: "),
+        // The first test to touch Exploding sees its own message, every later one the JVM's.
+        err.contains("dev.taihei.tsuji.tools.exploding: dev.taihei.tsuji.tools.exploding.Exploding: cannot initialise: "),
         !err.contains("null"),
         out.contains("2 messages in nl"),
+      )
+    },
+    test("a named family object that fails to load says why") {
+      val dir                = Files.createTempDirectory("taihei-export")
+      val (status, out, err) =
+        run("--out", dir.toString, "--family", "dev.taihei.tsuji.tools.exploding.Exploding")
+      assertTrue(
+        status == 2,
+        out.isEmpty,
+        err.contains("dev.taihei.tsuji.tools.exploding.Exploding: cannot initialise: "),
+        !err.contains("not a MessageFamily object"),
       )
     },
     test("an exception without a message is described by its class, never as null") {

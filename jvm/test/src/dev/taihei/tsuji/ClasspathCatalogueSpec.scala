@@ -106,6 +106,34 @@ object ClasspathCatalogueSpec extends ZIOSpecDefault:
         empty == Right(""),
       )
     },
+    test("a file that starts with a byte order mark is refused, and the same file without one is read") {
+      val text     = "{\"format\":1,\"language\":\"de\",\"messages\":{\"order.cancelled\":\"Storniert\"}}"
+      val bom      = Array(0xef, 0xbb, 0xbf).map(_.toByte)
+      val withMark =
+        PlatformCatalogueResources.readBounded(ByteArrayInputStream(bom ++ text.getBytes("UTF-8")), "de.json")
+      val without  = PlatformCatalogueResources.readBounded(ByteArrayInputStream(text.getBytes("UTF-8")), "de.json")
+      // Not at the start, the mark is a character like any other: here inside a template.
+      val inside   = text.replace("Storniert", "Stor\uFEFFniert")
+      val midway   = PlatformCatalogueResources.readBounded(ByteArrayInputStream(inside.getBytes("UTF-8")), "de.json")
+      // Before this change the mark reached the parser, which refused the file as not JSON.
+      assertTrue(
+        withMark == Left("de.json starts with a byte order mark; save it as UTF-8 without one"),
+        without == Right(text),
+        without.flatMap(Catalogue.parse(_).left.map(_.message)).map(_.messages.size) == Right(1),
+        midway == Right(inside),
+      )
+    },
+    test("a classpath file that starts with a byte order mark falls back with that one problem") {
+      given c: Catalogues = Catalogues()
+      val Italian = Language("it")
+      val shown   = Orders.cancelled.localize(Italian)
+      val refusal = "META-INF/taihei-tsuji/order/it.json starts with a byte order mark; save it as UTF-8 without one"
+      assertTrue(
+        shown == "Your order was cancelled",
+        c.problems.filter(_.language.contains(Italian)).map(_.message) == List(refusal),
+        ClasspathCatalogues.read(Orders, Italian) == Some(Left(CatalogueProblem(refusal, Some(Italian)))),
+      )
+    },
   )
 
 end ClasspathCatalogueSpec

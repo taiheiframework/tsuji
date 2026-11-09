@@ -64,11 +64,22 @@ object CatalogueLoader:
       catch case NonFatal(e) => Future.failed(e)
     fetched
       .map: text =>
-        Catalogue.parse(text) match
-          case Left(p) => List(p.copy(language = Some(language)))
-          case Right(catalogue) if catalogue.language != language =>
-            problem(s"the file at ${Printable(url)} is a catalogue of ${catalogue.language.tag}")
-          case Right(catalogue)                                   => catalogues.add(catalogue)
+        Catalogue
+          .refuseByteOrderMark(s"the file at ${Printable(url)}", text)
+          .left
+          .map(CatalogueProblem(_, Some(language)))
+          .flatMap(Catalogue.parse(_).left.map(_.copy(language = Some(language))))
+          .flatMap(catalogue =>
+            Either.cond(
+              catalogue.language == language,
+              catalogue,
+              CatalogueProblem(
+                s"the file at ${Printable(url)} is a catalogue of ${catalogue.language.tag}",
+                Some(language),
+              ),
+            )
+          )
+          .fold(List(_), catalogues.add)
       .recover:
         case NonFatal(e) =>
           problem(s"cannot fetch ${Printable(url)}: ${Printable(String.valueOf(e.getMessage))}")
@@ -92,15 +103,20 @@ object CatalogueLoader:
 
   private def tooLarge = new IllegalStateException(s"larger than $MaxBytes bytes")
 
-  // A decoder that refuses malformed UTF-8, as the JVM's reader does, instead of replacing it. A
-  // decoder that ignores the option (an old polyfill) would replace it silently, so it is refused.
+  // A decoder that refuses malformed UTF-8, as the JVM's reader does, instead of replacing it, and
+  // keeps a leading byte order mark as U+FEFF, as the JVM's reader does, so that the shared check
+  // refuses it on both. A decoder that ignores either option (an old polyfill) would replace
+  // malformed bytes or drop the mark silently, so it is refused.
   private def strictDecoder(): Try[js.Dynamic] =
     Try(
-      js.Dynamic.newInstance(js.Dynamic.global.TextDecoder)("utf-8", js.Dynamic.literal(fatal = true))
+      js.Dynamic.newInstance(js.Dynamic.global.TextDecoder)(
+        "utf-8",
+        js.Dynamic.literal(fatal = true, ignoreBOM = true),
+      )
     ).flatMap(decoder =>
       Either
         .cond(
-          decoder.fatal.asInstanceOf[Any] == true,
+          decoder.fatal.asInstanceOf[Any] == true && decoder.ignoreBOM.asInstanceOf[Any] == true,
           decoder,
           new IllegalStateException("there is no strict UTF-8 decoder here"),
         )

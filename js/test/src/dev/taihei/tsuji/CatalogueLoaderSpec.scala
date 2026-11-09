@@ -95,6 +95,16 @@ object CatalogueLoaderSpec extends ZIOSpecDefault:
 
   private val GermanFile = """{"format":1,"language":"de","messages":{"order.cancelled":"Storniert"}}"""
 
+  // A TextDecoder that keeps `fatal` but ignores `ignoreBOM`, and so would drop a leading mark.
+  private class MarkDroppingDecoder extends js.Object:
+    val fatal                                          = true
+    val ignoreBOM                                      = false
+    def decode(bytes: js.Any, options: js.Any): String = ""
+
+  private val Mark = bytes(0xef, 0xbb, 0xbf)
+
+  private val MarkRefusal = s"the file at $Url starts with a byte order mark; save it as UTF-8 without one"
+
   def spec = suite("CatalogueLoader")(
     test("a fetched catalogue is added and its listeners hear of it") {
       given c: Catalogues = Catalogues(Seq(Orders))
@@ -248,6 +258,52 @@ object CatalogueLoaderSpec extends ZIOSpecDefault:
         empty.isEmpty,
         fine.isEmpty,
         c.languages == Set(German),
+      )
+    },
+    test("a file that starts with a byte order mark is refused, streamed or whole, as on the JVM") {
+      val c = Catalogues(Seq(Orders))
+      // The decoder used to drop the mark, so the file loaded here and was refused on the JVM.
+      for
+        streamed <- withFetch(answering(response(Body(Mark, utf8(GermanFile)))))(load(c, German, Url))
+        whole    <- withFetch(answering(streamless(bytes((Seq(0xef, 0xbb, 0xbf) ++
+        GermanFile.getBytes("UTF-8").map(_ & 0xff))*))))(load(c, German, Url))
+      yield assertTrue(
+        streamed.map(_.message) == List(MarkRefusal),
+        whole.map(_.message) == List(MarkRefusal),
+        (streamed ++ whole).forall(_.language.contains(German)),
+        c.languages.isEmpty,
+      )
+    },
+    test("a byte order mark split over chunks is refused too") {
+      val c    = Catalogues(Seq(Orders))
+      val body = Body(Mark.subarray(0, 1), Mark.subarray(1, 2), Mark.subarray(2), utf8(GermanFile))
+      withFetch(answering(response(body)))(load(c, German, Url)).map(problems =>
+        assertTrue(problems.map(_.message) == List(MarkRefusal), c.languages.isEmpty)
+      )
+    },
+    test("the same file without the mark loads, and a mark inside a template is no refusal") {
+      given c: Catalogues = Catalogues(Seq(Orders))
+      val inside = GermanFile.replace("Storniert", "Stor\uFEFFniert")
+      for
+        plain  <- withFetch(answering(response(Body(utf8(GermanFile)))))(load(c, German, Url))
+        before <- ZIO.succeed(Orders.cancelled.localize(German))
+        marked <- withFetch(answering(response(Body(utf8(inside)))))(load(c, German, Url))
+      yield assertTrue(
+        plain.isEmpty,
+        before == "Storniert",
+        marked.isEmpty,
+        Orders.cancelled.localize(German) == "Stor\uFEFFniert",
+      )
+    },
+    test("a decoder that ignores ignoreBOM is refused, so that it cannot drop the mark silently") {
+      val c = Catalogues(Seq(Orders))
+      withGlobal("TextDecoder", js.constructorOf[MarkDroppingDecoder])(
+        withFetch(answering(response(Body(utf8(GermanFile)))))(load(c, German, Url))
+      ).map(problems =>
+        assertTrue(
+          problems.map(_.message) == List(s"cannot fetch $Url: there is no strict UTF-8 decoder here"),
+          c.languages.isEmpty,
+        )
       )
     },
   ) @@ TestAspect.sequential // one test replaces the global fetch for a while

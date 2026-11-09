@@ -10,6 +10,11 @@ One JSON file per language, MF2 templates by key:
 {"format":1,"language":"de","messages":{"order.shipped":"...","order.cancelled":"..."}}
 ```
 
+A file is UTF-8 without a byte order mark. The classpath reader (JVM) and `CatalogueLoader`
+(Scala.js) refuse a file whose bytes start with EF BB BF with the problem
+`<file> starts with a byte order mark; save it as UTF-8 without one`; the export never writes
+one.
+
 - `Catalogue(language, messages: Map[MessageKey, String])`, `catalogue.toJson`.
 - `Catalogue.parse(json): Either[CatalogueProblem, Catalogue]` never throws. It refuses a file
   over 4M characters, nested deeper than 16, with a number longer than 1100 characters or with

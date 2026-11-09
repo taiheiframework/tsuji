@@ -295,7 +295,9 @@ Translations come from two places, both checked the same way:
   a library's own few languages, and tests. Inline translations are code: **in Scala.js they are
   part of the bundle.** A browser application with many languages keeps them in files.
 - **Catalogue files**, one per language, written by translators or exported:
-  `{"format":1,"language":"de","messages":{"order.shipped":"...","order.cancelled":"..."}}`.
+  `{"format":1,"language":"de","messages":{"order.shipped":"...","order.cancelled":"..."}}`,
+  in UTF-8 without a byte order mark: a file that starts with one is refused, on the JVM and in
+  the browser, with a problem that says so.
 
 To show a message in language L, a `Catalogues` registry uses the first of these that has the key:
 

@@ -66,6 +66,19 @@ object Catalogue:
   private[tsuji] val MaxMessages = 100000
   private val MaxDepth           = 16
 
+  /**
+   * The text of the catalogue file `name`, or why it is refused: it starts with a byte order mark.
+   * Both platforms' readers decode it as U+FEFF and refuse it here, in the same words, so that a
+   * file loads in a browser exactly when it loads on the JVM. A BOM anywhere else is left to the
+   * parser, as any other character.
+   */
+  private[tsuji] def refuseByteOrderMark(name: String, text: String): Either[String, String] =
+    Either.cond(
+      !text.startsWith("﻿"),
+      text,
+      s"$name starts with a byte order mark; save it as UTF-8 without one",
+    )
+
   /** A catalogue of these templates, which are checked when they are first used. */
   def apply(language: Language, messages: Map[MessageKey, String]): Catalogue =
     new Catalogue(language, messages, Nil)

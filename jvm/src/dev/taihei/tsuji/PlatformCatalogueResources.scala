@@ -37,12 +37,13 @@ private[tsuji] object PlatformCatalogueResources:
 
   /**
    * The text of `in`: Left when it holds more than MaxBytes bytes, of which it reads one past
-   * the limit and no more, or when they are not UTF-8.
+   * the limit and no more, when they are not UTF-8, or when they start with a byte order mark.
    */
   private[tsuji] def readBounded(in: InputStream, name: String): Either[String, String] =
     Right(in.readNBytes(MaxBytes + 1))
       .filterOrElse(_.length <= MaxBytes, s"$name is larger than $MaxBytes bytes")
       .flatMap(bytes => strictUtf8(bytes).toRight(s"$name is not UTF-8"))
+      .flatMap(Catalogue.refuseByteOrderMark(name, _))
 
   // The text of `bytes`, or None when they are not UTF-8; a malformed byte is never replaced.
   private def strictUtf8(bytes: Array[Byte]): Option[String] =

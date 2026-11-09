@@ -15,10 +15,12 @@ Package `dev.taihei.tsuji`. Artifacts: `dev.taihei::taihei-tsuji` (`taihei-tsuji
 `dev.taihei.tsuji.ziojson`, JVM and Scala.js) and the JVM-only `dev.taihei::taihei-tsuji-tools`,
 version 6.0.0 (not on Maven Central, which has the versions up to 5.0.2), Scala 3.9 (LTS), Apache
 2.0. Source: <https://github.com/taiheiframework/tsuji>. The core's one runtime dependency is
-jsoniter-scala-core; ZIO and zio-json come only with `taihei-tsuji-zio-json`. Tsuji 5.0.x gets
-security fixes for 12 months after 6.0.0. Up to 4.x the library was `dev.taihei::taihei-i18n`,
-package `dev.taihei.i18n`; that line stays under its old name on branch `4.0.x` and gets security
-fixes for 12 months after Taihei Tsuji 5.0.0. Use the newest taihei-i18n 4.0.x on the 4.x line.
+jsoniter-scala-core; ZIO and zio-json come only with `taihei-tsuji-zio-json`. Use 6.0.0 for new
+code. Tsuji 5.0.x gets security fixes for 12 months after 6.0.0; on that line use 5.0.2 or later,
+never 5.0.0 or 5.0.1, which advisory GHSA-pjj4-5gjj-j2p8 affects. Up to 4.x the library was
+`dev.taihei::taihei-i18n`, package `dev.taihei.i18n`; that line stays under its old name on branch
+`4.0.x` and gets security fixes for 12 months after Taihei Tsuji 5.0.0. On the 4.x line use
+taihei-i18n 4.0.2 or later (advisories GHSA-45w8-x6c8-w4hg and GHSA-6h29-v54g-8337).
 
 ## When to use this skill
 

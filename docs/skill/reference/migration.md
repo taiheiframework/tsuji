@@ -72,6 +72,9 @@ dependency becomes `dev.taihei::taihei-tsuji` (and `taihei-tsuji-tools`), the pa
 different artifacts in different packages and can share a classpath, but their `Language` types
 are different types.
 
+Take the newest version, 6.0.0: the steps below, then "From Tsuji 5.x to 6.0.0" above. If you stop
+on the 5.x line, use 5.0.2 or later, never 5.0.0 or 5.0.1 (advisory GHSA-pjj4-5gjj-j2p8).
+
 ```sh
 grep -rlZ 'dev\.taihei\.i18n' --include='*.scala' . | xargs -0 perl -pi -e 's/dev\.taihei\.i18n/dev.taihei.tsuji/g'
 ```

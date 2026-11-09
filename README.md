@@ -684,7 +684,10 @@ Tsuji 5 with its own taihei-i18n jar. Its `dev.taihei.i18n.Language` and the
 
 5.0.0 also replaces the 4.x `Message`, which carried every translation, with typed families. The
 4.x type stays, unchanged and deprecated, as `dev.taihei.tsuji.legacy.Message` until 7.0.0.
-Moving to 5.0.0 starts with the new coordinates and a change of imports:
+Moving to Taihei Tsuji starts with the new coordinates and a change of imports. Take 6.0.0 and
+follow [Coming from Tsuji 5.x](#coming-from-tsuji-5x) as well; if you stop on the 5.x line, take
+5.0.2 or later, never 5.0.0 or 5.0.1 (advisory
+[GHSA-pjj4-5gjj-j2p8](https://github.com/taiheiframework/tsuji/security/advisories/GHSA-pjj4-5gjj-j2p8)):
 
 ```sh
 # every import of dev.taihei.i18n becomes dev.taihei.tsuji

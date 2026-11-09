@@ -1,6 +1,6 @@
 package dev.taihei.tsuji
 
-import java.io.InputStream
+import java.io.{ByteArrayInputStream, InputStream}
 
 import zio.test.*
 
@@ -67,6 +67,30 @@ object ClasspathCatalogueSpec extends ZIOSpecDefault:
           len
       val result  = PlatformCatalogueResources.readBounded(endless, "endless.json")
       assertTrue(result.left.exists(_.contains("larger than")), served == Catalogue.MaxLength.toLong * 4 + 1)
+    },
+    test("a file of exactly the limit is read, and one byte more is refused") {
+      val limit = Catalogue.MaxLength * 4
+      val at    = PlatformCatalogueResources.readBounded(ByteArrayInputStream(Array.fill(limit)('a'.toByte)), "at.json")
+      val past  =
+        PlatformCatalogueResources.readBounded(ByteArrayInputStream(Array.fill(limit + 1)('a'.toByte)), "past.json")
+      assertTrue(
+        at.map(_.length) == Right(limit),
+        past == Left(s"past.json is larger than $limit bytes"),
+      )
+    },
+    test("a file that is not UTF-8 is refused, and one that is reads as its text") {
+      val malformed = PlatformCatalogueResources.readBounded(
+        ByteArrayInputStream(Array(0x7b, 0xc3, 0x28, 0x7d).map(_.toByte)),
+        "bad.json",
+      )
+      val utf8      =
+        PlatformCatalogueResources.readBounded(ByteArrayInputStream("{\"ü\": \"€\"}".getBytes("UTF-8")), "good.json")
+      val empty     = PlatformCatalogueResources.readBounded(ByteArrayInputStream(Array.emptyByteArray), "empty.json")
+      assertTrue(
+        malformed == Left("bad.json is not UTF-8"),
+        utf8 == Right("{\"ü\": \"€\"}"),
+        empty == Right(""),
+      )
     },
   )
 

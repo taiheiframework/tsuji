@@ -1,9 +1,10 @@
 package dev.taihei.tsuji
 
-import java.io.{ByteArrayOutputStream, InputStream}
+import java.io.InputStream
 import java.nio.ByteBuffer
 import java.nio.charset.{CharacterCodingException, CodingErrorAction, StandardCharsets}
 
+import scala.util.control.Exception.catching
 import scala.util.control.NonFatal
 
 // Catalogue files on the classpath, read with the class loader of the family that owns them.
@@ -13,7 +14,7 @@ private[tsuji] object PlatformCatalogueResources:
   val available: Boolean = true
 
   // UTF-8 takes at most four bytes per character.
-  private val MaxBytes = Catalogue.MaxLength.toLong * 4
+  private val MaxBytes = Catalogue.MaxLength * 4
 
   def path(prefix: String, tag: String): String = s"META-INF/taihei-tsuji/$prefix/$tag.json"
 
@@ -33,27 +34,24 @@ private[tsuji] object PlatformCatalogueResources:
     catch
       case NonFatal(e) => Some(Left(s"cannot read $name: ${Printable(String.valueOf(e.getMessage))}"))
 
+  /**
+   * The text of `in`: Left when it holds more than MaxBytes bytes, of which it reads one past
+   * the limit and no more, or when they are not UTF-8.
+   */
   private[tsuji] def readBounded(in: InputStream, name: String): Either[String, String] =
-    val out    = new ByteArrayOutputStream()
-    val buffer = new Array[Byte](8192)
-    var total  = 0L
-    var done   = false
-    // One byte past the limit is enough to know the file is too large.
-    while !done && total <= MaxBytes do
-      val n = in.read(buffer, 0, math.min(buffer.length.toLong, MaxBytes + 1 - total).toInt)
-      if n < 0 then done = true
-      else
-        out.write(buffer, 0, n)
-        total += n
-    if total > MaxBytes then Left(s"$name is larger than $MaxBytes bytes")
-    else
-      val decoder = StandardCharsets.UTF_8
+    Right(in.readNBytes(MaxBytes + 1))
+      .filterOrElse(_.length <= MaxBytes, s"$name is larger than $MaxBytes bytes")
+      .flatMap(bytes => strictUtf8(bytes).toRight(s"$name is not UTF-8"))
+
+  // The text of `bytes`, or None when they are not UTF-8; a malformed byte is never replaced.
+  private def strictUtf8(bytes: Array[Byte]): Option[String] =
+    catching(classOf[CharacterCodingException]).opt(
+      StandardCharsets.UTF_8
         .newDecoder()
         .onMalformedInput(CodingErrorAction.REPORT)
         .onUnmappableCharacter(CodingErrorAction.REPORT)
-      try Right(decoder.decode(ByteBuffer.wrap(out.toByteArray)).toString)
-      catch case _: CharacterCodingException => Left(s"$name is not UTF-8")
-
-  end readBounded
+        .decode(ByteBuffer.wrap(bytes))
+        .toString
+    )
 
 end PlatformCatalogueResources

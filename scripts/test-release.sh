@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Tests of the release machinery that never touch a real registry (make release-test, part of
 # make validate): scripts/release.py, and repo-guard, release-preflight, release-github,
-# publish-repo, verify-repo, central-bundle, publish, release-abort and the embargo in the
-# Makefile, run against scripts/fake_servers.py on localhost, which stands in for Maven Central,
+# publish-repo, verify-repo, publish-dry-run, release-prepare's checks, release-finalize's first
+# steps, release-abort and the embargo guard in the Makefile, run against scripts/fake_servers.py on localhost, which stands in for Maven Central,
 # the family's Maven repository and the GitHub API. A throwaway git repository, with a bare one as
 # its origin, holds a copy of the Makefile and scripts/, tagged v9.9.9, with a synthetic bundle
 # signed by throwaway keys (no Mill, never the release key): what is tested is what the targets do
@@ -12,12 +12,12 @@
 # line per check; exits non-zero when any check fails.
 set -uo pipefail
 # make hands its command-line variables to every make below it, through MAKEFLAGS and as
-# environment variables: release-prepare TYPE=... EMBARGO=... runs make validate, and so this
-# script, and the make calls here would inherit them (an EMBARGO=0 from outside answers the very
-# question one check asks). TYPE, EMBARGO and VERSION are the ones the Makefile reads from there;
-# COURSIER_* it reads from the environment. The release credentials and the launcher's version
-# variables are cleared too, so that only what a check sets reaches the targets.
-unset MAKEFLAGS MFLAGS MAKEOVERRIDES MAKELEVEL TYPE EMBARGO VERSION RELEASE_ENV COURSIER_CONFIG_DIR \
+# environment variables: release-prepare TYPE=... EMBARGO=... TICKET=... runs make validate, and so
+# this script, and the make calls here would inherit them (an EMBARGO=0 from outside answers the
+# very question one check asks). TYPE, EMBARGO, TICKET and VERSION are the ones the Makefile reads
+# from there; COURSIER_* it reads from the environment. The release credentials and the launcher's
+# version variables are cleared too, so that only what a check sets reaches the targets.
+unset MAKEFLAGS MFLAGS MAKEOVERRIDES MAKELEVEL TYPE EMBARGO TICKET VERSION RELEASE_ENV COURSIER_CONFIG_DIR \
   COURSIER_REPOSITORIES COURSIER_MIRRORS COURSIER_CREDENTIALS \
   MILL_SONATYPE_USERNAME MILL_SONATYPE_PASSWORD MILL_PGP_SECRET_BASE64 MILL_PGP_PASSPHRASE \
   MILL_VERSION DEFAULT_MILL_VERSION MILL_TESTS_PUBLISH_DRY_RUN GH_TOKEN GITHUB_TOKEN
@@ -238,7 +238,7 @@ expect "build-repos: a YAML build file that names repositories is refused" 1 "na
 printf -- '-Dcoursier.cache=/tmp/x\n' > "$BR/.mill-jvm-opts"
 expect "build-repos: Mill options that move Coursier's cache are refused" 1 "names a repository" build_repos .mill-jvm-opts
 
-# resolved (C12): a stand-in Coursier cache, with a release of the library on the stand-in API.
+# resolved: a stand-in Coursier cache, with a release of the library on the stand-in API.
 # Another library of the family than this one, so that a pin on it is a pin, not a module of ours.
 LIB=""; for f in $FAMILY; do [ "$f" != "$LIBRARY" ] && { LIB=$f; break; }; done
 [ -n "$LIB" ] || { echo "FAMILY names no library besides $LIBRARY"; exit 1; }
@@ -359,8 +359,8 @@ MLOG="$W/mill-env"; GLOG="$W/gh-log"; GHS="$W/gh"; mkdir -p "$GHS" "$W/bin"
 
 # The stand-in Mill answers the guards and repo-guard's questions, and records which Central token
 # variables reached each Mill call before the publishing one (in $MLOG.pre), and for the
-# publishing command which credential variables reached it (their names, never their values), its
-# arguments, and whether the Central marker was there when it started. Every call is also logged
+# publishing command which credential variables reached it (their names, never their values) and
+# its arguments. Every call is also logged
 # in $MLOG.calls: its arguments, the names of the credential variables it saw, and whether any
 # environment variable held the marker value cmdline-secret, which a check puts on make's command
 # line (make hands it on in MAKEFLAGS). STANDIN_VERSION, when set, is the version it reports.
@@ -396,8 +396,7 @@ case "\$*" in
       if [ "\${!v-}" = dry-run-no-upload ]; then echo "\$v placeholder"
       elif [ -n "\${!v+x}" ]; then echo "\$v set"; else echo "\$v unset"; fi
     done > "$MLOG"
-    echo "args \$*" >> "$MLOG"
-    if [ -e "$B.CENTRAL_UPLOAD_STARTED" ]; then echo "marker before mill" >> "$MLOG"; fi;;
+    echo "args \$*" >> "$MLOG";;
   *) echo "stand-in mill: unexpected \$*" >&2; exit 1;;
 esac
 EOF
@@ -458,8 +457,8 @@ M=(env PATH="$W/bin:$PATH" make -C "$G" --no-print-directory "REPO_URL=$SITE" "C
 gh_reset() { rm -rf "$GHS"; mkdir -p "$GHS"; : > "$GLOG"; }
 gh_called() { grep -q -- "$1" "$GLOG"; }
 
-# repo-guard, end to end with the stand-in Mill: the pin check and the C12 check of what was
-# resolved. One published POM pins the stand-in library's version on the site.
+# repo-guard, end to end with the stand-in Mill: the pin check and the check of every file that
+# was resolved. One published POM pins the stand-in library's version on the site.
 resolvers_json "$MODULES" "$IVY" https://repo1.maven.org/maven2 "$ONLY" > "$RESOLVERS_JSON"
 resolving $MODULES > "$RESOLVING"
 PIN="$W/pin.pom"; deps_pom "$PIN" "$(dep dev.taihei "$DA" "$DV")"
@@ -491,7 +490,7 @@ rm "$S/site/dev/taihei/$DA/$DV/$DA-$DV.pom"
 expect "repo-guard refuses a pin on neither Central nor the site" 1 "neither on Maven Central nor on" "${M[@]}" repo-guard
 cp "$SITEC/dev/taihei/$DA/$DV/$DA-$DV.pom" "$S/site/dev/taihei/$DA/$DV/"
 printf 'x' >> "$SITEC/dev/taihei/$DA/$DV/$DA-$DV.jar"
-expect "repo-guard refuses a resolved file that differs from its release (C12)" 1 "differs from the SHA256SUMS" "${M[@]}" repo-guard
+expect "repo-guard refuses a resolved file that differs from its release" 1 "differs from the SHA256SUMS" "${M[@]}" repo-guard
 restore_jar
 resolvers_json "$MODULES" "$ONLY" "$IVY" https://repo1.maven.org/maven2 > "$RESOLVERS_JSON"
 expect "repo-guard refuses a module that asks the site before Central" 1 "not Coursier's defaults" "${M[@]}" repo-guard
@@ -535,15 +534,19 @@ use_bundle "$W/u3"; expect "release-github refuses a file changed after it was s
 use_bundle "$SRC"
 expect "release-github refuses another number of signatures" 1 "not 9" "${M[@]}" release-github SIGNATURES=9
 
-echo "$V" > "$G/.release-embargo"
-expect "release-github refuses a version under embargo" 1 "under embargo" "${M[@]}" release-github
-expect "publish-repo refuses a version under embargo" 1 "under embargo" "${M[@]}" publish-repo
+# The earlier machinery's embargo list may still name a version under embargo: while it exists,
+# in any form, nothing is released.
+echo "1.2.3" > "$G/.release-embargo"
+expect "release-github refuses while the earlier embargo list exists" 1 "the earlier machinery's list" "${M[@]}" release-github
+expect "publish-repo refuses while the earlier embargo list exists" 1 "the earlier machinery's list" "${M[@]}" publish-repo
+expect "release-prepare refuses while the earlier embargo list exists" 1 "the earlier machinery's list" "${M[@]}" release-prepare TYPE=patch EMBARGO=0 TICKET=TAIHEI-1
+mv "$G/.release-embargo" "$W/embargo-list"; ln -s "$W/embargo-list" "$G/.release-embargo"
+expect "and so does a link of that name" 1 "the earlier machinery's list" "${M[@]}" release-github
 rm "$G/.release-embargo"
+# An embargoed release in progress does not stop release-github: its embargo is the tag that is not
+# pushed, and release-github wants the pushed tag (below).
 printf '{"newVersion":"%s","head":"x","embargo":true}\n' "$V" > "$G/.release-state.json"
-expect "release-github refuses while an embargoed release is prepared" 1 "under embargo" "${M[@]}" release-github
-expect "publish-repo refuses while an embargoed release is prepared" 1 "under embargo" "${M[@]}" publish-repo
-printf 'not json' > "$G/.release-state.json"
-expect "an unreadable release state refuses, since it may hold an embargo" 1 "cannot be read" "${M[@]}" release-github
+expect "release-github does not stop at an embargoed release state, but at the unpushed tag" 1 "push main and the tag first" "${M[@]}" release-github
 rm "$G/.release-state.json"
 git -C "$G" -c user.name=Test -c user.email=test@example.invalid -c commit.gpgsign=false commit -q --allow-empty -m after
 expect "release-github refuses a HEAD that is not the release tag" 1 "not at a release tag" "${M[@]}" release-github
@@ -620,48 +623,33 @@ rm "$GHS"/published
 expect "publish-repo refuses a version without a published release" 1 "make release-github first" "${M[@]}" publish-repo
 gh_reset
 
-# make publish, the direct Central upload, signs again: only for an embargoed version, and never
-# for one the site serves.
-expect "publish refuses a version that is not under embargo" 1 "is not under embargo" "${M[@]}" publish
-echo "$V" > "$G/.release-embargo"
-expect "publish refuses a version the site serves" 1 "not 404" "${M[@]}" publish
-rm "$G/.release-embargo"
+# release-prepare: the questions it wants answered, and the previous release finished, on Maven
+# Central (a version from before ADR 0009) or on the family's repository. v9.9.9 is on the
+# stand-in site now (publish-repo above). Past these checks release-prepare cleans the build,
+# which the stand-in Mill refuses: that refusal shows it got that far.
 expect "release-prepare wants the embargo decided" 1 "never a default" "${M[@]}" release-prepare TYPE=patch
-
-printf '%s\n1.2.3\n' "$V" > "$G/.release-embargo"
-expect "embargo-lift lifts one version" 0 "no longer under embargo" "${M[@]}" embargo-lift "VERSION=$V"
-[ "$(cat "$G/.release-embargo")" = "1.2.3" ] && pass "and keeps the others" || fail "embargo-lift changed the other versions"
-[ -f "$B.EMBARGO_LIFTED" ] && pass "embargo-lift records the lift next to the bundle" || fail "embargo-lift wrote no lift"
-rm -f "$B.EMBARGO_LIFTED"
-expect "embargo-lift records a lift for a version not listed here, saying so" 0 "not listed under embargo here" "${M[@]}" embargo-lift "VERSION=$V"
-rm -f "$G/.release-embargo" "$B.EMBARGO_LIFTED"
-
-# A security fix's bundle comes from Central's files (C14): nothing is signed again.
-rm -rf "$S/site/dev" "$B"
-cp -r "$SRC/dev" "$S/central/"
-expect "central-bundle wants the lift recorded first" 1 "make embargo-lift VERSION=$V first" "${M[@]}" central-bundle
-"${M[@]}" embargo-lift "VERSION=$V" >/dev/null 2>&1
-expect "central-bundle builds the bundle from Central's files" 0 "nothing was signed again" "${M[@]}" central-bundle
-mv "$B.EMBARGO_LIFTED" "$W/lifted"
-expect "release-github refuses a bundle from Central without a recorded lift, also with no embargo file" 1 "went to Maven Central first" "${M[@]}" release-github
-expect "publish-repo refuses it too" 1 "went to Maven Central first" "${M[@]}" publish-repo
-mv "$W/lifted" "$B.EMBARGO_LIFTED"
-diff <(cd "$SRC" && find . -type f -name '*.asc' | sort | xargs sha256sum) <(cd "$B/repository" && find . -type f -name '*.asc' | sort | xargs sha256sum) >/dev/null \
-  && pass "central-bundle keeps Central's signature bytes" || fail "central-bundle's signatures differ from Central's"
-expect "central-bundle builds a bundle once" 1 "built once" "${M[@]}" central-bundle
-rm -rf "$B"; CJ=$(first_jar "$S/central/dev"); cp "$CJ.asc" "$W/central.asc"; sign "$OTHER" "$CJ"
-expect "central-bundle refuses a file on Central signed by another key" 1 "not signed by the release key" "${M[@]}" central-bundle
-cp "$W/central.asc" "$CJ.asc"; rm -rf "$B.partial" "$B.download"
-"${M[@]}" central-bundle >/dev/null 2>&1
-rm -rf "$B"; DRY="$G/out/mill.javalib.SonatypeCentralPublishModule/publishAll.dest/repository/$PREFIX-$V"
-mkdir -p "$DRY"; cp -r "$SRC/dev" "$DRY/"
-expect "central-bundle compares Central's files with the local publish directory" 0 "byte-equal to the local publish directory" "${M[@]}" central-bundle
-rm -rf "$B"; printf x >> "$(first_jar "$DRY")"
-expect "central-bundle refuses files that differ from the local publish directory" 1 "differ from the local publish directory" "${M[@]}" central-bundle
-[ ! -e "$B" ] && pass "and keeps no bundle" || fail "a bundle was kept"
-rm -rf "$G/out" "$S/central/dev/taihei/$FIRST" "$B.partial" "$B.download"
-expect "central-bundle refuses a version Central does not have" 1 "is not on Maven Central" "${M[@]}" central-bundle
-rm -rf "$S/central/dev"
+expect "release-prepare wants the release ticket" 1 "TICKET=<key>" "${M[@]}" release-prepare TYPE=patch EMBARGO=0
+expect "release-prepare refuses a ticket that is not a key" 1 "not 'see the board'" "${M[@]}" release-prepare TYPE=patch EMBARGO=0 "TICKET=see the board"
+prepare() { "${M[@]}" release-prepare TYPE=patch EMBARGO=0 TICKET=TAIHEI-1 2>&1; }
+OUT=$(prepare)
+grep -qF "[OK] v$V is on $SITE" <<< "$OUT" && grep -qF "Cleaning build cache" <<< "$OUT" \
+  && pass "release-prepare accepts a previous version that only the family's repository serves" \
+  || fail "release-prepare refused a previous version on the site: $(tail -n 3 <<< "$OUT" | tr '\n' ';')"
+SITEPOM="$S/site/dev/taihei/$FIRST/$V/$FIRST-$V.pom"
+mv "$SITEPOM" "$W/site-pom"
+OUT=$(prepare)
+grep -qF "the release of v$V has not finished" <<< "$OUT" && ! grep -qF "Cleaning build cache" <<< "$OUT" \
+  && pass "release-prepare refuses while the previous version is on neither" || fail "release-prepare without the previous version: $(tail -n 3 <<< "$OUT" | tr '\n' ';')"
+mkdir -p "$S/central/dev/taihei/$FIRST/$V"; cp "$W/site-pom" "$S/central/dev/taihei/$FIRST/$V/$FIRST-$V.pom"
+OUT=$(prepare)
+grep -qF "[OK] v$V is on Maven Central" <<< "$OUT" && grep -qF "Cleaning build cache" <<< "$OUT" \
+  && pass "release-prepare accepts a previous version on Maven Central" || fail "release-prepare and Central: $(tail -n 3 <<< "$OUT" | tr '\n' ';')"
+rm -rf "$S/central/dev/taihei/$FIRST"; mv "$W/site-pom" "$SITEPOM"
+OUT=$("${M[@]}" release-prepare TYPE=patch EMBARGO=0 TICKET=TAIHEI-1 "REPO_URL=$BASE/moved/" 2>&1)
+grep -qF "HTTP 301" <<< "$OUT" && grep -qF "has not finished" <<< "$OUT" \
+  && pass "release-prepare follows no redirect" || fail "release-prepare and a redirect: $(tail -n 3 <<< "$OUT" | tr '\n' ';')"
+[ ! -e "$G/.release-state.json" ] && [ -z "$(git -C "$G" status --porcelain --untracked-files=no)" ] \
+  && pass "and a refused release-prepare leaves no release state and no change" || fail "release-prepare left a state or a change"
 
 # --- the targets that start Mill to publish, against the stand-in --------------------------
 ( umask 077
@@ -712,47 +700,36 @@ env HOME="$W/home" RELEASE_ENV="$W/release.env" make -C "$G" --no-print-director
 saw "MILL_PGP_SECRET_BASE64 unset" \
   && pass "an environment variable RELEASE_ENV does not choose the file that is sourced" || fail "RELEASE_ENV from the environment was sourced"
 
-# make publish marks the Central upload before Mill starts, so that it never runs twice for a
-# version and release-abort does not undo it.
-echo "$V" > "$G/.release-embargo"; rm -f "$MLOG"
-expect "publish refuses when Mill would publish another version than the tag's" 1 "not the tag's" env STANDIN_VERSION=9.9.8 "${M[@]}" publish "RELEASE_ENV=$W/release.env"
-[ ! -e "$B.CENTRAL_UPLOAD_STARTED" ] && [ ! -e "$MLOG" ] \
-  && pass "and it wrote no Central marker and started no upload" || fail "publish marked or started a Central upload for another version than the tag's"
-rm -f "$MLOG.calls"
-expect "publish uploads an embargoed version to Central" 0 "to Maven Central" env MILL_TESTS_PUBLISH_DRY_RUN=1 "${TOKENS[@]}" "${M[@]}" publish "RELEASE_ENV=$W/release.env"
-grep -q '^--no-daemon resolve __.publishArtifacts ' "$MLOG.calls" && ! grep -v -e '^--no-daemon ' -e '^shutdown ' "$MLOG.calls" >/dev/null \
-  && pass "publish: with a token in the environment (CI), no Mill call but shutdown runs on a daemon, the module guard included" \
-  || fail "publish: a Mill call may start a daemon that keeps the token: $(grep -v -e '^--no-daemon ' -e '^shutdown ' "$MLOG.calls" 2>/dev/null | tr '\n' ';')"
-[ -s "$B.CENTRAL_UPLOAD_STARTED" ] && saw "marker before mill" \
-  && pass "publish marked the Central upload before Mill started" || fail "publish did not mark the Central upload before Mill"
-saw "$ARGS" && pass "publish: Mill gets the bundle name and no other argument" || fail "publish: Mill's arguments: $(grep '^args' "$MLOG")"
-saw "MILL_SONATYPE_USERNAME set" && saw "MILL_TESTS_PUBLISH_DRY_RUN unset" \
-  && pass "publish gives Mill the Central token, and no dry-run switch, not even an inherited one" || fail "publish: Mill's environment"
-rm -f "$MLOG"
-expect "publish never starts the Central upload of a version twice" 1 "started before" "${M[@]}" publish "RELEASE_ENV=$W/release.env"
-[ ! -e "$MLOG" ] && pass "and Mill did not run" || fail "Mill ran for a second Central upload"
-# The CI route: no release env file, every credential from the environment. publish must hand all
-# of them to the publishing call, and run nothing but shutdown on a daemon.
-rm -f "$B.CENTRAL_UPLOAD_STARTED" "$MLOG" "$MLOG.calls"
-expect "publish takes the credentials from the environment when there is no release env (CI)" 0 "to Maven Central" \
-  env MILL_TESTS_PUBLISH_DRY_RUN=1 "${TOKENS[@]}" "${M[@]}" publish
-saw "MILL_SONATYPE_USERNAME set" && saw "MILL_SONATYPE_PASSWORD set" && saw "MILL_PGP_SECRET_BASE64 set" && saw "MILL_PGP_PASSPHRASE set" \
-  && ! grep -v -e '^--no-daemon ' -e '^shutdown ' "$MLOG.calls" >/dev/null \
-  && clean_shutdowns \
-  && pass "publish: the publishing call gets all four from the environment, and no daemon, shutdown's included, sees them" \
-  || fail "publish: on the CI route, Mill's environment or a daemon: $(cat "$MLOG" "$MLOG.calls" 2>/dev/null | tr '\n' ';')"
-rm -f "$G/.release-embargo"
-expect "release-bundle never signs again a version signed for Central" 1 "never signed again" "${M[@]}" release-bundle
-expect "release-github sends a version that went to Central first to central-bundle" 1 "make central-bundle" "${M[@]}" release-github
-printf '{"currentVersion":"0.0.0","newVersion":"%s","releaseType":"patch","branch":"main","head":"x","embargo":true}\n' "$V" > "$G/.release-state.json"
-expect "release-abort undoes nothing once the Central upload started" 1 "may be final there" "${M[@]}" release-abort
-git -C "$G" rev-parse -q --verify "refs/tags/v$V" >/dev/null && [ -e "$G/.release-state.json" ] \
-  && pass "the tag and the release state stay" || fail "release-abort removed the tag or the state"
-rm -f "$G/.release-state.json" "$B.CENTRAL_UPLOAD_STARTED"
+# release-finalize commits the notes under the release ticket. With the stand-in Mill the dry run
+# writes no bundle, so it stops at release-bundle, after the notes commit and the local tag;
+# release-abort then undoes both, recognising the commit by that subject.
+git -C "$G" config user.name Test; git -C "$G" config user.email test@example.invalid
+git -C "$G" config commit.gpgsign false; git -C "$G" config tag.gpgsign false
+gh_reset
+HEAD_BEFORE=$(git -C "$G" rev-parse HEAD)
+printf '{"currentVersion":"%s","newVersion":"9.9.10","releaseType":"patch","branch":"main","head":"%s","embargo":false,"ticket":"TAIHEI-7"}\n' "$V" "$HEAD_BEFORE" > "$G/.release-state.json"
+printf '# Release 9.9.10\n' > "$G/RELEASE_9_9_10.md"
+OUT=$(env STANDIN_VERSION=9.9.10 "${M[@]}" release-finalize 2>&1)
+grep -qF "[bundle] refused; nothing left the machine" <<< "$OUT" \
+  && pass "release-finalize gets as far as the bundle with the stand-ins" || fail "release-finalize stopped early: $(tail -n 4 <<< "$OUT" | tr '\n' ';')"
+[ "$(git -C "$G" log -1 --format=%s)" = "TAIHEI-7: add the release notes of 9.9.10" ] \
+  && git -C "$G" log -1 --format=%b | grep -qF "The notes of version 9.9.10, written by make release-prepare" \
+  && [ "$(git -C "$G" rev-parse HEAD~1)" = "$HEAD_BEFORE" ] \
+  && pass "the notes commit names the release ticket and has a body" || fail "the notes commit: $(git -C "$G" log -1 --format='%s / %b' | tr '\n' ' ')"
+git -C "$G" rev-parse -q --verify "refs/tags/v9.9.10" >/dev/null && pass "and the tag is made, locally" || fail "release-finalize made no tag"
+expect "release-abort undoes a notes commit under the release ticket" 0 "Reverted local release-notes commit" "${M[@]}" release-abort
+[ "$(git -C "$G" rev-parse HEAD)" = "$HEAD_BEFORE" ] && ! git -C "$G" rev-parse -q --verify "refs/tags/v9.9.10" >/dev/null \
+  && [ -f "$G/.release-notes.aborted-9.9.10.md" ] && [ ! -e "$G/.release-state.json" ] \
+  && pass "and the tag, the commit and the state are gone, the notes kept aside" || fail "release-abort left the release in place"
+rm -f "$G/.release-notes.aborted-9.9.10.md"
 
-# release-finalize runs repo-guard first (C12), before it commits or tags anything.
+printf '{"currentVersion":"%s","newVersion":"9.9.10","releaseType":"patch","branch":"main","head":"%s","embargo":false}\n' "$V" "$HEAD_BEFORE" > "$G/.release-state.json"
+expect "release-finalize refuses a release state that names no ticket" 1 "names no ticket" "${M[@]}" release-finalize
+rm -f "$G/.release-state.json"
+
+# release-finalize runs repo-guard first, before it commits or tags anything.
 git -C "$G" tag -d "v$V" >/dev/null
-printf '{"currentVersion":"9.9.8","newVersion":"9.9.10","releaseType":"patch","branch":"main","head":"%s","embargo":false}\n' "$(git -C "$G" rev-parse HEAD)" > "$G/.release-state.json"
+printf '{"currentVersion":"9.9.8","newVersion":"9.9.10","releaseType":"patch","branch":"main","head":"%s","embargo":false,"ticket":"TAIHEI-7"}\n' "$(git -C "$G" rev-parse HEAD)" > "$G/.release-state.json"
 HEAD_BEFORE=$(git -C "$G" rev-parse HEAD)
 expect "release-finalize runs repo-guard first" 1 "[repo-guard] COURSIER_REPOSITORIES" env COURSIER_REPOSITORIES=https://example.invalid "${M[@]}" release-finalize
 [ "$(git -C "$G" rev-parse HEAD)" = "$HEAD_BEFORE" ] && ! git -C "$G" rev-parse -q --verify "refs/tags/v9.9.10" >/dev/null \
@@ -760,9 +737,9 @@ expect "release-finalize runs repo-guard first" 1 "[repo-guard] COURSIER_REPOSIT
 rm -f "$G/.release-state.json"
 
 # release-abort undoes no notes commit that main on origin holds, also before the tag is pushed.
-git -C "$G" -c user.name=Test -c user.email=test@example.invalid -c commit.gpgsign=false commit -q --allow-empty -m "Add release notes for version 9.9.10"
+git -C "$G" commit -q --allow-empty -m "TAIHEI-7: add the release notes of 9.9.10"
 git -C "$G" push -q origin HEAD:refs/heads/main 2>/dev/null
-printf '{"currentVersion":"9.9.9","newVersion":"9.9.10","releaseType":"patch","branch":"main","head":"x","embargo":false}\n' > "$G/.release-state.json"
+printf '{"currentVersion":"9.9.9","newVersion":"9.9.10","releaseType":"patch","branch":"main","head":"x","embargo":false,"ticket":"TAIHEI-7"}\n' > "$G/.release-state.json"
 NOTES_COMMIT=$(git -C "$G" rev-parse HEAD)
 expect "release-abort undoes no notes commit that is on origin's main" 1 "would need a force push" "${M[@]}" release-abort
 [ "$(git -C "$G" rev-parse HEAD)" = "$NOTES_COMMIT" ] && pass "and the notes commit stays" || fail "release-abort reset a pushed commit"

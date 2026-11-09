@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Release helpers for the Makefile: one signed bundle, kept on an immutable GitHub Release, served
-by the family's Maven repository and taken unchanged to Maven Central by the release train.
+"""Release helpers for the Makefile: one signed bundle, kept on an immutable GitHub Release and
+served unchanged by the family's Maven repository.
 
 Run as `python3 -I -B scripts/release.py <command> ...`, so that nothing from the current
 directory or the environment is imported, and no bytecode is written next to the scripts (-I
@@ -30,7 +30,7 @@ problem on stderr, when anything is not exactly as expected.
            exactly once with MavenRepository(release.repoUrl), and name no other repository.
   resolved --workspace DIR --url URL --central URL --api URL --owner O --family "A B"
            --key FILE --fingerprint FPR JSON...
-           Check every file in Mill's `show` output of resolved classpaths (C12): each comes from
+           Check every file in Mill's `show` output of resolved classpaths: each comes from
            Maven Central or URL in the Coursier cache, only dev.taihei comes from URL, and every
            dev.taihei file (and the POM beside it) is in the SHA256SUMS of its version's immutable
            GitHub Release, or, without such a release, comes from Central with a good signature
@@ -411,7 +411,7 @@ def build_repos(args):
         fail(problems)
 
 
-# ---------------------------------------------------------------- what the build resolved (C12)
+# ---------------------------------------------------------------- what the build resolved
 
 TIMEOUT = 60
 MAX_SUMS = 1 << 20

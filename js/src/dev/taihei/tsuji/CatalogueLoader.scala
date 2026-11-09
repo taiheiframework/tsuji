@@ -94,12 +94,18 @@ object CatalogueLoader:
 
   // A decoder that refuses malformed UTF-8, as the JVM's reader does, instead of replacing it. A
   // decoder that ignores the option (an old polyfill) would replace it silently, so it is refused.
-  private def strictDecoder(): js.Dynamic =
-    Some(
+  private def strictDecoder(): Try[js.Dynamic] =
+    Try(
       js.Dynamic.newInstance(js.Dynamic.global.TextDecoder)("utf-8", js.Dynamic.literal(fatal = true))
+    ).flatMap(decoder =>
+      Either
+        .cond(
+          decoder.fatal.asInstanceOf[Any] == true,
+          decoder,
+          new IllegalStateException("there is no strict UTF-8 decoder here"),
+        )
+        .toTry
     )
-      .filter(_.fatal.asInstanceOf[Any] == true)
-      .getOrElse(throw new IllegalStateException("there is no strict UTF-8 decoder here"))
 
   // With `stream`, a character split over two chunks waits for the next one; without it, a
   // character the bytes leave unfinished is malformed too.
@@ -122,34 +128,40 @@ object CatalogueLoader:
     if js.isUndefined(body) || body == null then whole(response)
     else
       // The decoder first: if it cannot be built, no reader holds the stream locked.
-      val decoder                             = strictDecoder()
-      val reader                              = body.getReader()
-      val out                                 = new StringBuilder
-      def next(total: Double): Future[String] =
-        reader
-          .read()
-          .asInstanceOf[js.Promise[js.Dynamic]]
-          .toFuture
-          .flatMap: chunk =>
-            if chunk.done.asInstanceOf[Boolean] then
-              Future.fromTry(decode(decoder, js.undefined, stream = false).map(out.append(_).result()))
-            else
-              val read = total + chunk.value.length.asInstanceOf[Double]
-              Future
-                .fromTry(
-                  Either
-                    .cond(read <= MaxBytes, (), tooLarge)
-                    .toTry
-                    .flatMap(_ => decode(decoder, chunk.value, stream = true))
-                )
-                .transformWith:
-                  case Success(text) =>
-                    out ++= text
-                    next(read)
-                  case Failure(e)    =>
-                    quietly(reader.cancel())
-                    Future.failed(e)
-      next(0.0)
+      Future
+        .fromTry(strictDecoder())
+        .flatMap: decoder =>
+          val reader                              = body.getReader()
+          val out                                 = new StringBuilder
+          def next(total: Double): Future[String] =
+            reader
+              .read()
+              .asInstanceOf[js.Promise[js.Dynamic]]
+              .toFuture
+              .flatMap: chunk =>
+                if chunk.done.asInstanceOf[Boolean] then
+                  Future.fromTry(decode(
+                    decoder,
+                    js.undefined,
+                    stream = false,
+                  ).map(out.append(_).result()))
+                else
+                  val read = total + chunk.value.length.asInstanceOf[Double]
+                  Future
+                    .fromTry(
+                      Either
+                        .cond(read <= MaxBytes, (), tooLarge)
+                        .toTry
+                        .flatMap(_ => decode(decoder, chunk.value, stream = true))
+                    )
+                    .transformWith:
+                      case Success(text) =>
+                        out ++= text
+                        next(read)
+                      case Failure(e)    =>
+                        quietly(reader.cancel())
+                        Future.failed(e)
+          next(0.0)
     end if
 
   end readBounded
@@ -171,7 +183,8 @@ object CatalogueLoader:
           Either
             .cond(buffer.byteLength <= MaxBytes, (), tooLarge)
             .toTry
-            .flatMap(_ => decode(strictDecoder(), new Uint8Array(buffer), stream = false))
+            .flatMap(_ => strictDecoder())
+            .flatMap(decode(_, new Uint8Array(buffer), stream = false))
         )
 
 end CatalogueLoader

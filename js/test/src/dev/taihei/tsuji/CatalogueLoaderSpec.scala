@@ -69,7 +69,7 @@ object CatalogueLoaderSpec extends ZIOSpecDefault:
     )
 
   // A TextDecoder as an old polyfill may be: it takes the options and ignores `fatal`.
-  private class LenientDecoder(label: String, options: js.Any) extends js.Object:
+  private class LenientDecoder extends js.Object:
     val fatal                                          = false
     def decode(bytes: js.Any, options: js.Any): String = ""
 
@@ -202,14 +202,17 @@ object CatalogueLoaderSpec extends ZIOSpecDefault:
           assertTrue(problems.map(_.message) == List(s"cannot fetch $Url: not UTF-8"), c.languages.isEmpty)
         )
     },
-    test("a decoder that ignores the fatal option is refused before the body is read") {
-      val c    = Catalogues(Seq(Orders))
-      val body = Body(utf8(GermanFile))
+    test("a decoder that ignores the fatal option is refused, with or without a body stream") {
+      val c       = Catalogues(Seq(Orders))
+      val body    = Body(utf8(GermanFile))
+      val refusal = List(s"cannot fetch $Url: there is no strict UTF-8 decoder here")
       withGlobal("TextDecoder", js.constructorOf[LenientDecoder])(
-        withFetch(answering(response(body)))(load(c, German, Url))
-      ).map(problems =>
-        assertTrue(
-          problems.map(_.message) == List(s"cannot fetch $Url: there is no strict UTF-8 decoder here"),
+        for
+          streamed <- withFetch(answering(response(body)))(load(c, German, Url))
+          whole    <- withFetch(answering(streamless(utf8(GermanFile))))(load(c, German, Url))
+        yield assertTrue(
+          streamed.map(_.message) == refusal,
+          whole.map(_.message) == refusal,
           // No reader was taken; the stream's own first pull fills its queue regardless.
           !body.stream.locked.asInstanceOf[Boolean],
           c.languages.isEmpty,

@@ -54,6 +54,17 @@ object CatalogueLoaderSpec extends ZIOSpecDefault:
         original
     )(original => ZIO.succeed(global.updateDynamic(name)(original)))(_ => use)
 
+  // Runs `use` with the global `name` deleted, so that reading it throws as on a runtime that
+  // never declared it, and puts it back however `use` ends.
+  private def withoutGlobal[R, E, A](name: String)(use: ZIO[R, E, A]) =
+    val global = js.Dynamic.global.globalThis
+    ZIO.acquireReleaseWith(
+      ZIO.succeed:
+        val original = global.selectDynamic(name)
+        js.special.delete(global, name)
+        original
+    )(original => ZIO.succeed(global.updateDynamic(name)(original)))(_ => use)
+
   private def withFetch[R, E, A](stub: js.Any)(use: ZIO[R, E, A]) = withGlobal("fetch", stub)(use)
 
   private def answering(response: => js.Any): js.Function1[String, js.Promise[js.Any]] =
@@ -388,10 +399,10 @@ object CatalogueLoaderSpec extends ZIOSpecDefault:
           )
       )
     } @@ TestAspect.timeout(zio.Duration.fromSeconds(30)),
-    test("without AbortController, the timeout still ends the load") {
+    test("without AbortController, the timeout still ends the load, and nothing throws") {
       val c      = Catalogues(Seq(Orders))
       val silent = Silent()
-      withGlobal("AbortController", js.undefined)(
+      withoutGlobal("AbortController")(
         withFetch(silent.fetch)(
           TimeBudget.withinZIO("no AbortController, timeout 200 ms", 2000)(loadWithin(c, 200.millis)): problems =>
             assertTrue(

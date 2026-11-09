@@ -59,7 +59,12 @@ object CatalogueLoader:
     using ExecutionContext
   ): Future[List[CatalogueProblem]] =
     def problem(message: String) = List(CatalogueProblem(message, Some(language)))
-    val fetched = timeout.fold(fetchText(url, NoCutoff))(within(_)(fetchText(url, _)))
+    // Whatever throws on the way to a Future becomes a failed one, and so a problem.
+    val fetched                  =
+      Future.fromTry(Try(timeout.fold(fetchText(
+        url,
+        NoCutoff,
+      ))(within(_)(fetchText(url, _))))).flatten
     fetched
       .map: text =>
         Catalogue
@@ -115,11 +120,13 @@ object CatalogueLoader:
   end within
 
   // A runtime without AbortController still has the timer: the load gives up and the body is
-  // let go, only the request itself is not aborted.
+  // let go, only the request itself is not aborted. A global the runtime never declared throws
+  // when it is read, so the read sits inside the Try too.
   private def abortController(): Option[js.Dynamic] =
-    Option(js.Dynamic.global.AbortController)
-      .filterNot(js.isUndefined)
-      .flatMap(constructor => Try(js.Dynamic.newInstance(constructor)()).toOption)
+    Try(js.Dynamic.global.AbortController)
+      .filter(js.typeOf(_) == "function")
+      .flatMap(constructor => Try(js.Dynamic.newInstance(constructor)()))
+      .toOption
 
   private def fetchText(
     url: String,

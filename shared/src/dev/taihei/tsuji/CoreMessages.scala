@@ -167,7 +167,7 @@ object CoreMessages:
     /**
      * Translations are missing in these languages, each named in the reader's language and joined
      * as a list: `missing translations for: Dutch, French`, and `ontbrekende vertalingen voor:
-     * Nederlands, Frans` to a Dutch reader.
+     * Nederlands, Frans` to a Dutch reader. An empty list leaves nothing after the colon.
      */
     def missingTranslations(languages: List[Language]): Message =
       missingTranslationsFor(languages = languages)

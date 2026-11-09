@@ -630,7 +630,9 @@ Language.French))` shows as `missing translations for: German, French` in Englis
 still compiles, with a deprecation warning, and shows that string as it is; it is removed in
 7.0.0. The list form is a message of its own, `taihei.validation.missingTranslationsFor`, so a
 message written by 6.0 with the string still reads. To move, pass the `Language` values instead
-of their joined names; a catalogue of your own that translates CoreMessages adds the new key.
+of their joined names. A catalogue of your own that translates CoreMessages needs the new key, or
+`Catalogues.verify` with that language in `required` reports it missing. A reader still on 6.0
+does not know the new key, so update the readers before the writers.
 
 ## Coming from Tsuji 5.x
 

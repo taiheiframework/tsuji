@@ -100,6 +100,18 @@ object CoreMessagesSpec extends ZIOSpecDefault:
         read.map(_.localize(English)) == Right("missing translations for: nl, fr"),
       )
     },
+    test("both forms read from the JSON a writer sends, without its text") {
+      given Catalogues = Catalogues(CoreMessages.families)
+      val listed =
+        """{"key":"taihei.validation.missingTranslationsFor","args":{"languages":["de","fr"]}}"""
+      val joined = """{"key":"taihei.validation.missingTranslations","args":{"languages":"nl, fr"}}"""
+      assertTrue(
+        listed.fromJson[Message].map(_.localize(English)) ==
+        Right("missing translations for: German, French"),
+        listed.fromJson[Message] == Right(Validation.missingTranslations(List(Language("de"), French))),
+        joined.fromJson[Message].map(_.localize(English)) == Right("missing translations for: nl, fr"),
+      )
+    },
     test("every template and translation passes verify") {
       assertTrue(Catalogues.verify(CoreMessages.families, Nil).isEmpty)
     },

@@ -221,14 +221,12 @@ object CatalogueLoaderSpec extends ZIOSpecDefault:
         fine      <- withFetch(answering(streamless(utf8(GermanFile))))(load(c, German, Url))
       yield assertTrue(
         large.map(_.message) == List(s"cannot fetch $Url: larger than $Limit bytes"),
-        limit.nonEmpty,
-        limit.forall(p => !p.message.contains("larger than") && !p.message.contains("cannot fetch")),
+        limit.map(_.message) == List(s"a catalogue is at most ${Catalogue.MaxLength} characters"),
         malformed.map(_.message) == List(s"cannot fetch $Url: not UTF-8"),
         empty.isEmpty,
         fine.isEmpty,
         c.languages == Set(German),
       )
-      end for
     },
   ) @@ TestAspect.sequential // one test replaces the global fetch for a while
 

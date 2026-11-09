@@ -16,8 +16,11 @@ import com.github.plokhotnyuk.jsoniter_scala.core.*
  * template is left out, and named in [[problems]].
  */
 final class Catalogue private (
+  /** The language of every template in this catalogue. */
   val language: Language,
+  /** The templates by message key, as the file holds them; each is checked when first used. */
   val messages: Map[MessageKey, String],
+  /** The entries [[Catalogue.parse]] left out and why; empty for a catalogue made in code. */
   val problems: List[CatalogueProblem]):
 
   /** The catalogue as a format 1 file, its keys in order. */

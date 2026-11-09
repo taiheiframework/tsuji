@@ -82,10 +82,11 @@ object Message:
 
   /**
    * Writes and reads a message as `{"args": [...], "namedArgs": {...}, "translationTemplates":
-   * {...}}`, as taihei-i18n 4.0.x does: the arguments as strings, the templates by language. A
-   * message read from JSON holds at most 1000 templates and 1000 arguments (positional and named
-   * together), and no template, argument or argument name longer than 65536 characters; a larger
-   * one is a decoding error, a `JsonReaderException`, as anything else wrong with the input is.
+   * {...}}`, as taihei-i18n 4.0.x does: the arguments as strings, the templates by language. As in
+   * taihei-i18n 4.0.2 (4.0.0 and 4.0.1 had no bounds), a message read from JSON holds at most 1000
+   * templates and 1000 arguments (positional and named together), and no template, argument or
+   * argument name longer than 65536 characters; a larger one is a decoding error, a
+   * `JsonReaderException`, as anything else wrong with the input is.
    * The value is written compactly, whatever the `WriterConfig`'s indentation or `escapeUnicode`.
    */
   given JsonValueCodec[Message] = TreeCodec(fromTree, toTree)

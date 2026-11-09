@@ -34,7 +34,8 @@ zio-json/src                         taihei-tsuji-zio-json: TsujiZioJson
 ```
 
 - `make validate`: scalafix, scalafmt, compile, tests on the JVM and Node, MiMa against the newest
-  release of the current major line.
+  release of the current major line, and `no-zio`: only `taihei-tsuji-zio-json`'s POM may name
+  `dev.zio`.
 - Released from the Makefile (`make release-prepare TYPE=...`, `make release-finalize`), the
   version from the git tag; one release publishes `taihei-tsuji`, `taihei-tsuji-zio-json` and
   `taihei-tsuji-tools`.

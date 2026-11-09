@@ -21,6 +21,7 @@ final class Language private (val tag: String) extends Serializable:
    */
   def isoCode: String = tag
 
+  /** Whether this is [[Language.defaultLanguage]], English: `nl` and `en-GB` are not. */
   def isDefault: Boolean = this == Language.defaultLanguage
 
   /** The language without script, region or variant: `nl-BE` gives `nl`, `nl` gives itself. */
@@ -72,9 +73,14 @@ end Language
  */
 object Language extends LanguagePlatform:
 
+  /** English, `en`: the default language, and a family's source language unless it says. */
   val English: Language = new Language("en")
-  val Dutch: Language   = new Language("nl")
-  val French: Language  = new Language("fr")
+
+  /** Dutch, `nl`. */
+  val Dutch: Language = new Language("nl")
+
+  /** French, `fr`. */
+  val French: Language = new Language("fr")
 
   private val builtIns: Vector[Language] = Vector(English, Dutch, French)
 
@@ -207,10 +213,16 @@ object Language extends LanguagePlatform:
       ),
     )
 
+  /** English: what [[of]] gives for a tag it cannot read, and what [[Language.isDefault]] asks. */
   def defaultLanguage: Language = English
 
+  /** English, as [[defaultLanguage]]: the value a form or a record starts with. */
   def empty: Language = English
 
+  /**
+   * One of the three built-ins, picked at random, for tests and sample data. It draws from
+   * `scala.util.Random`'s shared generator, so it is not for application logic.
+   */
   def sample: Language =
     val vs = values
     vs(scala.util.Random.nextInt(vs.length))

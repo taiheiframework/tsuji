@@ -120,7 +120,7 @@ internals needs the changes of step 2. To silence them while migrating:
 ## JSON during a rollout
 
 5.x reads 4.x JSON (as a legacy message with the key `legacy`), within the bounds of
-taihei-i18n 4.0.x: at most 1000 templates and 1000 arguments, none of them, nor an argument name,
+taihei-i18n 4.0.2 (4.0.0 and 4.0.1 had none): at most 1000 templates and 1000 arguments, none of them, nor an argument name,
 longer than 65536 characters. `legacy.Message`'s own codec holds to the same bounds. A 4.x
 reader cannot read a 5.x message: upgrade readers (clients) first, or keep writing legacy
 messages until they have.

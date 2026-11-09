@@ -108,6 +108,7 @@ object MessageArg:
     case _: JsonTree.Bool => "a boolean"
     case JsonTree.Null    => "null"
 
+  /** A string, shown as it is. */
   given MessageArg[String] = simple(
     ArgKind.Text,
     JsonTree.Str(_),
@@ -117,20 +118,27 @@ object MessageArg:
     },
   )
 
+  /** An `Int`, a number to the template (`:number`, `:integer`, `:plural`). */
   given MessageArg[Int] = number[Int](
     i => JsonTree.Num(BigDecimal(i).bigDecimal),
     n => Option.when(n.isValidInt)(n.toInt),
     "an Int",
   )
 
+  /** A `Long`, a number to the template. */
   given MessageArg[Long] = number[Long](
     l => JsonTree.Num(BigDecimal(l).bigDecimal),
     n => Option.when(n.isValidLong)(n.toLong),
     "a Long",
   )
 
+  /**
+   * A `Double`, a number to the template. NaN and the infinities travel as the strings `"NaN"`,
+   * `"Infinity"` and `"-Infinity"`, since JSON has no number for them.
+   */
   given MessageArg[Double] = number[Double](finite, n => Some(n.toDouble), "a Double", nonFinite)
 
+  /** A `Float`, a number to the template, written as a `Double` is. */
   given MessageArg[Float] =
     number[Float](
       f => finite(f.toString.toDouble),
@@ -139,6 +147,7 @@ object MessageArg:
       s => nonFinite(s).map(_.toFloat),
     )
 
+  /** A boolean, a JSON `true` or `false`. */
   given MessageArg[Boolean] = simple(
     ArgKind.Text,
     JsonTree.Bool(_),
@@ -148,8 +157,13 @@ object MessageArg:
     },
   )
 
+  /** A date for `:date` or `:datetime`, travelling as its ISO 8601 string (`2026-10-20`). */
   given MessageArg[LocalDate] = temporal(ArgKind.Date, LocalDate.parse, "date")
+
+  /** A date and time for `:datetime`, `:date` or `:time`, travelling as its ISO 8601 string. */
   given MessageArg[LocalDateTime] = temporal(ArgKind.DateTime, LocalDateTime.parse, "date and time")
+
+  /** A time for `:time` or `:datetime`, travelling as its ISO 8601 string. */
   given MessageArg[LocalTime] = temporal(ArgKind.Time, LocalTime.parse, "time")
 
   /** A language travels as its tag (`"nl-BE"`) and shows as its name in the reader's language. */

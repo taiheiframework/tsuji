@@ -1,6 +1,6 @@
 # Taihei Tsuji
 
-The tsuji (通詞) were the official interpreters of Nagasaki in the Edo period. Taihei Tsuji is a
+The tsūji (通詞) were the official interpreters of Nagasaki in the Edo period. Taihei Tsuji is a
 type-safe internationalization library for Scala 3: languages, typed message families
 checked when the code compiles, per-language catalogues, ICU MessageFormat 2.0, and
 locale-aware number and date formatting. Cross-compiled for the **JVM and Scala.js**.
@@ -72,7 +72,7 @@ make test           # ./mill __.test.testForked    (JVM + JS; JS runs on Node)
 make fmt            # ./mill __.reformat
 make fix            # ./mill __.fix                 (scalafix)
 make lint           # ./mill __.checkFormat and __.fix --check, as CI checks them
-make validate       # repo-guard + release-test + fix + fmt + lint + compile + test + mima
+make validate       # repo-guard + release-test + fix + fmt + lint + compile + test + mima + no-zio
 make repo-guard     # Coursier's defaults (local Ivy, Central), then REPO_URL for dev.taihei
                     # alone, nothing else; every resolved dev.taihei file checked
 make release-test   # the release machinery's own tests, against stand-ins on localhost
@@ -546,7 +546,7 @@ val tmpl = ".match {$count :plural} when one {You have one item} when * {You hav
 
 MessageFormat2.format(tmpl, Map("count" -> 1), "en")  // You have one item
 MessageFormat2.format(tmpl, Map("count" -> 5), "en")  // You have 5 items
-MessageFormat2.validate("Hello {$name")               // List(TemplateError(6, a placeholder is not closed with }))
+MessageFormat2.validate("Hello {$name")               // List(at 6: a placeholder is not closed with })
 ```
 
 Functions: `{$n :number}` (with `style=percent` or `style=currency`), `{$n :integer}`,

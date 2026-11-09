@@ -15,7 +15,8 @@ import scala.collection.mutable
  *   val shipped   = message[(count: Int, on: LocalDate)](            // a MessageDefinition
  *     ".match {$count :plural} when one {One item shipped on {$on :date dateStyle=long}} " +
  *       "when * {{$count} items shipped on {$on :date dateStyle=long}}",
- *     Language.Dutch -> ".match {$count :plural} when one {Eén artikel verzonden} when * {{$count} artikels verzonden}",
+ *     Language.Dutch -> ".match {$count :plural} when one {Eén artikel verzonden op {$on :date dateStyle=long}} " +
+ *       "when * {{$count} artikels verzonden op {$on :date dateStyle=long}}",
  *   )
  *
  * Orders.shipped(count = 3, on = today)   // a Message: key "order.shipped" and two arguments
@@ -37,7 +38,7 @@ abstract class MessageFamily(val prefix: String, val sourceLanguage: Language = 
   final def definitions: List[MessageDefinition[?]] = defined.synchronized(defined.toList)
 
   // Called from the expansion of `message` in user code: its name and signature are binary API
-  // for 5.x, kept stable by @publicInBinary.
+  // within a major line, kept stable by @publicInBinary and checked by MiMa.
   @publicInBinary
   final private[tsuji] def define[A <: AnyNamedTuple](
     name: String,
@@ -123,7 +124,7 @@ final class MessageDefinition[A <: AnyNamedTuple] private[tsuji] (
     new Message(key, Message.Body.Defined(this, args.toVector))
 
   // The message of a definition without arguments.
-  // Binary API for 5.x, as MessageFamily.define is.
+  // Binary API within a major line, as MessageFamily.define is.
   @publicInBinary
   private[tsuji] def constant: Message = new Message(key, Message.Body.Defined(this, Vector.empty))
 

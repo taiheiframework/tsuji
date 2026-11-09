@@ -15,7 +15,7 @@ import zio.json.ast.Json
 // RetractReader declares itself; of Write it calls write(String).
 import zio.json.internal.{RetractReader, Write}
 
-import dev.taihei.tsuji.{JsonTree, JsonTreeReader}
+import dev.taihei.tsuji.{Catalogue, JsonTree, JsonTreeReader}
 
 import com.github.plokhotnyuk.jsoniter_scala.core.*
 
@@ -51,6 +51,16 @@ private[ziojson] object Capture:
   val ScaleBeyond = s"a number with a scale beyond $MaxScale"
 
   val MantissaBeyond = s"a number with a mantissa of $MaxMantissaBits bits or more"
+
+  // The most values and characters a built AST may stand for, counting a subtree once for every
+  // place it appears in: as many as the longest catalogue text the core reads has characters. A
+  // caller can place one subtree in many places, so that a small AST stands for a tree too large
+  // to walk; without a bound, converting it and decoding it would take time exponential in its
+  // depth. Text cannot share, so the route from bytes needs no such bound.
+  val MaxSize: Int = Catalogue.MaxLength
+
+  val TooLarge =
+    s"a built value of more than $MaxSize values and characters, counting each place a shared part appears in"
 
   /** How the core reads and writes one of its types: its codec, and its decoder of a tree. */
   final case class Route[A](codec: JsonValueCodec[A], fromTree: JsonTree => Either[String, A])
@@ -211,29 +221,44 @@ private[ziojson] object Capture:
    * What in a built AST the core would not read from text, found without recursion: arrays and
    * objects nested deeper than [[MaxDepth]], a number of a scale beyond [[MaxScale]] either way or
    * with a mantissa of [[MaxMantissaBits]] bits or more, or a string or a field's name with an
-   * unpaired surrogate.
+   * unpaired surrogate; and an AST that stands for more than [[MaxSize]] values and characters.
    */
   def problem(json: Json): Option[String] =
-    val pending = mutable.Stack[(Json, Int)](json -> 0)
-    var found   = Option.empty[String]
+    val pending              = mutable.Stack[(Json, Int)](json -> 0)
+    var found                = Option.empty[String]
+    // The values and characters met so far, the root included. A subtree the caller placed in
+    // several places is met, and counted, once for every place, as the conversion to the core's
+    // tree and the core's decoders meet it. Each node's children are counted before they are
+    // pushed and a string's characters before they are checked, so the walk stops within one
+    // node's work of the bound.
+    var size                 = 1L
+    def count(n: Long): Unit =
+      size += n
+      if size > MaxSize then found = Some(TooLarge)
     while pending.nonEmpty && found.isEmpty do
       val (value, depth) = pending.pop()
       value match
         case Json.Obj(fields)   =>
           if depth >= MaxDepth then found = Some(TooDeep)
           else
-            fields.foreach: (name, v) =>
-              if !isUnicode(name) then found = Some(NotUnicode)
-              pending.push(v -> (depth + 1))
+            count(fields.foldLeft(fields.length.toLong)((n, field) => n + field._1.length))
+            if found.isEmpty then
+              fields.foreach: (name, v) =>
+                if !isUnicode(name) then found = Some(NotUnicode)
+                pending.push(v -> (depth + 1))
         case Json.Arr(elements) =>
           if depth >= MaxDepth then found = Some(TooDeep)
-          else elements.foreach(v => pending.push(v -> (depth + 1)))
+          else
+            count(elements.length.toLong)
+            if found.isEmpty then elements.foreach(v => pending.push(v -> (depth + 1)))
         case Json.Num(n)        =>
           // The bound is 5.0.x's for a built AST, the same either way; from text the lowest
           // scale is a little higher, but nothing costs more for the difference.
           if math.abs(n.scale.toLong) > MaxScale then found = Some(ScaleBeyond)
           else if n.unscaledValue.bitLength >= MaxMantissaBits then found = Some(MantissaBeyond)
-        case Json.Str(s)        => if !isUnicode(s) then found = Some(NotUnicode)
+        case Json.Str(s)        =>
+          count(s.length.toLong)
+          if found.isEmpty && !isUnicode(s) then found = Some(NotUnicode)
         case _                  => ()
       end match
     end while

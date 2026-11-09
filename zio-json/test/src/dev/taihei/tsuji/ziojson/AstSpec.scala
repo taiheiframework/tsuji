@@ -31,6 +31,10 @@ object AstSpec extends ZIOSpecDefault:
       i += 1
     j
 
+  // A built AST `n` levels deep in which every array holds the level below twice: the same
+  // object, so that it takes n + 1 nodes and stands for 2^(n + 1) - 1 values.
+  private def shared(n: Int): Json = Iterator.iterate[Json](Json.Num(1))(j => Json.Arr(Chunk(j, j))).drop(n).next()
+
   private def withX(x: Json): Json = Json.Obj("text" -> Json.Str("x"), "language" -> Json.Str("en"), "x" -> x)
 
   private def keptArg(x: Json): Json =
@@ -59,6 +63,44 @@ object AstSpec extends ZIOSpecDefault:
         refused(deep.as[legacy.Message], "deeper"),
         refused(ast(100000).as[Language], "deeper"),
         refused(ast(100000).as[MessageKey], "deeper"),
+      )
+    },
+    test("a subtree shared at every level is refused as the values it stands for, not walked through") {
+      // 22 levels of two places each stand for 2^23 - 1 values, about twice the bound.
+      val twice = shared(22)
+      assertTrue(
+        Capture.problem(twice).contains(Capture.TooLarge),
+        refused(withX(twice).as[Text], "values and characters"),
+        refused(keptArg(twice).as[Message], "values and characters"),
+        refused(keptArg(twice).as[Displayable], "values and characters"),
+        refused(withX(twice).as[legacy.Message], "values and characters"),
+        refused(twice.as[Language], "values and characters"),
+        Capture.problem(shared(20)).isEmpty,
+        withX(shared(20)).as[Text] == Right(Text("x", Language.English)),
+      )
+    },
+    test("a subtree shared at 60 levels is refused at once") {
+      val huge = withX(shared(60))
+      TimeBudget.within("a subtree shared at 60 levels", 1000)(huge.as[Text]): result =>
+        assertTrue(refused(result, "values and characters"))
+    },
+    test("a string shared in many places counts its characters in every place") {
+      val s      = Json.Str("x" * 1000)
+      val over   = Json.Arr(Chunk.fill(5000)(s))
+      val within = Json.Arr(Chunk.fill(4000)(s))
+      assertTrue(
+        refused(withX(over).as[Text], "values and characters"),
+        withX(within).as[Text] == Right(Text("x", Language.English)),
+      )
+    },
+    test("an AST of exactly the bound's values is read, one more is refused") {
+      // The array itself is the first value.
+      val at     = Json.Arr(Chunk.fill(Capture.MaxSize - 1)(Json.Null))
+      val beyond = Json.Arr(Chunk.fill(Capture.MaxSize)(Json.Null))
+      assertTrue(
+        Capture.MaxSize == 4 * 1024 * 1024,
+        Capture.problem(at).isEmpty,
+        Capture.problem(beyond).contains(Capture.TooLarge),
       )
     },
     test("a number of a scale beyond the bound, or of a mantissa of 256 bits, is refused") {

@@ -476,7 +476,8 @@ Orders.cancelled.toJson(using TsujiZioJson.messageEncoder(withText = false))
   codecs of your types find them.
 - Decoding a `Message` or a `Displayable` needs a `Catalogues` in scope; encoding needs none.
 - A value that is already a zio-json AST (`.as[Message]`) is checked against the same bounds
-  before it is decoded.
+  before it is decoded, and refused when it stands for more than 4194304 values and characters,
+  a part placed in several places of the AST counted in each.
 - What follows the value is zio-json's to decide: `fromJson` ignores it, where the core's codecs
   under jsoniter-scala's default `ReaderConfig` refuse it.
 - A value is read whole, members it does not use included, and held at a few times its length

@@ -4,7 +4,8 @@ Package `dev.taihei.tsuji`. `CoreMessages` holds families of common messages, En
 language, Dutch and French as catalogue files in the jar
 (`META-INF/taihei-tsuji/taihei.<group>/<nl|fr>.json`), which translate every message of every
 family. On Scala.js those files reach the browser through the export. `CoreMessages.families`
-lists all of them.
+lists all of them. The French texts put a no-break space (U+00A0) before `:` and a narrow
+no-break space (U+202F) before `;`, `?` and `!`, so a test that compares French output needs them.
 
 ```scala
 given Catalogues = Catalogues(CoreMessages.families)

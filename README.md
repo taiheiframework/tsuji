@@ -562,7 +562,7 @@ and `20 okt 2026` on later JDKs.
 French as catalogue files in the jar: `General`, `Authentication`, `Authorization`, `Validation`,
 `Exceptions`, and `Languages` (what `Language.label` uses). `CoreMessages.families` lists them.
 Every message has a Dutch and a French translation; the French ones put a no-break space before
-`:` and a narrow one before `;`, as French typography wants.
+`:` and a narrow one before `;`, `?` and `!`, as French typography wants.
 
 ```scala
 given Catalogues = Catalogues(CoreMessages.families)

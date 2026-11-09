@@ -85,14 +85,21 @@ object BoundsSpec extends ZIOSpecDefault:
       )
     },
     test("a registry keeps 1024 fallback chains, and the 1025th drops them all") {
-      // A kept chain is the same object when it is asked for again; a dropped one is computed anew.
-      def firstKept(n: Int): Boolean =
+      // A kept chain is the same object when it is asked for again; a dropped one is computed
+      // anew. The first and the 1024th chain show whether all were kept or all were dropped.
+      def kept(n: Int): (Boolean, Boolean) =
         val c         = Catalogues()
         val languages = PlainLanguages(n)
-        val first     = c.fallbackChain(languages.head, English)
-        languages.tail.foreach(c.fallbackChain(_, English))
-        c.fallbackChain(languages.head, English) eq first
-      assertTrue(PlainLanguages(1025).size == 1025, firstKept(1024), !firstKept(1025))
+        val chains    = languages.map(c.fallbackChain(_, English))
+        (
+          c.fallbackChain(languages.head, English) eq chains.head,
+          c.fallbackChain(languages(1023), English) eq chains(1023),
+        )
+      assertTrue(
+        PlainLanguages(1025).size == 1025,
+        kept(1024) == (true, true),
+        kept(1025) == (false, false),
+      )
     },
   )
 

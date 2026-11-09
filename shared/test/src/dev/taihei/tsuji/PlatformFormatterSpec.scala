@@ -108,6 +108,7 @@ object PlatformFormatterSpec extends ZIOSpecDefault:
     },
     test("both platforms write the date and time they are given") {
       // 02:30 on 2026-03-29 does not exist in Central Europe: the clocks jump from 02:00 to 03:00.
+      // Under UTC that proves little; RuntimeZoneSpec runs the same value in Europe/Brussels.
       val gap = LocalDateTime.of(2026, 3, 29, 2, 30)
       assertTrue(
         PlatformDateTimeFormatter.formatDateTime(gap, Map.empty, "de") == "29.03.2026, 02:30:00",

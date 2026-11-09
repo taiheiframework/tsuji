@@ -111,20 +111,92 @@ object AstSpec extends ZIOSpecDefault:
         withX(within).as[Text] == Right(Text("x", Language.English)),
       )
     },
-    test("a Chunk concatenated with itself is counted as it is met, never by its length") {
-      // 2^28 fields, and 2^31 elements whose Chunk says its length is negative. Three walks up to
-      // the bound, so three times the budget of one.
+    test("a Chunk concatenated with itself is refused by the length it reports, never walked") {
+      // 2^28 fields, and 2^31 elements whose Chunk says its length is negative.
       val fields   = Json.Obj(doubled("a" -> Json.Null, 28))
       val elements = doubled[Json](Json.Null, 31)
       assertTrue(elements.length < 0) &&
-      TimeBudget.within("Chunks concatenated with themselves", 3000)(
-        List(
-          withX(fields).as[Text],
-          withX(Json.Arr(elements)).as[Text],
-          withX(Json.Arr(Chunk(Json.Arr(elements), shared(60)))).as[Text],
+      TimeBudget.within("2^28 fields", 2000)(withX(fields).as[Text]): result =>
+        assertTrue(refused(result, "values and characters"))
+      && TimeBudget.within("2^31 elements", 2000)(withX(Json.Arr(elements)).as[Text]): result =>
+        assertTrue(refused(result, "values and characters"))
+      // Members are pushed in order and met last first, so the negative length is met before its
+      // sibling, and must not lower the count for it.
+      && TimeBudget.within("2^31 elements before a shared sibling", 2000)(
+        withX(Json.Arr(Chunk(shared(60), Json.Arr(elements)))).as[Text]
+      ): result =>
+        assertTrue(refused(result, "values and characters"))
+    },
+    test("a slice of a Chunk concatenated with itself is read by index, in many places") {
+      // A Chunk that holds 2^30 elements in 31 nodes. A slice of it at its end is one element,
+      // whose iterator, or its copy into an array, would pass through every element before it.
+      val elements = doubled[Json](Json.Null, 30)
+      val fields   = doubled("a" -> Json.Null, 30)
+      val tail     = elements.slice(elements.length - 1, elements.length)
+      val middle   = elements.slice(elements.length / 2 - 500, elements.length / 2 + 500)
+      val last     = fields.slice(fields.length - 2, fields.length)
+      val places   = Json.Arr(Chunk.fill(100)(Json.Arr(Chunk(Json.Arr(tail), Json.Arr(middle), Json.Obj(last)))))
+      val many     = Json.Arr(Chunk.fill(5000)(Json.Arr(middle)))
+      assertTrue(tail.length == 1, middle.length == 1000, last.length == 2) &&
+      TimeBudget.within("slices in 100 places", 2000)(withX(places).as[Text]): result =>
+        assertTrue(result == Right(Text("x", Language.English)))
+      && TimeBudget.within("a slice of 1000 in 5000 places", 2000)(withX(many).as[Text]): result =>
+        assertTrue(refused(result, "values and characters"))
+    },
+    test("a Chunk updated in place at many levels is read once, at a bounded cost for each member") {
+      // Each level is a slice and 256 updates, the most zio keeps before it copies; an index
+      // passes through every level's updates. zio copies a Chunk 128 levels deep, so this is
+      // near the most an index can cost. In 200 places it is still read once: read again in
+      // every place, its 3.3 million indices would take seconds.
+      val levels = Iterator.iterate(Chunk.fill[Json](1 << 14)(Json.Null)): c =>
+        (0 until 256).foldLeft(c.slice(0, c.length))((u, i) => u.updated(i, Json.Bool(true)))
+      val deep   = levels.drop(64).next()
+      TimeBudget.within("2^14 members under 64 levels of updates, in 200 places", 2000)(
+        withX(Json.Arr(Chunk.fill(200)(Json.Arr(deep)))).as[Text]
+      ): result =>
+        assertTrue(result == Right(Text("x", Language.English)))
+    },
+    test("a Chunk whose length wrapped is read as the members it reports, by index") {
+      // 2^32 elements report a length of 0; one more reports 1, and index 0 gives the last one.
+      val zero = doubled[Json](Json.Null, 32)
+      val one  = zero ++ Chunk(Json.Null)
+      assertTrue(zero.length == 0, one.length == 1) &&
+      TimeBudget.within("Chunks whose length wrapped", 2000)(
+        (withX(Json.Arr(zero)).as[Text], withX(Json.Arr(one)).as[Text], Capture.problem(Json.Arr(one)))
+      ):
+        (
+          empty,
+          single,
+          problem,
+        ) =>
+          assertTrue(
+            empty == Right(Text("x", Language.English)),
+            single == Right(Text("x", Language.English)),
+            problem.isEmpty,
+          )
+    },
+    test("a null in place of a value, a name or a member, or a member a Chunk lacks, is refused") {
+      val nothing: Json = null
+      val nulls         = List(
+        Json.Arr(Chunk.fromArray(Array(nothing))),
+        new Json.Arr(null),
+        new Json.Obj(null),
+        Json.Obj(Chunk.fromArray(Array[(String, Json)](null))),
+        Json.Obj(Chunk.fromArray(Array[(String, Json)]((null, Json.Null)))),
+        Json.Obj(Chunk.fromArray(Array[(String, Json)](("a", nothing)))),
+        Json.Str(null),
+        Json.Num(null: java.math.BigDecimal),
+      ) ++
+        // An array Chunk that says it holds more than its array does. On the JVM the index past
+        // the array throws; Scala.js leaves it undefined, a fatal error in a test build and a
+        // null (refused above) in a release build, so it is tried on the JVM only.
+        Option.when(System.getProperty("java.vm.name") != "Scala.js")(
+          Json.Arr(Chunk.AnyRefArray(Array[Json](Json.Null), 0, 2))
         )
-      ): results =>
-        assertTrue(results.forall(refused(_, "values and characters")))
+      assertTrue(
+        nulls.forall(n => refused(withX(n).as[Text], Capture.Unreadable)),
+        nulls.forall(n => Capture.problem(n).contains(Capture.Unreadable)),
+      )
     },
     test("a string shared in many places counts its characters in every place") {
       val s      = Json.Str("x" * 1000)

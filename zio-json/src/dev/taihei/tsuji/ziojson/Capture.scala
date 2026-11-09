@@ -15,6 +15,8 @@ import zio.json.ast.Json
 // RetractReader declares itself; of Write it calls write(String).
 import zio.json.internal.{RetractReader, Write}
 
+import zio.Chunk
+
 import dev.taihei.tsuji.{Catalogue, JsonTree, JsonTreeReader}
 
 import com.github.plokhotnyuk.jsoniter_scala.core.*
@@ -47,6 +49,8 @@ private[ziojson] object Capture:
   val TooDeep: String = JsonTreeReader.TooDeep
 
   val NotUnicode = "a string that is not Unicode: an unpaired surrogate"
+
+  val Unreadable = "the JSON could not be read"
 
   val ScaleBeyond = s"a number with a scale beyond $MaxScale"
 
@@ -93,16 +97,16 @@ private[ziojson] object Capture:
         )
       catch
         case e: JsonReaderException => fail(e.getMessage, trace)
-        case _: StackOverflowError  => fail("the JSON could not be read", trace)
-        case NonFatal(_)            => fail("the JSON could not be read", trace)
+        case _: StackOverflowError  => fail(Unreadable, trace)
+        case NonFatal(_)            => fail(Unreadable, trace)
 
     override def unsafeFromJsonAST(trace: List[JsonError], json: Json): A =
-      problem(json).foreach(fail(_, trace))
+      val read   = checked(json).fold(fail(_, trace), identity)
       val result =
-        try route.fromTree(tree(json))
+        try route.fromTree(tree(json, read))
         catch
-          case _: StackOverflowError => Left("the JSON could not be read")
-          case NonFatal(_)           => Left("the JSON could not be read")
+          case _: StackOverflowError => Left(Unreadable)
+          case NonFatal(_)           => Left(Unreadable)
       result.fold(fail(_, trace), identity)
 
   end decoder
@@ -117,7 +121,7 @@ private[ziojson] object Capture:
       if !isUnicode(in) then fail(NotUnicode, trace)
       val result =
         try route.fromTree(JsonTree.Str(in))
-        catch case NonFatal(_) => Left("the JSON could not be read")
+        catch case NonFatal(_) => Left(Unreadable)
       result.fold(fail(_, trace), identity)
 
   // The core reads exactly one value, the one captured, with no hex dump of it in an error.
@@ -222,60 +226,116 @@ private[ziojson] object Capture:
    * What in a built AST the core would not read from text, found without recursion: arrays and
    * objects nested deeper than [[MaxDepth]], a number of a scale beyond [[MaxScale]] either way or
    * with a mantissa of [[MaxMantissaBits]] bits or more, or a string or a field's name with an
-   * unpaired surrogate; and an AST that stands for more than [[MaxSize]] values and characters.
+   * unpaired surrogate; an AST that stands for more than [[MaxSize]] values and characters; and a
+   * null where a value, a name or a member should be, or a collection that fails to give one.
    */
-  def problem(json: Json): Option[String] =
+  def problem(json: Json): Option[String] = checked(json).left.toOption
+
+  // A collection by its identity: a Chunk placed in several places is the same one in each.
+  final private class Same(val chunk: AnyRef):
+
+    override def equals(that: Any): Boolean = that match
+      case same: Same => same.chunk eq chunk
+      case _          => false
+
+    override def hashCode: Int = System.identityHashCode(chunk)
+
+  /** The members of every collection in an AST, as the walk read them, each collection once. */
+  final private class Read:
+    val arrays  = mutable.HashMap.empty[Same, Array[Json]]
+    val objects = mutable.HashMap.empty[Same, Array[(String, Json)]]
+
+  // What problem found, or the members it read for tree.
+  private def checked(json: Json): Either[String, Read] =
+    val read = Read()
+    try walk(json, read).toLeft(read)
+    catch case NonFatal(_) => Left(Unreadable)
+
+  private def walk(json: Json, read: Read): Option[String] =
     val pending              = mutable.Stack[(Json, Int)](json -> 0)
     var found                = Option.empty[String]
     // The values and characters met so far, the root included. A subtree the caller placed in
     // several places is met, and counted, once for every place, as the conversion to the core's
-    // tree and the core's decoders meet it. Every element is counted as it is met and a string's
-    // characters before they are checked, so the walk does at most a constant amount of work for
-    // each value and character it counts, and stops at the bound. A collection's own length is
-    // never trusted: a zio Chunk that is concatenated with itself shares structure too, and its
-    // length, an Int, wraps while its iterator still meets every element.
+    // tree and the core's decoders meet it. A collection counts its length before any member is
+    // met and a string its characters before they are checked, so the walk stops at the bound.
     var size                 = 1L
     def count(n: Long): Unit =
       size += n
       if size > MaxSize then found = Some(TooLarge)
-    // The members of an array or an object, counted and pushed one at a time until the bound.
-    def members[M](all: Iterator[M], depth: Int)(member: M => Json): Unit =
-      while found.isEmpty && all.hasNext do
-        count(1)
-        if found.isEmpty then pending.push(member(all.next()) -> (depth + 1))
+    // The members of an array or an object. A zio Chunk can share structure: concatenated with
+    // itself it holds 2^n elements in n + 1 nodes, and a slice of it, or its iterator or its copy
+    // into an array, can pass through every element it shares without yielding them. So members
+    // are read by index only, which passes through one node per level, of which zio keeps fewer
+    // than 128 before it copies: no member costs more than zio's own foreach pays for it. Each
+    // collection is read once, however many places it is in, and tree uses what was read.
+    // Its length is an Int that can wrap: a negative length is refused, and one that wrapped to
+    // a small number is read as that many members; a member that is null is refused.
+    def members[M <: AnyRef : scala.reflect.ClassTag](
+      all: Chunk[M],
+      depth: Int,
+      known: mutable.HashMap[Same, Array[M]],
+    )(
+      member: M => Json
+    ): Unit                  =
+      val length = all.length
+      if length < 0 || length > MaxSize - size then found = Some(TooLarge)
+      else
+        count(length.toLong)
+        val same   = Same(all)
+        val before = known.get(same)
+        val got    = before.getOrElse(new Array[M](length))
+        var i      = 0
+        while found.isEmpty && i < length do
+          if before.isEmpty then got(i) = all(i)
+          val m = got(i)
+          if m == null then found = Some(Unreadable)
+          else pending.push(member(m) -> (depth + 1))
+          i += 1
+        if found.isEmpty && before.isEmpty then known.update(same, got)
+    end members
     while pending.nonEmpty && found.isEmpty do
       val (value, depth) = pending.pop()
       value match
+        case null               => found = Some(Unreadable)
         case Json.Obj(fields)   =>
-          if depth >= MaxDepth then found = Some(TooDeep)
+          if fields == null then found = Some(Unreadable)
+          else if depth >= MaxDepth then found = Some(TooDeep)
           else
-            members(fields.iterator, depth): (name, v) =>
-              count(name.length.toLong)
-              if found.isEmpty && !isUnicode(name) then found = Some(NotUnicode)
+            members(fields, depth, read.objects): (name, v) =>
+              if name == null then found = Some(Unreadable)
+              else
+                count(name.length.toLong)
+                if found.isEmpty && !isUnicode(name) then found = Some(NotUnicode)
               v
         case Json.Arr(elements) =>
-          if depth >= MaxDepth then found = Some(TooDeep)
-          else members(elements.iterator, depth)(identity)
+          if elements == null then found = Some(Unreadable)
+          else if depth >= MaxDepth then found = Some(TooDeep)
+          else members(elements, depth, read.arrays)(identity)
         case Json.Num(n)        =>
           // The bound is 5.0.x's for a built AST, the same either way; from text the lowest
           // scale is a little higher, but nothing costs more for the difference.
-          if math.abs(n.scale.toLong) > MaxScale then found = Some(ScaleBeyond)
+          if n == null then found = Some(Unreadable)
+          else if math.abs(n.scale.toLong) > MaxScale then found = Some(ScaleBeyond)
           else if n.unscaledValue.bitLength >= MaxMantissaBits then found = Some(MantissaBeyond)
         case Json.Str(s)        =>
-          count(s.length.toLong)
-          if found.isEmpty && !isUnicode(s) then found = Some(NotUnicode)
+          if s == null then found = Some(Unreadable)
+          else
+            count(s.length.toLong)
+            if found.isEmpty && !isUnicode(s) then found = Some(NotUnicode)
         case _                  => ()
       end match
     end while
     found
 
-  end problem
+  end walk
 
   // The core's tree of an AST that problem found nothing wrong with, so at most MaxDepth levels
-  // deep: this recursion is bounded by it.
-  private def tree(json: Json): JsonTree = json match
-    case Json.Obj(fields)   => JsonTree.Obj(fields.toVector.map((n, v) => n -> tree(v)))
-    case Json.Arr(elements) => JsonTree.Arr(elements.toVector.map(tree))
+  // deep: this recursion is bounded by it. A collection's members are the ones problem read and
+  // counted, never read from the Chunk again.
+  private def tree(json: Json, read: Read): JsonTree = json match
+    case Json.Obj(fields)   =>
+      JsonTree.Obj(read.objects(Same(fields)).toVector.map((n, v) => n -> tree(v, read)))
+    case Json.Arr(elements) => JsonTree.Arr(read.arrays(Same(elements)).toVector.map(tree(_, read)))
     case Json.Str(s)        => JsonTree.Str(s)
     case Json.Num(n)        => JsonTree.Num(n)
     case Json.Bool(b)       => JsonTree.Bool(b)

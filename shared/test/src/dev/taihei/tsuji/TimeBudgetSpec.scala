@@ -4,6 +4,8 @@ import scala.collection.mutable.ListBuffer
 
 import zio.test.*
 
+import zio.ZIO
+
 // TimeBudget retries a slow but correct run and nothing else. A fake clock makes each attempt
 // take exactly the time the test says.
 object TimeBudgetSpec extends ZIOSpecDefault:
@@ -46,6 +48,16 @@ object TimeBudgetSpec extends ZIOSpecDefault:
       val fast = Run(40, 40, 40)
       val slow = Run(150, 40, 40)
       assertTrue(run(fast, _ => false).isFailure, fast.runs == 1, run(slow, _ => false).isFailure, slow.runs == 1)
+    },
+    test("work that ends later is judged the same way") {
+      val slow                                   = Run(150, 120, 60)
+      val wrong                                  = Run(150, 40, 40)
+      def later(r: Run, correct: Int => Boolean) =
+        TimeBudget.withinZIO("work", 100, r.nanos, r.log)(ZIO.succeed(r.work()))(n => assertTrue(correct(n)))
+      for
+        passed <- later(slow, _ => true)
+        failed <- later(wrong, _ => false)
+      yield assertTrue(passed.isSuccess, slow.runs == 3, failed.isFailure, wrong.runs == 1)
     },
     test("a wrong result on a retry fails, though the first run was correct") {
       val r = Run(150, 40, 40)

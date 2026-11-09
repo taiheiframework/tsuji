@@ -46,6 +46,19 @@ object CoreMessagesCatalogueSpec extends ZIOSpecDefault:
         Exceptions.invalidQuery.localize(French) != Exceptions.invalidCommand.localize(French),
       )
     },
+    test("every French entry has a no-break space before each colon and semicolon") {
+      // Placeholders such as {$min :date} are left out: their colon is MessageFormat syntax.
+      val texts = CoreMessages.families.flatMap(f =>
+        ClasspathCatalogues.read(f, French).toList.flatMap(_.toOption).flatMap(_.messages.values)
+      ).map(_.replaceAll("\\{[^}]*\\}", ""))
+      val loose = texts.filter(t =>
+        t.indices.exists(i =>
+          (t(i) == ':' && (i == 0 || t(i - 1) != '\u00a0')) ||
+          (t(i) == ';' && (i == 0 || t(i - 1) != '\u202f'))
+        )
+      )
+      assertTrue(texts.size > 60, loose.isEmpty)
+    },
     test("French puts a no-break space before a colon or semicolon, Dutch none") {
       given Catalogues = Catalogues(CoreMessages.families)
       assertTrue(

@@ -568,7 +568,7 @@ Every message has a Dutch and a French translation; the French ones put a no-bre
 given Catalogues = Catalogues(CoreMessages.families)
 CoreMessages.Validation.stringMinLength(min = 8).localize(Language.Dutch)  // lengte moet minimaal 8 zijn
 CoreMessages.Validation.formatErrors(Map("email" -> List(CoreMessages.Validation.stringValidEmail)))
-  .localize(Language.French)  // Échec de la validation : email (doit être une adresse e-mail valide)
+  .localize(Language.French)  // Échec de la validation\u00a0: email (doit être une adresse e-mail valide)
 ```
 
 In Scala.js the Dutch and French files reach the browser through the export, like your own.

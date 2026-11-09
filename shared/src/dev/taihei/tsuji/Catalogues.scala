@@ -157,11 +157,16 @@ final class Catalogues private (
             .map:
               case ((name, arg), value) => name -> arg.toFormat(value, language, this, budget)
             .toMap
-          // A spent budget fails every later language too: it is named once, for the first.
+          // A spent budget fails every later language too: it is named once, for the first
+          // template tried, which is tried even when the budget was spent on entry (by a 4.x
+          // nested message, which reports nothing itself).
           fallbackChain(language, d.family.sourceLanguage).iterator
-            .takeWhile(_ => !budget.spent)
             .flatMap(candidate => template(d, candidate).map(candidate -> _))
-            .flatMap((candidate, t) => formatted(d, candidate, t, values, language, budget))
+            .zipWithIndex
+            .takeWhile((_, tried) => tried == 0 || !budget.spent)
+            .flatMap { case ((candidate, t), _) =>
+              formatted(d, candidate, t, values, language, budget)
+            }
             .nextOption()
             .getOrElse(d.template)
         catch

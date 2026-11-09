@@ -101,14 +101,21 @@ object FormatProblemsSpec extends ZIOSpecDefault:
       )
     },
     test("a spent budget is named once, for the first language tried, not for each fallback") {
-      val c      = Catalogues(Seq(Orders))
-      val budget = Budget.fresh()
-      budget.charge(Budget.PerMessage.toInt - 3)
-      val shown  = c.render(Orders.cancelled, Dutch, budget)
+      val overBudget                       =
+        s"formatted text past ${Budget.PerMessage} characters for one message, nested messages included"
+      def shown(spend: Budget => Unit)     =
+        val c      = Catalogues(Seq(Orders))
+        val budget = Budget.fresh()
+        spend(budget)
+        (c.render(Orders.cancelled, Dutch, budget), c.problems)
+      val nearlySpent                      = shown(_.charge(Budget.PerMessage.toInt - 3))
+      // Spent before the message starts, as a 4.x nested message leaves it without a problem.
+      val spentOnEntry                     = shown(b => scala.util.Try(b.charge(Budget.PerMessage.toInt + 1)))
+      val expected: List[CatalogueProblem] =
+        List(CatalogueProblem(overBudget, Some(Dutch), Some(Orders.cancelled.key)))
       assertTrue(
-        shown == "Your order was cancelled",
-        c.problems.map(_.language) == List(Some(Dutch)),
-        c.problems.forall(_.message.contains("for one message")),
+        nearlySpent == ("Your order was cancelled", expected),
+        spentOnEntry == ("Your order was cancelled", expected),
       )
     },
     test("a listener that throws is named once per language, and the others still hear") {

@@ -761,7 +761,7 @@ def released(args):
         if code == 200:
             print(f"{args.version} is on {name}")
             return
-    fail([f"v{args.version} is neither on Maven Central nor on {args.url}: publish it (make release-github, make publish-repo), or set MIMA_BASELINE"])
+    fail([f"v{args.version} is neither on Maven Central nor on {args.url}: its release has not finished (make release-github, make publish-repo)"])
 
 
 def same(args):

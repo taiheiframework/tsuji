@@ -725,7 +725,17 @@ rm -f "$G/.release-notes.aborted-9.9.10.md"
 
 printf '{"currentVersion":"%s","newVersion":"9.9.10","releaseType":"patch","branch":"main","head":"%s","embargo":false}\n' "$V" "$HEAD_BEFORE" > "$G/.release-state.json"
 expect "release-finalize refuses a release state that names no ticket" 1 "names no ticket" "${M[@]}" release-finalize
-rm -f "$G/.release-state.json"
+# release-abort still recognises a notes commit the earlier machinery wrote, under a state without
+# a ticket.
+git -C "$G" commit -q --allow-empty -m "Add release notes for version 9.9.10"
+expect "release-abort undoes an earlier machinery's notes commit" 0 "Reverted local release-notes commit" "${M[@]}" release-abort
+[ "$(git -C "$G" rev-parse HEAD)" = "$HEAD_BEFORE" ] && pass "and HEAD is the prepared commit again" || fail "release-abort kept the earlier notes commit"
+printf '{"currentVersion":"%s","newVersion":"9.9.10","releaseType":"patch","branch":"main","head":"%s","embargo":false,"ticket":"TAIHEI-7"}\n' "$V" "$HEAD_BEFORE" > "$G/.release-state.json"
+echo "1.2.3" > "$G/.release-embargo"
+expect "release-finalize refuses while the earlier embargo list exists" 1 "the earlier machinery's list" "${M[@]}" release-finalize
+rm -f "$G/.release-embargo" "$G/.release-state.json"
+expect "release-prepare runs nothing a TICKET value holds" 1 "TICKET=<key>" "${M[@]}" release-prepare TYPE=patch EMBARGO=0 'TICKET=x"; touch injected; echo "'
+[ ! -e "$G/injected" ] && pass "and the value stayed data" || fail "a TICKET value ran as a command"
 
 # release-finalize runs repo-guard first, before it commits or tags anything.
 git -C "$G" tag -d "v$V" >/dev/null

@@ -21,6 +21,14 @@ object MessageSpec extends ZIOSpecDefault:
         msg(1).translate(Language("ru")) == "1 item",
       )
     },
+    test("a reader in pt-PT keeps the rules of pt-PT when the template is the pt one") {
+      val coisas      = ".match {$n :plural} when one {{$n} coisa} when * {{$n} coisas}"
+      def msg(n: Int) = Message.withNamedArgs(Language("pt") -> coisas)("n" -> n)
+      assertTrue(
+        msg(0).translate(Language("pt-PT")) == "0 coisas",
+        msg(0).translate(Language("pt-BR")) == "0 coisa",
+      )
+    },
     suite("Message creation with positional arguments")(
       test("with0Args creates message without arguments") {
         val msg = Message.with0Args(

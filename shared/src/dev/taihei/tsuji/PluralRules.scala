@@ -38,9 +38,9 @@ private[tsuji] object Operands:
   private val MaxBits = 3700
 
   /**
-   * The operands of a value given to `:plural`: an integer as it is, a `Float` or `Double` as the
-   * fewest digits that read back as the same value, without trailing fraction zeros (1.1f is 1.1,
-   * 1.0 is 1), a `BigDecimal` and a numeric text with the fraction digits they show, so `"1.0"`
+   * The operands of a value given to `:plural`: an integer as it is, a whole `Float` or `Double`
+   * as that integer (1.0 is 1, 8589934592f is 8589934592), any other as the fewest digits that
+   * read back as the same value (1.1f is 1.1), a `BigDecimal` and a numeric text with the fraction digits they show, so `"1.0"`
    * has `v = 1`. Scala.js has one type for both, so there a `Double` that is exactly a `Float`
    * with a fraction reads as that `Float`: the same for every value a program writes as a
    * decimal, and differs only for a widened `Float` such as `1.1f.toDouble`.

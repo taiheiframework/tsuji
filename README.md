@@ -631,14 +631,15 @@ MessageFormat2.format(files, Map("n" -> 1.5), "pl")  // 1.5 pliku
   English template because Russian has none, 21 is `other` and says "21 items"; the number itself
   is formatted for the reader. A template found by cutting subtags off the reader's own tag keeps
   the reader's regional rules (a `pt-PT` reader of the `pt` template has `pt-PT`'s). The 4.x
-  `legacy.Message` does the same. `MessageFormat2.format` uses its one `locale` for both.
+  `legacy.Message` does the same, also for its fallback to the reader's base language. `MessageFormat2.format` uses its one `locale` for both.
 - A language is found as the fallback chain walks a tag: `pt-PT` has rules of its own, `pt-BR`
   falls back to `pt`, `sr-Latn-RS` to `sr`. A language CLDR has no rules for takes CLDR's root,
   where every number is `other`.
 - The number is read as CLDR reads it: `1.5` is `other` in English and `one` in French, and the
   text `"1.0"` or a `BigDecimal` of `1.0` shows a fraction digit, so it is `other` in English. An
-  `Int`, a `Long`, a `Float` and a `Double` are read as the fewest digits that give their value
-  back (`1.0` as a `Double` is `1`, `1.1f` is `1.1`), the same on the JVM and Scala.js. Scala.js
+  `Int` and a `Long` are read as they are, a whole `Float` or `Double` as that integer (`1.0` is
+  `1`), and any other `Float` or `Double` as the fewest digits that give its value back (`1.1f` is
+  `1.1`), the same on the JVM and Scala.js. Scala.js
   has one number type, so there a `Double` with a fraction that is exactly a `Float` value, such
   as `1.1f.toDouble`, reads as that `Float` (`1.1`), where the JVM reads all its digits. A negative
   number takes the category of its absolute value, and a text of more than 1100 characters counts

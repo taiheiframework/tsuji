@@ -65,9 +65,13 @@ After declarations, a simple pattern ends at the line break.
 - A tag falls back by subtags (`pt-PT` has its own rules, `pt-BR` takes `pt`); a language CLDR
   does not know takes root, where every number is `other`.
 - In a message shown through the fallback chain, the rules are the template's language's (an
-  English fallback says "21 items" to a Russian reader); numbers are formatted for the reader.
-- A `Double` or `Float` is read as its shortest digits (1.0 is 1, 1.1f is 1.1, on both platforms); a text or `BigDecimal` keeps its fraction digits (`"1.0"`
-  is `other` in English); a negative number takes its absolute value's category; a text over 1100
+  English fallback says "21 items" to a Russian reader); numbers are formatted for the reader. A
+  template found by cutting subtags off the reader's tag keeps the reader's regional rules (a
+  `pt-PT` reader of the `pt` template has `pt-PT`'s).
+- A whole `Double` or `Float` is read as its integer (1.0 is 1), any other as its shortest digits
+  (1.1f is 1.1), on both platforms; on Scala.js a `Double` with a fraction that is exactly a
+  `Float` value (a widened `Float`) reads as that `Float`. A text or `BigDecimal` keeps its
+  fraction digits (`"1.0"` is `other` in English); a negative number takes its absolute value's category; a text over 1100
   characters is no number (only `other` and `*` match).
 - A `.match` on a `Language` compares its tag (`when nl {...}`).
 - Functions inside variant patterns format (`when * {{$n} on {$d :date}}`).

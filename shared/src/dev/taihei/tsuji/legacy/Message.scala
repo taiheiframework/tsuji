@@ -43,11 +43,19 @@ case class Message(
       case (k, v) => k -> (v: Any)
 
   // Exact, then the base language (a Belgian Dutch reader gets the Dutch text when no nl-BE one
-  // was written), then English; with the language the template is written in, whose plural rules
-  // choose its variant (an English fallback says "21 items" to a Russian reader).
+  // was written), then English; with the language whose plural rules choose the variant. That is
+  // the template's (an English fallback says "21 items" to a Russian reader), or the reader's own
+  // when the template is in the reader's base language: a pt-PT reader of the pt text keeps
+  // pt-PT's rules, as the registry does.
   private def template(language: Language): (Option[Language], String) =
-    List(language, language.base, Language.defaultLanguage)
-      .collectFirst(Function.unlift(l => translationTemplates.get(l).map(t => Some(l) -> t)))
+    List(
+      language -> language,
+      language.base -> language,
+      Language.defaultLanguage -> Language.defaultLanguage,
+    )
+      .collectFirst(Function.unlift((l, rules) =>
+        translationTemplates.get(l).map(t => Some(rules) -> t)
+      ))
       .getOrElse(None -> "!!unknown message!!")
 
   def translate(language: Language): String = translateWithin(language, Budget.fresh())

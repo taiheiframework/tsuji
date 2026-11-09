@@ -71,10 +71,9 @@ CatalogueLoader.load(catalogues, Language("de"), "/i18n/de.json"): Future[List[C
 
 Takes a `given ExecutionContext`, uses the global `fetch`, never fails the `Future`. Needs a
 `TextDecoder` that honours `fatal` and `ignoreBOM` (every current browser and Node); with one that
-ignores them every load is a problem. Until a
-language is loaded, messages show through the chain; `onAdded` tells when to re-render. No
-dependency on Laminar or an effect library. Inline translations are in the bundle: a browser
-application with many languages uses files.
+ignores them every load is a problem. Until a language is loaded, messages show through the
+chain; `onAdded` tells when to re-render. No dependency on Laminar or an effect library. Inline
+translations are in the bundle: a browser application with many languages uses files.
 
 ## verify, for tests
 

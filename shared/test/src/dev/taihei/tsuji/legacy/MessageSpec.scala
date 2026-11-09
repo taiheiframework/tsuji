@@ -12,6 +12,15 @@ import dev.taihei.tsuji.TestJson.*
 object MessageSpec extends ZIOSpecDefault:
 
   def spec = suite("MessageSpec")(
+    test("a fallback template chooses its plural variant by its own language, not the reader's") {
+      val items       = ".match {$n :plural} when one {{$n} item} when * {{$n} items}"
+      def msg(n: Int) = Message.withNamedArgs(Language.English -> items)("n" -> n)
+      assertTrue(
+        msg(21).translate(Language("ru")) == "21 items",
+        msg(0).translate(Language("hi")) == "0 items",
+        msg(1).translate(Language("ru")) == "1 item",
+      )
+    },
     suite("Message creation with positional arguments")(
       test("with0Args creates message without arguments") {
         val msg = Message.with0Args(

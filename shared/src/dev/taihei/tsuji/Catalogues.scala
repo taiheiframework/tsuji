@@ -184,11 +184,23 @@ final class Catalogues private (
     language: Language,
     budget: Budget,
   ): Option[String] =
-    MessageFormat2.formatted(t, values, language.tag, budget, Some(candidate.tag)) match
+    MessageFormat2.formatted(
+      t,
+      values,
+      language.tag,
+      budget,
+      Some(pluralTag(language, candidate)),
+    ) match
       case Right(text) => Some(text)
       case Left(cause) =>
         report(List(CatalogueProblem(cause, Some(candidate), Some(d.key))))
         None
+
+  // The template's language chooses the plural variant, as the grammar of its text. A template
+  // found by cutting subtags off the reader's own tag is in the reader's language, whose regional
+  // rules then hold: a pt-PT reader of the pt template keeps pt-PT's rules, where 0 is `other`.
+  private def pluralTag(reader: Language, candidate: Language): String =
+    if truncations(reader).contains(candidate) then reader.tag else candidate.tag
 
   private def template(d: MessageDefinition[?], candidate: Language)
     : Option[MessageFormat2.Message] =

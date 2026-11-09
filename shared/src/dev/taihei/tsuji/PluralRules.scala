@@ -42,7 +42,8 @@ private[tsuji] object Operands:
    * fewest digits that read back as the same value, without trailing fraction zeros (1.1f is 1.1,
    * 1.0 is 1), a `BigDecimal` and a numeric text with the fraction digits they show, so `"1.0"`
    * has `v = 1`. Scala.js has one type for both, so there a `Double` that is exactly a `Float`
-   * reads as that `Float`: the same for every value a program writes as a decimal.
+   * with a fraction reads as that `Float`: the same for every value a program writes as a
+   * decimal, and differs only for a widened `Float` such as `1.1f.toDouble`.
    * None when the value is no finite number within [[MaxNumberText]] digits.
    */
   def of(value: Any): Option[Operands] = value match
@@ -70,10 +71,15 @@ private[tsuji] object Operands:
       .when(!d.isNaN && !d.isInfinite)(d)
       .flatMap(d => ofDecimal(shortest(d, 17, _.toDouble == d)))
 
+  // A whole Float is read as the Double it is: Scala.js has one number type, so a whole Double
+  // such as 8589934592.0 arrives here too, and must stay that integer, not 8589935000.
   private def ofFloat(f: Float): Option[Operands] =
     Option
       .when(!f.isNaN && !f.isInfinite)(f)
-      .flatMap(f => ofDecimal(shortest(f.toDouble, 9, _.toDouble.toFloat == f)))
+      .flatMap(f =>
+        if f.isWhole then ofDouble(f.toDouble)
+        else ofDecimal(shortest(f.toDouble, 9, _.toDouble.toFloat == f))
+      )
 
   // The fewest significant digits that read back as the value, found by the same arithmetic on
   // both platforms: Double.toString differs between them (Scala.js prints 1.0 as 1, and Java 17

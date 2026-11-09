@@ -177,7 +177,7 @@ object PluralRulesSpec extends ZIOSpecDefault:
       test("a Float and a Double are read as their shortest digits, the same on both platforms") {
         def digits(v: Any) = Operands.of(v).map(o => (o.i, o.v, o.f))
         assertTrue(
-          cat(1.1f, "hr") == "one", // f % 10 = 1
+          cat(1.1f, "hr") == "one",                                           // f % 10 = 1
           cat(2.3f, "hr") == "few",
           cat(0.1f, "lv") == "one",
           digits(1.1f).contains((BigInt(1), 1, BigInt(1))),
@@ -186,6 +186,9 @@ object PluralRulesSpec extends ZIOSpecDefault:
           digits(1.0e23).contains((BigInt("100000000000000000000000"), 0, BigInt(0))),
           digits(0.1 + 0.2).contains((BigInt(0), 17, BigInt("30000000000000004"))),
           digits(-0.0).contains((BigInt(0), 0, BigInt(0))),
+          digits(8589934592.0).contains((BigInt(8589934592L), 0, BigInt(0))), // a Float value too, on Scala.js
+          digits(8589934592.0f).contains((BigInt(8589934592L), 0, BigInt(0))),
+          cat(8589934592.0, "ru") == "few",
           digits(Float.NaN).isEmpty,
         )
       },
@@ -214,7 +217,7 @@ object PluralRulesSpec extends ZIOSpecDefault:
       },
     ),
     suite("a message shown through the fallback chain")(
-      test("takes the plural rules of the template's language, and formats for the reader") {
+      test("takes the plural rules of the template's language, or the reader's own regional ones") {
         object Items extends MessageFamily("items"):
           val count = message[(n: Int)](
             ".match {$n :plural} when one {{$n} item} when * {{$n} items}",
@@ -229,7 +232,20 @@ object PluralRulesSpec extends ZIOSpecDefault:
           Items.count(3).localize(Language("pl-PL")) == "3 rzeczy",
           Items.count(1).localize(Language("pl")) == "1 rzecz",
         )
-      }
+      },
+      test("a reader in pt-PT keeps the rules of pt-PT when the template is the pt one") {
+        object Coisas extends MessageFamily("coisas"):
+          val count = message[(n: Int)](
+            ".match {$n :plural} when one {{$n} item} when * {{$n} items}",
+            Language("pt") -> ".match {$n :plural} when one {{$n} coisa} when * {{$n} coisas}",
+          )
+        given Catalogues = Catalogues()
+        assertTrue(
+          Coisas.count(0).localize(Language("pt-PT")) == "0 coisas",
+          Coisas.count(0).localize(Language("pt-BR")) == "0 coisa",
+          Coisas.count(0).localize(Language("pt")) == "0 coisa",
+        )
+      },
     ),
     suite("languages fall back as Tsuji's do")(
       test("a region or script falls back to its language, and pt-PT has its own rules") {

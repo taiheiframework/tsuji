@@ -42,29 +42,28 @@ case class Message(
     mf2Args.map:
       case (k, v) => k -> (v: Any)
 
-  private def message(template: String, language: Language): String =
-    MessageFormat2.format(template, formatArgs, language.isoCode)
-
   // Exact, then the base language (a Belgian Dutch reader gets the Dutch text when no nl-BE one
-  // was written), then English.
-  private def template(language: Language): String = translationTemplates
-    .get(language)
-    .orElse(translationTemplates.get(language.base))
-    .orElse(translationTemplates.get(Language.defaultLanguage))
-    .getOrElse("!!unknown message!!")
+  // was written), then English; with the language the template is written in, whose plural rules
+  // choose its variant (an English fallback says "21 items" to a Russian reader).
+  private def template(language: Language): (Option[Language], String) =
+    List(language, language.base, Language.defaultLanguage)
+      .collectFirst(Function.unlift(l => translationTemplates.get(l).map(t => Some(l) -> t)))
+      .getOrElse(None -> "!!unknown message!!")
 
-  def translate(language: Language): String =
-    message(template(language), language)
+  def translate(language: Language): String = translateWithin(language, Budget.fresh())
 
   // As translate, within the budget of the 5.x message this one is an argument of.
   private[tsuji] def translateWithin(language: Language, budget: Budget): String =
-    val t = template(language)
-    MessageFormat2.tryFormat(
-      MessageFormat2.parse(t).message,
-      formatArgs,
-      language.isoCode,
-      budget,
-    ).getOrElse(t)
+    val (written, t) = template(language)
+    MessageFormat2
+      .formatted(
+        MessageFormat2.parse(t).message,
+        formatArgs,
+        language.isoCode,
+        budget,
+        written.map(_.tag),
+      )
+      .getOrElse(t)
 
   def render(language: Language): String = translate(language)
 

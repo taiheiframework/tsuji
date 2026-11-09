@@ -782,7 +782,8 @@ object MessageFormat2:
 
   // Variants are tried in the order the template gives them, as before CLDR's rules: an exact
   // key matches the number it names, a category key the category CLDR gives the number in the
-  // reader's language, and `other` and `*` any value, as the catch-all of ICU MessageFormat.
+  // template's language (Context.pluralLocale, else the locale), and `other` and `*` any value, as
+  // the catch-all of ICU MessageFormat.
   private def matchesPluralKey(choice: PluralChoice, key: String): Boolean =
     key match
       case "other" | "*" => true

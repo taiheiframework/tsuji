@@ -254,7 +254,11 @@ reader sends: `Language.fromAcceptLanguage` reads the header, most preferred fir
 val supported = Seq(Language.Dutch, Language.French, Language.English)
 
 def readerLanguage(acceptLanguage: String): Language =
-  Language.negotiate(Language.fromAcceptLanguage(acceptLanguage), supported, Language.English)
+  Language.negotiate(
+    requested = Language.fromAcceptLanguage(acceptLanguage),
+    supported = supported,
+    default = Language.English,
+  )
 
 readerLanguage("nl-BE,nl;q=0.9,en;q=0.8") // Dutch
 readerLanguage("fr-CA, *;q=0.1")          // French
@@ -262,7 +266,7 @@ readerLanguage("de, it;q=0.5")            // English
 ```
 
 `fromAcceptLanguage` orders the entries by weight, leaves out those with `q=0` and those weighted
-below a `*` (which stands for your default), and skips an entry it cannot read; it never throws
+below a `*` (which stands for any language no other entry names, so for your default), and skips an entry it cannot read; it never throws
 and reads at most 4096 characters and 32 entries of the header. `negotiate` walks each requested
 language down as a registry does to find a message, from `zh-Hant-TW` to `zh-Hant` to `zh`, so
 `nl-BE` chooses a supported `nl`. It never goes the other way: a request for `en` does not choose

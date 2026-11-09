@@ -43,6 +43,9 @@ object AcceptLanguageSpec extends ZIOSpecDefault:
           read("*") == Vector.empty,
           read("nl, *;q=0.5, fr;q=0.3") == Vector("nl"),
           read("*;q=0, fr") == Vector("fr"),
+          read("*, nl") == Vector("nl"),
+          read("nl, *, fr") == Vector("nl", "fr"),
+          read("*;q=0.5, nl;q=0.5, fr;q=0.4") == Vector("nl"),
         )
       },
       test("malformed entries are skipped and the rest are read") {
@@ -75,6 +78,7 @@ object AcceptLanguageSpec extends ZIOSpecDefault:
           read("nl," + padding + ",fr") == Vector("nl"),
           read(padding + "x,nl") == Vector.empty,
           read("nl," + "a" * 4090 + ",fr") == Vector("nl", "fr"),
+          read("nl," + "a" * 4090 + ",fr,de") == Vector("nl", "fr"),
         )
       },
       test("only the first 32 entries are read") {
@@ -115,6 +119,8 @@ object AcceptLanguageSpec extends ZIOSpecDefault:
           pick("zh-Hant-HK-u-nu-hanidec") == Language("zh-Hant"),
           pick("pt-BR-x-custom") == Language("pt-BR"),
           pick("en-US-u-ca-buddhist") == English,
+          // q=0 only drops `nl` from the requested list; `nl-BE` still walks down to it.
+          pick("nl-BE, nl;q=0") == Dutch,
         )
       },
       test("a broader request does not choose a narrower supported language") {

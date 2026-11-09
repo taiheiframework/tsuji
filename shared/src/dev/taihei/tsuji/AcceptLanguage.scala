@@ -21,9 +21,11 @@ private[tsuji] object AcceptLanguage:
     entries(Option(header).getOrElse(""))
       .flatMap(entry)
       .filter((_, weight) => weight > 0)
-      .sortBy((_, weight) => -weight) // stable: equal weights keep the header's order
+      // Stable, so equal weights keep the header's order, except that a `*` stands only for the
+      // languages no other entry names (RFC 9110): it goes after the entries of its own weight.
+      .sortBy((range, weight) => (-weight, range.isEmpty))
       .map((range, _) => range)
-      .takeWhile(_.isDefined)         // a `*` stands for the default, so it ends the list
+      .takeWhile(_.isDefined) // a `*` stands for the default, so it ends the list
       .flatten
       .distinct
 
@@ -36,7 +38,9 @@ private[tsuji] object AcceptLanguage:
     cut.split(',').iterator.map(_.trim).filter(_.nonEmpty).take(MaxEntries).toVector
 
   // One entry, `range` or `range;q=weight`, as the language (None for `*`) and its weight in
-  // thousandths. Anything else, a malformed tag or weight or another parameter, is skipped.
+  // thousandths. Anything else, a malformed tag or weight or another parameter, is skipped. It
+  // is more lenient than RFC 9110 where that costs nothing: `en_US` reads as `en-US`, as
+  // Language.parse reads it, and spaces around the `=` of the weight are allowed.
   private def entry(s: String): Option[(Option[Language], Int)] =
     val parts = s.split(";", -1).toVector.map(_.trim)
     for

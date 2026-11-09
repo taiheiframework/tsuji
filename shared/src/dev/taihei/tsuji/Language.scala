@@ -248,8 +248,9 @@ object Language extends LanguagePlatform:
   /**
    * The languages of an HTTP `Accept-Language` value, most preferred first, for
    * [[negotiate]]. Entries are ordered by their weight (`q`), equal weights in the header's order;
-   * an entry with `q=0` is left out. A `*` stands for the application's default, so the entries
-   * weighted below it are left out too. An entry that is not a well-formed tag or weight, a tag
+   * an entry with `q=0` is left out. A `*` stands for any language no other entry names, so for
+   * the application's default: it comes after the entries of its own weight, and the entries
+   * weighted below it are left out. An entry that is not a well-formed tag or weight, a tag
    * that names no language (`und`) and a repeat are skipped; `null` reads as no header.
    *
    * The value comes from a request, so it is bounded: past 4096 characters it is cut at the last
@@ -257,7 +258,7 @@ object Language extends LanguagePlatform:
    *
    * {{{
    * Language.fromAcceptLanguage("fr-CH, fr;q=0.9, en;q=0.8, *;q=0.5")
-   * // Vector(fr-CH, fr, English)
+   * // Vector(fr-CH, French, English)
    * }}}
    */
   def fromAcceptLanguage(header: String): Vector[Language] = AcceptLanguage.parse(header)
@@ -270,12 +271,14 @@ object Language extends LanguagePlatform:
    * The first step that is supported wins, before any less preferred language is tried. A
    * supported language is never matched by a broader request: `en` does not choose `en-GB`, so
    * list the plain languages you support too. The fallbacks configured on a `Catalogues` are not
-   * consulted; `default` is what a reader gets when nothing they asked for is supported.
+   * consulted; `default` is what a reader gets when nothing they asked for is supported. A `q=0`
+   * entry only drops out of `requested`: `nl-BE, nl;q=0` still chooses a supported `nl` by
+   * walking `nl-BE` down. The two lists have the same type, so name them where it reads better.
    *
    * {{{
    * val supported = Seq(Language("nl"), Language("fr"), Language.English)
    * val requested = Language.fromAcceptLanguage(request.header("Accept-Language"))
-   * Language.negotiate(requested, supported, Language.English)
+   * Language.negotiate(requested = requested, supported = supported, default = Language.English)
    * // "nl-BE, fr;q=0.8" gives Dutch; "de, *;q=0.1" gives English
    * }}}
    */

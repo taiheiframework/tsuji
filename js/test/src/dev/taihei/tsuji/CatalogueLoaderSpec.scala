@@ -32,12 +32,18 @@ object CatalogueLoaderSpec extends ZIOSpecDefault:
 
   private val Limit = Catalogue.MaxLength.toLong * 4
 
-  // Runs `use` with the global fetch replaced by `stub` (js.undefined removes it), and puts the
-  // original back however `use` ends.
-  private def withFetch[R, E, A](stub: js.Any)(use: ZIO[R, E, A]) =
-    val original = js.Dynamic.global.fetch
-    ZIO.succeed(js.Dynamic.global.updateDynamic("fetch")(stub)) *>
-    use.ensuring(ZIO.succeed(js.Dynamic.global.updateDynamic("fetch")(original)))
+  // Runs `use` with the global `name` replaced by `stub` (js.undefined removes it), and puts the
+  // original back however `use` ends, interrupted too.
+  private def withGlobal[R, E, A](name: String, stub: js.Any)(use: ZIO[R, E, A]) =
+    val global = js.Dynamic.global.globalThis
+    ZIO.acquireReleaseWith(
+      ZIO.succeed:
+        val original = global.selectDynamic(name)
+        global.updateDynamic(name)(stub)
+        original
+    )(original => ZIO.succeed(global.updateDynamic(name)(original)))(_ => use)
+
+  private def withFetch[R, E, A](stub: js.Any)(use: ZIO[R, E, A]) = withGlobal("fetch", stub)(use)
 
   private def answering(response: => js.Any): js.Function1[String, js.Promise[js.Any]] =
     _ => js.Promise.resolve[js.Any](response)
@@ -61,6 +67,11 @@ object CatalogueLoaderSpec extends ZIOSpecDefault:
         cancel = (_: js.Any) => cancelled = true,
       )
     )
+
+  // A TextDecoder as an old polyfill may be: it takes the options and ignores `fatal`.
+  private class LenientDecoder(label: String, options: js.Any) extends js.Object:
+    val fatal                                          = false
+    def decode(bytes: js.Any, options: js.Any): String = ""
 
   private def response(
     body: Body,
@@ -113,16 +124,10 @@ object CatalogueLoaderSpec extends ZIOSpecDefault:
       )
     },
     test("a body larger than the limit is dropped while it is read, also without a declared length") {
-      import scala.scalajs.js
-      val c        = Catalogues(Seq(Orders))
-      val original = js.Dynamic.global.fetch
-      val big      = "x" * (Catalogue.MaxLength * 4 + 10)
-      js.Dynamic.global.updateDynamic("fetch")((_: String) =>
-        js.Promise.resolve[js.Dynamic](js.Dynamic.newInstance(js.Dynamic.global.Response)(big))
-      )
-      load(c, German, "https://example.invalid/de.json")
+      val c   = Catalogues(Seq(Orders))
+      val big = "x" * (Catalogue.MaxLength * 4 + 10)
+      withFetch(answering(js.Dynamic.newInstance(js.Dynamic.global.Response)(big)))(load(c, German, Url))
         .map(problems => assertTrue(problems.exists(_.message.contains("larger than"))))
-        .ensuring(zio.ZIO.succeed(js.Dynamic.global.updateDynamic("fetch")(original)))
     },
     test("a file in another language, a file that is no catalogue, and a failed fetch are problems") {
       val c = Catalogues(Seq(Orders))
@@ -196,6 +201,20 @@ object CatalogueLoaderSpec extends ZIOSpecDefault:
         .map(problems =>
           assertTrue(problems.map(_.message) == List(s"cannot fetch $Url: not UTF-8"), c.languages.isEmpty)
         )
+    },
+    test("a decoder that ignores the fatal option is refused before the body is read") {
+      val c    = Catalogues(Seq(Orders))
+      val body = Body(utf8(GermanFile))
+      withGlobal("TextDecoder", js.constructorOf[LenientDecoder])(
+        withFetch(answering(response(body)))(load(c, German, Url))
+      ).map(problems =>
+        assertTrue(
+          problems.map(_.message) == List(s"cannot fetch $Url: there is no strict UTF-8 decoder here"),
+          // No reader was taken; the stream's own first pull fills its queue regardless.
+          !body.stream.locked.asInstanceOf[Boolean],
+          c.languages.isEmpty,
+        )
+      )
     },
     test("a character split over two chunks is decoded") {
       given c: Catalogues = Catalogues(Seq(Orders))

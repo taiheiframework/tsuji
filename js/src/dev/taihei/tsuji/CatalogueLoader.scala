@@ -92,9 +92,14 @@ object CatalogueLoader:
 
   private def tooLarge = new IllegalStateException(s"larger than $MaxBytes bytes")
 
-  // A decoder that refuses malformed UTF-8, as the JVM's reader does, instead of replacing it.
+  // A decoder that refuses malformed UTF-8, as the JVM's reader does, instead of replacing it. A
+  // decoder that ignores the option (an old polyfill) would replace it silently, so it is refused.
   private def strictDecoder(): js.Dynamic =
-    js.Dynamic.newInstance(js.Dynamic.global.TextDecoder)("utf-8", js.Dynamic.literal(fatal = true))
+    Some(
+      js.Dynamic.newInstance(js.Dynamic.global.TextDecoder)("utf-8", js.Dynamic.literal(fatal = true))
+    )
+      .filter(_.fatal.asInstanceOf[Any] == true)
+      .getOrElse(throw new IllegalStateException("there is no strict UTF-8 decoder here"))
 
   // With `stream`, a character split over two chunks waits for the next one; without it, a
   // character the bytes leave unfinished is malformed too.

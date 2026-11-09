@@ -60,7 +60,8 @@ private[ziojson] object Capture:
   val MaxSize: Int = Catalogue.MaxLength
 
   val TooLarge =
-    s"a built value of more than $MaxSize values and characters, counting each place a shared part appears in"
+    s"a built value of more than $MaxSize values and characters, " +
+    "counting each place a shared part appears in"
 
   /** How the core reads and writes one of its types: its codec, and its decoder of a tree. */
   final case class Route[A](codec: JsonValueCodec[A], fromTree: JsonTree => Either[String, A])
@@ -228,29 +229,33 @@ private[ziojson] object Capture:
     var found                = Option.empty[String]
     // The values and characters met so far, the root included. A subtree the caller placed in
     // several places is met, and counted, once for every place, as the conversion to the core's
-    // tree and the core's decoders meet it. Each node's children are counted before they are
-    // pushed and a string's characters before they are checked, so the walk stops within one
-    // node's work of the bound.
+    // tree and the core's decoders meet it. Every element is counted as it is met and a string's
+    // characters before they are checked, so the walk does at most a constant amount of work for
+    // each value and character it counts, and stops at the bound. A collection's own length is
+    // never trusted: a zio Chunk that is concatenated with itself shares structure too, and its
+    // length, an Int, wraps while its iterator still meets every element.
     var size                 = 1L
     def count(n: Long): Unit =
       size += n
       if size > MaxSize then found = Some(TooLarge)
+    // The members of an array or an object, counted and pushed one at a time until the bound.
+    def members[M](all: Iterator[M], depth: Int)(member: M => Json): Unit =
+      while found.isEmpty && all.hasNext do
+        count(1)
+        if found.isEmpty then pending.push(member(all.next()) -> (depth + 1))
     while pending.nonEmpty && found.isEmpty do
       val (value, depth) = pending.pop()
       value match
         case Json.Obj(fields)   =>
           if depth >= MaxDepth then found = Some(TooDeep)
           else
-            count(fields.foldLeft(fields.length.toLong)((n, field) => n + field._1.length))
-            if found.isEmpty then
-              fields.foreach: (name, v) =>
-                if !isUnicode(name) then found = Some(NotUnicode)
-                pending.push(v -> (depth + 1))
+            members(fields.iterator, depth): (name, v) =>
+              count(name.length.toLong)
+              if found.isEmpty && !isUnicode(name) then found = Some(NotUnicode)
+              v
         case Json.Arr(elements) =>
           if depth >= MaxDepth then found = Some(TooDeep)
-          else
-            count(elements.length.toLong)
-            if found.isEmpty then elements.foreach(v => pending.push(v -> (depth + 1)))
+          else members(elements.iterator, depth)(identity)
         case Json.Num(n)        =>
           // The bound is 5.0.x's for a built AST, the same either way; from text the lowest
           // scale is a little higher, but nothing costs more for the difference.

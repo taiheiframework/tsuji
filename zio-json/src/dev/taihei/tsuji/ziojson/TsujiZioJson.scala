@@ -29,9 +29,10 @@ import com.github.plokhotnyuk.jsoniter_scala.core.JsonValueCodec
  * the input, and what follows it is the caller's: zio-json's `fromJson` ignores it. A value that
  * is already a zio-json AST (`.as[Message]`) is checked against the same bounds before it is
  * decoded, and refused when it stands for more than 4194304 values and characters, a part placed
- * in several places of the AST counted in each. Read from bytes, malformed UTF-8 reaches Tsuji as U+FFFD, the replacement character:
- * zio-json's reader of bytes replaces it before any decoder sees the text, where the core's codecs
- * refuse it. Values are always written compactly, whatever indentation the caller asks for.
+ * in several places of the AST counted in each. Read from bytes, malformed UTF-8 reaches Tsuji as
+ * U+FFFD, the replacement character: zio-json's reader of bytes replaces it before any decoder
+ * sees the text, where the core's codecs refuse it. Values are always written compactly, whatever
+ * indentation the caller asks for.
  *
  * A value of Tsuji's types is read whole, members it does not use included, and held at a few
  * times its length while it is decoded; no string in it has a length bound of its own. Bound the

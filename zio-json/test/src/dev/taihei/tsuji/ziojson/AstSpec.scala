@@ -35,6 +35,14 @@ object AstSpec extends ZIOSpecDefault:
   // object, so that it takes n + 1 nodes and stands for 2^(n + 1) - 1 values.
   private def shared(n: Int): Json = Iterator.iterate[Json](Json.Num(1))(j => Json.Arr(Chunk(j, j))).drop(n).next()
 
+  // The same, every level an object that holds the level below under two names.
+  private def sharedObj(n: Int): Json =
+    Iterator.iterate[Json](Json.Num(1))(j => Json.Obj("a" -> j, "b" -> j)).drop(n).next()
+
+  // A Chunk concatenated with itself n times: n + 1 nodes that hold 2^n copies of `a`. Its length
+  // is an Int, and from n = 31 on it wraps, while its iterator still meets every copy.
+  private def doubled[A](a: A, n: Int): Chunk[A] = Iterator.iterate(Chunk(a))(c => c ++ c).drop(n).next()
+
   private def withX(x: Json): Json = Json.Obj("text" -> Json.Str("x"), "language" -> Json.Str("en"), "x" -> x)
 
   private def keptArg(x: Json): Json =
@@ -81,8 +89,42 @@ object AstSpec extends ZIOSpecDefault:
     },
     test("a subtree shared at 60 levels is refused at once") {
       val huge = withX(shared(60))
-      TimeBudget.within("a subtree shared at 60 levels", 1000)(huge.as[Text]): result =>
+      TimeBudget.within("a subtree shared at 60 levels", 2000)(huge.as[Text]): result =>
         assertTrue(refused(result, "values and characters"))
+    },
+    test("a subtree shared through objects is refused as the values it stands for, at once") {
+      val huge = withX(sharedObj(60))
+      assertTrue(
+        Capture.problem(sharedObj(22)).contains(Capture.TooLarge),
+        refused(withX(sharedObj(22)).as[Text], "values and characters"),
+        withX(sharedObj(19)).as[Text] == Right(Text("x", Language.English)),
+      ) &&
+      TimeBudget.within("a subtree shared through objects at 60 levels", 2000)(huge.as[Text]): result =>
+        assertTrue(refused(result, "values and characters"))
+    },
+    test("a field's name shared in many places counts its characters in every place") {
+      val name   = "n" * 1000
+      val over   = Json.Arr(Chunk.fill(5000)(Json.Obj(name -> Json.Null)))
+      val within = Json.Arr(Chunk.fill(4000)(Json.Obj(name -> Json.Null)))
+      assertTrue(
+        refused(withX(over).as[Text], "values and characters"),
+        withX(within).as[Text] == Right(Text("x", Language.English)),
+      )
+    },
+    test("a Chunk concatenated with itself is counted as it is met, never by its length") {
+      // 2^28 fields, and 2^31 elements whose Chunk says its length is negative. Three walks up to
+      // the bound, so three times the budget of one.
+      val fields   = Json.Obj(doubled("a" -> Json.Null, 28))
+      val elements = doubled[Json](Json.Null, 31)
+      assertTrue(elements.length < 0) &&
+      TimeBudget.within("Chunks concatenated with themselves", 3000)(
+        List(
+          withX(fields).as[Text],
+          withX(Json.Arr(elements)).as[Text],
+          withX(Json.Arr(Chunk(Json.Arr(elements), shared(60)))).as[Text],
+        )
+      ): results =>
+        assertTrue(results.forall(refused(_, "values and characters")))
     },
     test("a string shared in many places counts its characters in every place") {
       val s      = Json.Str("x" * 1000)

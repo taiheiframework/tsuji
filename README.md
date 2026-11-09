@@ -302,8 +302,9 @@ To show a message in language L, a `Catalogues` registry uses the first of these
 
 Numbers, dates and plurals are formatted for L, also when the template comes from a fallback. A
 catalogue template wins over an inline one; in the source language the template in the code wins.
-A template that fails its checks is skipped and named in `catalogues.problems`. Showing a message
-never throws.
+A template that fails its checks, or cannot be formatted (its text would pass a million
+characters, or formatting threw), is skipped and named in `catalogues.problems` with its language
+and the kind of cause. Showing a message never throws.
 
 ### On the JVM
 

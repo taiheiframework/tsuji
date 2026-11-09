@@ -41,8 +41,10 @@ Orders.cancelled.localize(Language("lb-LU"))
 - `add(catalogue): List[CatalogueProblem]`: later adds win. Templates of known families are checked
   now, others when their message is first shown; one that fails is dropped and falls back.
 - `register(families*)`: needed for decoding JSON; showing a message registers its family.
-- `languages`, `problems` (the first 1000), `onAdded(listener): () => Unit` (returns the
-  unsubscribe; a throwing listener is ignored).
+- `languages`, `problems` (the first 1000, each once: failed checks, a template that could not be
+  formatted with its language and the kind of cause, a throwing listener),
+  `onAdded(listener): () => Unit` (returns the unsubscribe; a throwing listener does not stop the
+  others and is named in `problems`).
 - Thread-safe. Showing a message never throws.
 
 ## JVM: the classpath

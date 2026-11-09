@@ -21,8 +21,8 @@ import scala.util.control.NonFatal
  *  1. the family's source language, which always has it.
  *
  * Numbers, dates and plurals are always formatted for L, also when the template comes from a
- * fallback. A template that does not pass the checks is skipped, with a problem in [[problems]].
- * Showing a message never throws.
+ * fallback. A template that does not pass the checks, or cannot be formatted, is skipped, with a
+ * problem in [[problems]]. Showing a message never throws.
  *
  * In each language a template from a catalogue file wins over an inline translation; in the
  * family's source language the template in the code wins.
@@ -84,7 +84,12 @@ final class Catalogues private (
     () =>
       listeners.updateAndGet(_.filterNot(_._1 == id)); ()
 
-  /** What was wrong with the catalogues and translations so far, the first 1000. */
+  /**
+   * What was wrong with the catalogues and translations so far, the first 1000, each once: a
+   * template that failed its checks; a template that could not be formatted, with the language it
+   * came from and the kind of cause (the text it made was too long, or formatting threw); and an
+   * [[onAdded]] listener that threw.
+   */
   def problems: List[CatalogueProblem] = state.get.problems.toList
 
   /** The languages tried, in order, to show a message of a family in `source` to a reader of `language`. */
@@ -153,11 +158,30 @@ final class Catalogues private (
               case ((name, arg), value) => name -> arg.toFormat(value, language, this, budget)
             .toMap
           fallbackChain(language, d.family.sourceLanguage).iterator
-            .flatMap(candidate => template(d, candidate))
-            .flatMap(t => MessageFormat2.tryFormat(t, values, language.tag, budget))
+            .flatMap(candidate => template(d, candidate).map(candidate -> _))
+            .flatMap((candidate, t) => formatted(d, candidate, t, values, language, budget))
             .nextOption()
             .getOrElse(d.template)
-        catch case NonFatal(_) => d.template
+        catch
+          case NonFatal(e) =>
+            report(List(CatalogueProblem(MessageFormat2.failure(e), Some(language), Some(d.key))))
+            d.template
+
+  // A valid template that cannot be formatted falls back to the next language, as a missing one
+  // does; the problem tells the two apart, and says whether a limit or a bug was the cause.
+  private def formatted(
+    d: MessageDefinition[?],
+    candidate: Language,
+    t: MessageFormat2.Message,
+    values: Map[String, Any],
+    language: Language,
+    budget: Budget,
+  ): Option[String] =
+    MessageFormat2.formatted(t, values, language.tag, budget) match
+      case Right(text) => Some(text)
+      case Left(cause) =>
+        report(List(CatalogueProblem(cause, Some(candidate), Some(d.key))))
+        None
 
   private def template(d: MessageDefinition[?], candidate: Language)
     : Option[MessageFormat2.Message] =
@@ -266,9 +290,12 @@ final class Catalogues private (
 
   private def update(f: State => State): State = state.updateAndGet(s => f(s))
 
-  // The source-only registry keeps nothing, so that it holds no state between callers.
+  // The source-only registry keeps nothing, so that it holds no state between callers. A message
+  // that fails to format fails each time it is shown: a problem already kept, or one past the
+  // limit, changes nothing and is passed over without a write.
   private def report(found: List[CatalogueProblem]): Unit =
-    if found.nonEmpty && registers then
+    val now = state.get.problems
+    if registers && now.size < MaxProblems && found.exists(p => !now.contains(p)) then
       update: s =>
         val fresh = found.filterNot(s.problems.contains)
         s.copy(problems = (s.problems ++ fresh).take(MaxProblems))
@@ -276,7 +303,12 @@ final class Catalogues private (
   private def notifyAdded(language: Language): Unit =
     listeners.get.foreach: (_, listener) =>
       try listener(language)
-      catch case NonFatal(_) => ()
+      catch
+        case NonFatal(e) =>
+          report(List(CatalogueProblem(
+            s"an onAdded listener threw ${e.getClass.getName}",
+            Some(language),
+          )))
 
 end Catalogues
 

@@ -629,8 +629,25 @@ object MessageFormat2:
     locale: String,
     budget: Budget = Budget.fresh(),
   ): Option[String] =
-    try Some(evaluate(message, Context(args, locale, budget)))
-    catch case NonFatal(_) => None
+    formatted(message, args, locale, budget).toOption
+
+  // As tryFormat, with why it failed on the left, for a registry to report.
+  private[tsuji] def formatted(
+    message: Message,
+    args: Map[String, Any],
+    locale: String,
+    budget: Budget,
+  ): Either[String, String] =
+    try Right(evaluate(message, Context(args, locale, budget)))
+    catch case NonFatal(e) => Left(failure(e))
+
+  // The kind of cause only: an exception's message can hold text from the input, and a problem
+  // is meant to be logged as it is.
+  private[tsuji] def failure(e: Throwable): String = e match
+    case _: TooLong    => s"formatted text past $MaxOutputLength characters"
+    case _: OverBudget =>
+      s"formatted text past ${Budget.PerMessage} characters for one message, nested messages included"
+    case other         => s"formatting threw ${other.getClass.getName}"
 
   private def evaluate(message: Message, initialContext: Context): String =
     val context = message.declarations.foldLeft(initialContext): (ctx, decl) =>
@@ -723,6 +740,10 @@ object MessageFormat2:
   final private[tsuji] class TooLong
     extends RuntimeException("formatted text too long", null, false, false)
 
+  // A message and its nested messages together passed Budget.PerMessage.
+  final private[tsuji] class OverBudget
+    extends RuntimeException("over the budget of one message", null, false, false)
+
   // The elements of a list argument joined by ", ", held to the same limits.
   private[tsuji] def joined(parts: List[String], budget: Budget): String =
     val out = new StringBuilder
@@ -781,7 +802,7 @@ final private[tsuji] class Budget private (private var left: Long):
 
   def charge(n: Int): Unit =
     left -= n
-    if left < 0 then throw new MessageFormat2.TooLong
+    if left < 0 then throw new MessageFormat2.OverBudget
 
 private[tsuji] object Budget:
 

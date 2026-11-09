@@ -561,12 +561,14 @@ and `20 okt 2026` on later JDKs.
 `CoreMessages` holds families of common messages, English as the source language and Dutch and
 French as catalogue files in the jar: `General`, `Authentication`, `Authorization`, `Validation`,
 `Exceptions`, and `Languages` (what `Language.label` uses). `CoreMessages.families` lists them.
+Every message has a Dutch and a French translation; the French ones put a no-break space before
+`:` and a narrow one before `;`, as French typography wants.
 
 ```scala
 given Catalogues = Catalogues(CoreMessages.families)
 CoreMessages.Validation.stringMinLength(min = 8).localize(Language.Dutch)  // lengte moet minimaal 8 zijn
 CoreMessages.Validation.formatErrors(Map("email" -> List(CoreMessages.Validation.stringValidEmail)))
-  .localize(Language.French)  // Échec de validation: email (Doit être une adresse e-mail valide)
+  .localize(Language.French)  // Échec de la validation : email (doit être une adresse e-mail valide)
 ```
 
 In Scala.js the Dutch and French files reach the browser through the export, like your own.

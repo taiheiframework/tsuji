@@ -1,0 +1,7 @@
+{
+  "format": 1,
+  "language": "fr",
+  "messages": {
+    "taihei.language.name": "{$language}"
+  }
+}

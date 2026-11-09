@@ -2,19 +2,20 @@
 
 Package `dev.taihei.tsuji`. `CoreMessages` holds families of common messages, English as the source
 language, Dutch and French as catalogue files in the jar
-(`META-INF/taihei-tsuji/taihei.<group>/<nl|fr>.json`). On Scala.js those files reach the browser
-through the export. `CoreMessages.families` lists all of them.
+(`META-INF/taihei-tsuji/taihei.<group>/<nl|fr>.json`), which translate every message of every
+family. On Scala.js those files reach the browser through the export. `CoreMessages.families`
+lists all of them.
 
 ```scala
 given Catalogues = Catalogues(CoreMessages.families)
 CoreMessages.Validation.stringMinLength(min = 8).localize(Language.Dutch)  // lengte moet minimaal 8 zijn
-CoreMessages.Authentication.invalidCredentials.localize(Language.French)   // English: no French file entry
+CoreMessages.Authentication.invalidCredentials.localize(Language.French)   // Adresse e-mail ou mot de passe incorrect
 ```
 
 | Family (prefix) | Members |
 | --- | --- |
 | `General` (`taihei.general`) | `helloWorld(name)` |
-| `Authentication` (`taihei.authentication`, English only) | `success`, `accountNotFound`, `invalidCredentials`, `emailNotVerified`, `emailAlreadyRegistered`, `weakPassword`, `passwordMismatch`, `expiredToken`, `tokenAlreadyUsed`, `cannotRemoveLastCredential`, `wrongCurrentPassword`, `verificationSent`, `passwordResetSent`, `locked` |
+| `Authentication` (`taihei.authentication`) | `success`, `accountNotFound`, `invalidCredentials`, `emailNotVerified`, `emailAlreadyRegistered`, `weakPassword`, `passwordMismatch`, `expiredToken`, `tokenAlreadyUsed`, `cannotRemoveLastCredential`, `wrongCurrentPassword`, `verificationSent`, `passwordResetSent`, `locked` |
 | `Authorization` (`taihei.authorization`) | `accountNotActive`, `accountNotSystem`, `insufficientRole`, `insufficientGrant`, `personAccountMismatch`, `registerPersonForDifferentAccount` |
 | `Validation` (`taihei.validation`) | `invalid`, `stringShouldNotBeBlank`, `stringValidEmail`, `stringValidUrl`, `stringValidPhoneNumber`, `stringLengthBetween(min, max)`, `stringMinLength(min)`, `stringMaxLength(max)`, `stringShouldEqual(otherName)`, `intMinimum(min)`, `intMaximum(max)`, `intBetween(min, max)`, `longMinimum(min)`, `longMaximum(max)`, `dateMinimum(min: LocalDate)`, `dateMaximum(max: LocalDate)`, `dateFuture`, `datePast`, `nonEmpty`, `shouldNotEqual`, `invalidDate`, `invalidDateTime`, `dateRangeInvalid`, `missingTranslations(languages)`, `failed(errors)`, `fieldError(field, error)`, `formatErrors(errors)` |
 | `Exceptions` (`taihei.exceptions`) | `unsupportedCommand`, `invalidCommand`, `commandVeto(command, state)`, `personAlreadyLinked`, `mediaProcessingFailed`, `eventFailure`, `stateFailure`, `invalidQuery`, `queryFailure`, `unknownError`, `notFound`, `imageNotFound`, `unauthorized`, `forbidden`, `revisionMismatch`, `revisionMismatchBetween(expected, actual)` |

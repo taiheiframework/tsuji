@@ -1,0 +1,20 @@
+{
+  "format": 1,
+  "language": "nl",
+  "messages": {
+    "taihei.authentication.accountNotFound": "Account niet gevonden",
+    "taihei.authentication.cannotRemoveLastCredential": "De enige aanmeldmethode van dit account kan niet worden verwijderd",
+    "taihei.authentication.emailAlreadyRegistered": "Er bestaat al een account met dit e-mailadres",
+    "taihei.authentication.emailNotVerified": "Bevestig je e-mailadres voordat je je aanmeldt",
+    "taihei.authentication.expiredToken": "Deze link is verlopen",
+    "taihei.authentication.invalidCredentials": "Ongeldig e-mailadres of wachtwoord",
+    "taihei.authentication.locked": "Te veel mislukte pogingen; probeer het later opnieuw",
+    "taihei.authentication.passwordMismatch": "De wachtwoorden komen niet overeen",
+    "taihei.authentication.passwordResetSent": "Als dat e-mailadres geregistreerd is, is er een link verstuurd om je wachtwoord opnieuw in te stellen",
+    "taihei.authentication.success": "Aanmelding geslaagd",
+    "taihei.authentication.tokenAlreadyUsed": "Deze link is al gebruikt",
+    "taihei.authentication.verificationSent": "Kijk in je mailbox om je account te bevestigen",
+    "taihei.authentication.weakPassword": "Het wachtwoord is te zwak; kies een sterker wachtwoord",
+    "taihei.authentication.wrongCurrentPassword": "Het huidige wachtwoord is onjuist"
+  }
+}

@@ -5,7 +5,7 @@
     "taihei.authorization.accountNotActive": "account is niet actief",
     "taihei.authorization.accountNotSystem": "account is geen systeemaccount",
     "taihei.authorization.insufficientGrant": "account heeft geen toestemming voor dit bereik",
-    "taihei.authorization.insufficientRole": "account heeft niet een van de vereiste rollen",
+    "taihei.authorization.insufficientRole": "account heeft geen van de vereiste rollen",
     "taihei.authorization.personAccountMismatch": "persoon komt niet overeen met het geauthenticeerde account",
     "taihei.authorization.registerPersonForDifferentAccount": "poging om persoon te registreren voor een ander account dan het geauthenticeerde"
   }

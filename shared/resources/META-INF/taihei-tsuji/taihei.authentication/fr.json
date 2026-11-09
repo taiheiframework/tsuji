@@ -1,0 +1,20 @@
+{
+  "format": 1,
+  "language": "fr",
+  "messages": {
+    "taihei.authentication.accountNotFound": "Compte introuvable",
+    "taihei.authentication.cannotRemoveLastCredential": "Impossible de supprimer la seule méthode de connexion de ce compte",
+    "taihei.authentication.emailAlreadyRegistered": "Un compte existe déjà avec cette adresse e-mail",
+    "taihei.authentication.emailNotVerified": "Veuillez confirmer votre adresse e-mail avant de vous connecter",
+    "taihei.authentication.expiredToken": "Ce lien a expiré",
+    "taihei.authentication.invalidCredentials": "Adresse e-mail ou mot de passe incorrect",
+    "taihei.authentication.locked": "Trop de tentatives infructueuses ; veuillez réessayer plus tard",
+    "taihei.authentication.passwordMismatch": "Les mots de passe ne correspondent pas",
+    "taihei.authentication.passwordResetSent": "Si cette adresse e-mail est enregistrée, un lien de réinitialisation a été envoyé",
+    "taihei.authentication.success": "Authentification réussie",
+    "taihei.authentication.tokenAlreadyUsed": "Ce lien a déjà été utilisé",
+    "taihei.authentication.verificationSent": "Consultez votre messagerie pour confirmer votre compte",
+    "taihei.authentication.weakPassword": "Le mot de passe est trop faible ; choisissez-en un plus robuste",
+    "taihei.authentication.wrongCurrentPassword": "Le mot de passe actuel est incorrect"
+  }
+}

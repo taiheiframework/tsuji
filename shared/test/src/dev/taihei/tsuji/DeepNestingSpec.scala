@@ -109,18 +109,19 @@ object DeepNestingSpec extends ZIOSpecDefault:
         s"""{"key":"no.such","args":{"a":$long},"text":"t"}""",
         s"""{"key":"order.greeting","args":{"name":$long}}""",
       )
-      val start   = java.lang.System.nanoTime()
-      val results = inputs.flatMap(i => List(i.fromJson[Message], i.fromJson[Displayable], i.fromJson[Text]))
-      val millis  = (java.lang.System.nanoTime() - start) / 1000000
       val longest = "0." + "0" * (JsonTreeReader.MaxNumberLength - 3) + "1"
       assertTrue(
-        results.size == 12,
-        results.forall(_.left.exists(_.contains(s"longer than ${JsonTreeReader.MaxNumberLength}"))),
-        millis < 1000,
         longest.length == JsonTreeReader.MaxNumberLength,
         compact(longest) == Right("1E-1098"),
         compact("-" + longest).left.exists(_.contains("longer than")),
-      )
+      ) &&
+      TimeBudget.within("a number longer than the bound in every place", 1000)(
+        inputs.flatMap(i => List(i.fromJson[Message], i.fromJson[Displayable], i.fromJson[Text]))
+      ): results =>
+        assertTrue(
+          results.size == 12,
+          results.forall(_.left.exists(_.contains(s"longer than ${JsonTreeReader.MaxNumberLength}"))),
+        )
     },
     test("a number that is not JSON is refused, also where 5.x read it") {
       // 5.x read 01, 1. and their kind (ADR 0006, section 2); 6.0.0 reads RFC 8259.
@@ -149,17 +150,11 @@ object DeepNestingSpec extends ZIOSpecDefault:
     },
     test("short numbers with extreme exponents are read or refused at once") {
       val extreme = List("1e2147483647", "1e-2147483648", "1.5e999999999", "-0e-999999999", "9e+2147483648")
-      val start   = java.lang.System.nanoTime()
-      val results = extreme.map(n => tree(s"[$n]"))
-      val millis  = (java.lang.System.nanoTime() - start) / 1000000
       val written =
         List("1.5e999999999", "-0e-999999999", "1e-999999999", "77e+000000123", "1e0000000000005", "1E+05", "0e0")
-      assertTrue(
-        results.size == 5,
-        results.map(_.isRight) == List(false, false, true, true, false),
-        millis < 1000,
-        written.forall(n => compact(s"[$n]") == Right(s"[${new java.math.BigDecimal(n)}]")),
-      )
+      assertTrue(written.forall(n => compact(s"[$n]") == Right(s"[${new java.math.BigDecimal(n)}]"))) &&
+      TimeBudget.within("short numbers with extreme exponents", 1000)(extreme.map(n => tree(s"[$n]"))): results =>
+        assertTrue(results.size == 5, results.map(_.isRight) == List(false, false, true, true, false))
     },
     test("an exponent of more than nine digits is a decoding error in every place, on both platforms") {
       given Catalogues = Catalogues(Seq(Orders))
@@ -203,12 +198,11 @@ object DeepNestingSpec extends ZIOSpecDefault:
     },
     test("4 MB of numbers just under the bound are read in time that grows with their number") {
       // A number of the full length that reads to a value: its digits are leading zeros.
-      val near   = "0." + "0" * (JsonTreeReader.MaxNumberLength - 3) + "1"
-      val many   = List.fill(4 * 1024 * 1024 / (near.length + 1))(near).mkString("[", ",", "]")
-      val start  = java.lang.System.nanoTime()
-      val result = tree(many)
-      val millis = (java.lang.System.nanoTime() - start) / 1000000
-      assertTrue(near.length == JsonTreeReader.MaxNumberLength, many.length > 4000000, result.isRight, millis < 5000)
+      val near = "0." + "0" * (JsonTreeReader.MaxNumberLength - 3) + "1"
+      val many = List.fill(4 * 1024 * 1024 / (near.length + 1))(near).mkString("[", ",", "]")
+      assertTrue(near.length == JsonTreeReader.MaxNumberLength, many.length > 4000000) &&
+      TimeBudget.within("4 MB of numbers just under the bound", 5000)(tree(many)): result =>
+        assertTrue(result.isRight)
     },
     test("valid JSON reads and writes as 5.x wrote it; invalid JSON is refused") {
       val wrong = valid.filterNot((in, out) => compact(in) == Right(out))

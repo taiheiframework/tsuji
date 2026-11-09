@@ -116,23 +116,21 @@ object GivensSpec extends ZIOSpecDefault:
       )
     },
     test("4 MB of numbers at the length bound are read in time that grows with them") {
-      val near   = "0." + "0" * (JsonTreeReader.MaxNumberLength - 3) + "1"
-      val many   = List.fill(4 * 1024 * 1024 / (near.length + 1))(near).mkString("[", ",", "]")
-      val input  = s"""{"text":"a","language":"en","x":$many}"""
-      val start  = java.lang.System.nanoTime()
-      val result = input.fromJson[Text]
-      val millis = (java.lang.System.nanoTime() - start) / 1000000
+      val near  = "0." + "0" * (JsonTreeReader.MaxNumberLength - 3) + "1"
+      val many  = List.fill(4 * 1024 * 1024 / (near.length + 1))(near).mkString("[", ",", "]")
+      val input = s"""{"text":"a","language":"en","x":$many}"""
       // A budget with room for a slow machine and for Node: a reader that is not linear takes far
       // longer.
-      assertTrue(input.length > 4000000, result.isRight, millis < 20000)
+      assertTrue(input.length > 4000000) &&
+      TimeBudget.within("4 MB of numbers at the length bound", 20000)(input.fromJson[Text]): result =>
+        assertTrue(result.isRight)
     },
     test("4 MB of numbers in a text are read in time that grows with them") {
-      val many   = List.fill(2 * 1024 * 1024)("0").mkString("[", ",", "]")
-      val input  = s"""{"text":"a","language":"en","x":$many}"""
-      val start  = java.lang.System.nanoTime()
-      val result = input.fromJson[Text]
-      val millis = (java.lang.System.nanoTime() - start) / 1000000
-      assertTrue(input.length > 4000000, result.isRight, millis < 20000)
+      val many  = List.fill(2 * 1024 * 1024)("0").mkString("[", ",", "]")
+      val input = s"""{"text":"a","language":"en","x":$many}"""
+      assertTrue(input.length > 4000000) &&
+      TimeBudget.within("4 MB of numbers in a text", 20000)(input.fromJson[Text]): result =>
+        assertTrue(result.isRight)
     },
     test("a number longer than the bound at the top level is refused as it is read") {
       val long = "1" + "0" * 1000000

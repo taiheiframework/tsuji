@@ -181,7 +181,8 @@ Orders.cancelled.toJson(using TsujiZioJson.messageEncoder(withText = false))
   (`.as[Message]`) is checked against the same depth and number bounds (a scale within
   ±1000001100) before it is decoded, and refused when it stands for more than 4194304 values and
   characters, a part placed in several places of the AST counted in each; a `null` in it is
-  refused too.
+  refused too. The bound holds for each Tsuji value: a collection of N of them in a built AST
+  costs up to N times it, so bound what you build.
 - A value is read whole and held at a few times its length; strings have no length bound of their
   own. Bound the input (request body limit, `take` on a stream).
 - zio-json's byte and stream readers turn malformed UTF-8 into U+FFFD before Tsuji sees it; the

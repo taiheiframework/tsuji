@@ -478,6 +478,9 @@ Orders.cancelled.toJson(using TsujiZioJson.messageEncoder(withText = false))
 - A value that is already a zio-json AST (`.as[Message]`) is checked against the same bounds
   before it is decoded, and refused when it stands for more than 4194304 values and characters,
   a part placed in several places of the AST counted in each; a `null` in it is refused too.
+  The bound holds for each Tsuji value: a collection of N of them in a built AST costs up to N
+  times it, so bound what you build. Reading a member costs what zio's own `foreach` pays for it,
+  a few microseconds at the worst for a `Chunk` built by many layers of `updated`.
 - What follows the value is zio-json's to decide: `fromJson` ignores it, where the core's codecs
   under jsoniter-scala's default `ReaderConfig` refuse it.
 - A value is read whole, members it does not use included, and held at a few times its length

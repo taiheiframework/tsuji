@@ -265,9 +265,12 @@ private[ziojson] object Capture:
     // The members of an array or an object. A zio Chunk can share structure: concatenated with
     // itself it holds 2^n elements in n + 1 nodes, and a slice of it, or its iterator or its copy
     // into an array, can pass through every element it shares without yielding them. So members
-    // are read by index only, which passes through one node per level, of which zio keeps fewer
-    // than 128 before it copies: no member costs more than zio's own foreach pays for it. Each
-    // collection is read once, however many places it is in, and tree uses what was read.
+    // are read by index only, which passes through one node per level, and at a level built by
+    // `updated` through up to 256 indices it holds; zio copies a Chunk before 128 levels, so
+    // before about 64 such levels (measured: about 3 us an index at the worst). That is what
+    // zio's own foreach, iterator and toJson pay for each member too, and no access to a Chunk
+    // costs less for every structure. Each collection is read once, however many places it is
+    // in, and tree uses what was read.
     // Its length is an Int that can wrap: a negative length is refused, and one that wrapped to
     // a small number is read as that many members; a member that is null is refused.
     def members[M <: AnyRef : scala.reflect.ClassTag](

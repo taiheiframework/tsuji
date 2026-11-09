@@ -106,9 +106,13 @@ object AstSpec extends ZIOSpecDefault:
       val name   = "n" * 1000
       val over   = Json.Arr(Chunk.fill(5000)(Json.Obj(name -> Json.Null)))
       val within = Json.Arr(Chunk.fill(4000)(Json.Obj(name -> Json.Null)))
+      // One object in every place: its fields are read once, and its name counted in each.
+      val one    = Json.Obj(name -> Json.Null)
       assertTrue(
         refused(withX(over).as[Text], "values and characters"),
         withX(within).as[Text] == Right(Text("x", Language.English)),
+        refused(withX(Json.Arr(Chunk.fill(5000)(one))).as[Text], "values and characters"),
+        withX(Json.Arr(Chunk.fill(4000)(one))).as[Text] == Right(Text("x", Language.English)),
       )
     },
     test("a Chunk concatenated with itself is refused by the length it reports, never walked") {

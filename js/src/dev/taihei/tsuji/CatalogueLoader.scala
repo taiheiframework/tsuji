@@ -2,6 +2,8 @@ package dev.taihei.tsuji
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.scalajs.js
+import scala.scalajs.js.typedarray.{ArrayBuffer, Uint8Array}
+import scala.util.{Failure, Success, Try}
 import scala.util.control.NonFatal
 
 /**
@@ -56,7 +58,7 @@ object CatalogueLoader:
                 Future.failed(new IllegalStateException(s"HTTP ${response.status}"))
               else if declared.exists(_ > MaxBytes) then
                 cancel(response)
-                Future.failed(new IllegalStateException(s"larger than $MaxBytes bytes"))
+                Future.failed(tooLarge)
               else readBounded(response)
         end if
       catch case NonFatal(e) => Future.failed(e)
@@ -88,41 +90,82 @@ object CatalogueLoader:
         ()
     catch case NonFatal(_) => ()
 
-  // The body as text, read chunk by chunk and given up as soon as it passes MaxBytes.
+  private def tooLarge = new IllegalStateException(s"larger than $MaxBytes bytes")
+
+  // A decoder that refuses malformed UTF-8, as the JVM's reader does, instead of replacing it.
+  private def strictDecoder(): js.Dynamic =
+    js.Dynamic.newInstance(js.Dynamic.global.TextDecoder)("utf-8", js.Dynamic.literal(fatal = true))
+
+  // With `stream`, a character split over two chunks waits for the next one; without it, a
+  // character the bytes leave unfinished is malformed too.
+  private def decode(
+    decoder: js.Dynamic,
+    bytes: js.Any,
+    stream: Boolean,
+  ): Try[String] =
+    Try(decoder.decode(bytes, js.Dynamic.literal(stream = stream)).asInstanceOf[String])
+      .orElse(Failure(new IllegalStateException("not UTF-8")))
+
+  // The body as text, read chunk by chunk and given up as soon as it passes MaxBytes or holds a
+  // byte that is not UTF-8.
   private def readBounded(
     response: js.Dynamic
   )(
     using ExecutionContext
   ): Future[String] =
     val body = response.body
-    if js.isUndefined(body) || body == null then
-      response.text().asInstanceOf[js.Promise[String]].toFuture
+    if js.isUndefined(body) || body == null then whole(response)
     else
-      val reader                 = body.getReader()
-      val decoder                = js.Dynamic.newInstance(js.Dynamic.global.TextDecoder)("utf-8")
-      val out                    = new StringBuilder
-      var total                  = 0.0
-      def next(): Future[String] =
+      val reader                              = body.getReader()
+      val decoder                             = strictDecoder()
+      val out                                 = new StringBuilder
+      def next(total: Double): Future[String] =
         reader
           .read()
           .asInstanceOf[js.Promise[js.Dynamic]]
           .toFuture
           .flatMap: chunk =>
             if chunk.done.asInstanceOf[Boolean] then
-              out ++= decoder.decode().asInstanceOf[String]
-              Future.successful(out.result())
+              Future.fromTry(decode(decoder, js.undefined, stream = false).map(out.append(_).result()))
             else
-              total += chunk.value.length.asInstanceOf[Double]
-              if total > MaxBytes then
-                quietly(reader.cancel())
-                Future.failed(new IllegalStateException(s"larger than $MaxBytes bytes"))
-              else
-                out ++=
-                  decoder.decode(chunk.value, js.Dynamic.literal(stream = true)).asInstanceOf[String]
-                next()
-      next()
+              val read = total + chunk.value.length.asInstanceOf[Double]
+              Future
+                .fromTry(
+                  Either
+                    .cond(read <= MaxBytes, (), tooLarge)
+                    .toTry
+                    .flatMap(_ => decode(decoder, chunk.value, stream = true))
+                )
+                .transformWith:
+                  case Success(text) =>
+                    out ++= text
+                    next(read)
+                  case Failure(e)    =>
+                    quietly(reader.cancel())
+                    Future.failed(e)
+      next(0.0)
     end if
 
   end readBounded
+
+  // A response without a body stream (a runtime or a polyfill without one) arrives whole, so it
+  // cannot be dropped while it is read; it is counted and decoded as a streamed body is, so that
+  // nothing over MaxBytes or malformed reaches the parser.
+  private def whole(
+    response: js.Dynamic
+  )(
+    using ExecutionContext
+  ): Future[String] =
+    response
+      .arrayBuffer()
+      .asInstanceOf[js.Promise[ArrayBuffer]]
+      .toFuture
+      .flatMap: buffer =>
+        Future.fromTry(
+          Either
+            .cond(buffer.byteLength <= MaxBytes, (), tooLarge)
+            .toTry
+            .flatMap(_ => decode(strictDecoder(), new Uint8Array(buffer), stream = false))
+        )
 
 end CatalogueLoader

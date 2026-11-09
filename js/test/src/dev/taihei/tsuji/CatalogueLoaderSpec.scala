@@ -1,7 +1,10 @@
 package dev.taihei.tsuji
 
 import scala.concurrent.ExecutionContext
+import scala.scalajs.js
+import scala.scalajs.js.JSConverters.*
 import scala.scalajs.js.URIUtils
+import scala.scalajs.js.typedarray.Uint8Array
 
 import zio.test.*
 
@@ -24,6 +27,62 @@ object CatalogueLoaderSpec extends ZIOSpecDefault:
         using ec: ExecutionContext
       )
     )
+
+  private val Url = "https://example.invalid/de.json"
+
+  private val Limit = Catalogue.MaxLength.toLong * 4
+
+  // Runs `use` with the global fetch replaced by `stub` (js.undefined removes it), and puts the
+  // original back however `use` ends.
+  private def withFetch[R, E, A](stub: js.Any)(use: ZIO[R, E, A]) =
+    val original = js.Dynamic.global.fetch
+    ZIO.succeed(js.Dynamic.global.updateDynamic("fetch")(stub)) *>
+    use.ensuring(ZIO.succeed(js.Dynamic.global.updateDynamic("fetch")(original)))
+
+  private def answering(response: => js.Any): js.Function1[String, js.Promise[js.Any]] =
+    _ => js.Promise.resolve[js.Any](response)
+
+  private def bytes(values: Int*) = new Uint8Array(values.map(_.toShort).toJSArray)
+
+  private def utf8(text: String) = bytes(text.getBytes("UTF-8").map(_ & 0xff).toSeq*)
+
+  // A body stream that hands out `chunks` one by one and records whether it was cancelled.
+  final private class Body(chunks: Uint8Array*):
+    var cancelled = false
+    var pulled    = 0
+
+    val stream = js.Dynamic.newInstance(js.Dynamic.global.ReadableStream)(
+      js.Dynamic.literal(
+        pull = (controller: js.Dynamic) =>
+          if pulled < chunks.length then controller.enqueue(chunks(pulled))
+          else controller.close()
+          pulled += 1
+        ,
+        cancel = (_: js.Any) => cancelled = true,
+      )
+    )
+
+  private def response(
+    body: Body,
+    status: Int = 200,
+    headers: js.Dictionary[String] = js.Dictionary(),
+  ) =
+    js.Dynamic.newInstance(js.Dynamic.global.Response)(
+      body.stream,
+      js.Dynamic.literal(status = status, headers = headers),
+    )
+
+  // A response without a body stream, as a runtime or a polyfill without streams gives.
+  private def streamless(content: Uint8Array) = js.Dynamic.literal(
+    ok = true,
+    status = 200,
+    headers = js.Dynamic.newInstance(js.Dynamic.global.Headers)(),
+    body = null,
+    arrayBuffer = () => js.Promise.resolve[js.Any](content.buffer),
+    text = () => js.Promise.reject("text() is not bounded"),
+  )
+
+  private val GermanFile = """{"format":1,"language":"de","messages":{"order.cancelled":"Storniert"}}"""
 
   def spec = suite("CatalogueLoader")(
     test("a fetched catalogue is added and its listeners hear of it") {
@@ -76,6 +135,93 @@ object CatalogueLoaderSpec extends ZIOSpecDefault:
         garbage.exists(_.message.contains("not JSON")),
         failed.exists(_.message.contains("cannot fetch")),
         c.languages.isEmpty,
+      )
+    },
+    test("without fetch in the runtime, loading is a problem and nothing throws") {
+      val c = Catalogues(Seq(Orders))
+      withFetch(js.undefined)(load(c, German, Url)).map(problems =>
+        assertTrue(
+          problems.map(_.message) == List(s"cannot fetch $Url: there is no fetch here"),
+          problems.forall(_.language.contains(German)),
+          c.languages.isEmpty,
+        )
+      )
+    },
+    test("a status that is not OK is a problem, and its body is let go unread") {
+      val c    = Catalogues(Seq(Orders))
+      val body = Body(utf8(GermanFile))
+      withFetch(answering(response(body, status = 404)))(load(c, German, Url)).map(problems =>
+        assertTrue(
+          problems.map(_.message) == List(s"cannot fetch $Url: HTTP 404"),
+          body.cancelled,
+          c.languages.isEmpty,
+        )
+      )
+    },
+    test("a declared length over the limit is refused before the body is read") {
+      val c        = Catalogues(Seq(Orders))
+      val body     = Body(utf8(GermanFile))
+      val declared = js.Dictionary("content-length" -> (Limit + 1).toString)
+      withFetch(answering(response(body, headers = declared)))(load(c, German, Url)).map(problems =>
+        assertTrue(
+          problems.map(_.message) == List(s"cannot fetch $Url: larger than $Limit bytes"),
+          body.cancelled,
+          c.languages.isEmpty,
+        )
+      )
+    },
+    test("a declared length at the limit is read") {
+      val c        = Catalogues(Seq(Orders))
+      val declared = js.Dictionary("content-length" -> Limit.toString)
+      withFetch(answering(response(Body(utf8(GermanFile)), headers = declared)))(load(c, German, Url))
+        .map(problems => assertTrue(problems.isEmpty, c.languages == Set(German)))
+    },
+    test("malformed UTF-8 in a streamed body is refused, as on the JVM, and the stream is let go") {
+      val c      = Catalogues(Seq(Orders))
+      // 0xFF is never UTF-8; the TextDecoder used to replace it with U+FFFD and load the file.
+      val prefix = utf8("""{"format":1,"language":"de","messages":{"order.cancelled":"Storn""")
+      val body   = Body(prefix, bytes(0xff), utf8("""iert"}}"""))
+      withFetch(answering(response(body)))(load(c, German, Url)).map(problems =>
+        assertTrue(
+          problems.map(_.message) == List(s"cannot fetch $Url: not UTF-8"),
+          body.cancelled,
+          c.languages.isEmpty,
+        )
+      )
+    },
+    test("a body that ends inside a character is refused") {
+      val c = Catalogues(Seq(Orders))
+      // 0xC3 opens a two-byte character that never comes.
+      withFetch(answering(response(Body(utf8(GermanFile), bytes(0xc3)))))(load(c, German, Url))
+        .map(problems =>
+          assertTrue(problems.map(_.message) == List(s"cannot fetch $Url: not UTF-8"), c.languages.isEmpty)
+        )
+    },
+    test("a character split over two chunks is decoded") {
+      given c: Catalogues = Catalogues(Seq(Orders))
+      val text    = """{"format":1,"language":"de","messages":{"order.cancelled":"Storniert é"}}"""
+      val encoded = utf8(text)
+      // Right after the first byte of the two that encode é.
+      val split   = text.getBytes("UTF-8").indexOf(0xc3.toByte) + 1
+      val body    = Body(encoded.subarray(0, split), encoded.subarray(split))
+      withFetch(answering(response(body)))(load(c, German, Url)).map(problems =>
+        assertTrue(problems.isEmpty, Orders.cancelled.localize(German) == "Storniert é")
+      )
+    },
+    test("a body without a stream is counted and decoded strictly, and never read as text") {
+      val c        = Catalogues(Seq(Orders))
+      val tooLarge = new Uint8Array(Limit.toInt + 1) // zero bytes: UTF-8, but one too many
+      for
+        large     <- withFetch(answering(streamless(tooLarge)))(load(c, German, Url))
+        malformed <- withFetch(answering(streamless(bytes(0x7b, 0xff, 0x7d))))(load(c, German, Url))
+        empty     <- ZIO.succeed(c.languages)
+        fine      <- withFetch(answering(streamless(utf8(GermanFile))))(load(c, German, Url))
+      yield assertTrue(
+        large.map(_.message) == List(s"cannot fetch $Url: larger than $Limit bytes"),
+        malformed.map(_.message) == List(s"cannot fetch $Url: not UTF-8"),
+        empty.isEmpty,
+        fine.isEmpty,
+        c.languages == Set(German),
       )
     },
   ) @@ TestAspect.sequential // one test replaces the global fetch for a while

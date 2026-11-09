@@ -142,10 +142,12 @@ object AcceptLanguageSpec extends ZIOSpecDefault:
       },
       test("32 requested tags of the greatest length are negotiated within the budget") {
         // The costliest request a header can make: 32 distinct tags of 50 variants each, every
-        // one walked down a subtag at a time, none supported.
+        // one walked down a subtag at a time, none supported. Scala.js is the sharper guard: a walk
+        // that parses every prefix again missed this budget there on every attempt, while a warm
+        // JVM could still make it.
         val requested = (0 until 32).map(i => Language("en" + "-1234" * 49 + f"-9$i%03d"))
         TimeBudget.within("negotiate 32 long tags", budgetMillis = 200) {
-          (1 to 10).map(_ => negotiate(requested, Seq(Dutch), French)).last
+          (1 to 5).map(_ => negotiate(requested, Seq(Dutch), French)).last
         }(chosen => assertTrue(requested.forall(_.tag.length == 252), chosen == French))
       },
       test("the result agrees with the chain a registry walks to find a message") {

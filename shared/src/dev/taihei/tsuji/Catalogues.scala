@@ -430,17 +430,18 @@ object Catalogues:
   ): CatalogueProblem =
     CatalogueProblem(s"${e.message} (at character ${e.position})", Some(language), Some(key))
 
-  // The language with its last subtag removed, step by step; a step that is no tag (a singleton
-  // left at the end) is passed over.
+  // The language, then with its last subtag removed, step by step.
   // Extensions and private use (from the first single-letter subtag on) say nothing about which
-  // translation to take: after the exact tag, they are left out before subtags are removed.
+  // translation to take: after the exact tag, they are left out before subtags are removed. The
+  // part before them is well formed whenever the tag is; should it not be, the walk stops at the
+  // tag rather than build steps that are no tags.
   private[tsuji] def truncations(language: Language): List[Language] =
     val parts = language.tag.split('-').toList
     val plain = parts.takeWhile(_.length > 1)
-    val base  =
-      if plain.size == parts.size then language
-      else Language.parse(plain.mkString("-")).getOrElse(language)
-    (language :: truncationsOf(base)).distinct
+    val base  = Option
+      .when(plain.size == parts.size)(language)
+      .orElse(Language.parse(plain.mkString("-")).toOption)
+    (language :: base.fold(Nil)(truncationsOf)).distinct
 
   // `language` has no extension or private use, and in the grammar of such a tag every subtag
   // after the language is optional, so each prefix is a well-formed tag, already canonical. It is

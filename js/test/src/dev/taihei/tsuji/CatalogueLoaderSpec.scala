@@ -211,18 +211,24 @@ object CatalogueLoaderSpec extends ZIOSpecDefault:
     test("a body without a stream is counted and decoded strictly, and never read as text") {
       val c        = Catalogues(Seq(Orders))
       val tooLarge = new Uint8Array(Limit.toInt + 1) // zero bytes: UTF-8, but one too many
+      // Zero bytes are UTF-8, so at the limit the bytes pass and the parser judges the text.
+      val atLimit  = new Uint8Array(Limit.toInt)
       for
         large     <- withFetch(answering(streamless(tooLarge)))(load(c, German, Url))
+        limit     <- withFetch(answering(streamless(atLimit)))(load(c, German, Url))
         malformed <- withFetch(answering(streamless(bytes(0x7b, 0xff, 0x7d))))(load(c, German, Url))
         empty     <- ZIO.succeed(c.languages)
         fine      <- withFetch(answering(streamless(utf8(GermanFile))))(load(c, German, Url))
       yield assertTrue(
         large.map(_.message) == List(s"cannot fetch $Url: larger than $Limit bytes"),
+        limit.nonEmpty,
+        limit.forall(p => !p.message.contains("larger than") && !p.message.contains("cannot fetch")),
         malformed.map(_.message) == List(s"cannot fetch $Url: not UTF-8"),
         empty.isEmpty,
         fine.isEmpty,
         c.languages == Set(German),
       )
+      end for
     },
   ) @@ TestAspect.sequential // one test replaces the global fetch for a while
 

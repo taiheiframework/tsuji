@@ -116,8 +116,9 @@ object CatalogueLoader:
     val body = response.body
     if js.isUndefined(body) || body == null then whole(response)
     else
-      val reader                              = body.getReader()
+      // The decoder first: if it cannot be built, no reader holds the stream locked.
       val decoder                             = strictDecoder()
+      val reader                              = body.getReader()
       val out                                 = new StringBuilder
       def next(total: Double): Future[String] =
         reader

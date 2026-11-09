@@ -804,6 +804,8 @@ final private[tsuji] class Budget private (private var left: Long):
     left -= n
     if left < 0 then throw new MessageFormat2.OverBudget
 
+  def spent: Boolean = left < 0
+
 private[tsuji] object Budget:
 
   val PerMessage: Long = 4L * MessageFormat2.MaxOutputLength

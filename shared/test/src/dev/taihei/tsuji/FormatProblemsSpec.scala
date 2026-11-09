@@ -1,5 +1,7 @@
 package dev.taihei.tsuji
 
+import java.util.concurrent.atomic.AtomicReference
+
 import zio.test.*
 
 import dev.taihei.tsuji.Language.*
@@ -98,16 +100,27 @@ object FormatProblemsSpec extends ZIOSpecDefault:
         )),
       )
     },
+    test("a spent budget is named once, for the first language tried, not for each fallback") {
+      val c      = Catalogues(Seq(Orders))
+      val budget = Budget.fresh()
+      budget.charge(Budget.PerMessage.toInt - 3)
+      val shown  = c.render(Orders.cancelled, Dutch, budget)
+      assertTrue(
+        shown == "Your order was cancelled",
+        c.problems.map(_.language) == List(Some(Dutch)),
+        c.problems.forall(_.message.contains("for one message")),
+      )
+    },
     test("a listener that throws is named once per language, and the others still hear") {
       val c     = Catalogues()
-      var heard = List.empty[Language]
+      val heard = new AtomicReference(List.empty[Language])
       c.onAdded(_ => throw new RuntimeException("secret input"))
-      c.onAdded(l => heard = l :: heard)
+      c.onAdded(l => heard.updateAndGet(l :: _): Unit)
       c.add(Catalogue(German, Map.empty))
       c.add(Catalogue(German, Map.empty))
       c.add(Catalogue(French, Map.empty))
       assertTrue(
-        heard == List(French, German, German),
+        heard.get == List(French, German, German),
         c.problems == List(
           CatalogueProblem("an onAdded listener threw java.lang.RuntimeException", Some(German)),
           CatalogueProblem("an onAdded listener threw java.lang.RuntimeException", Some(French)),

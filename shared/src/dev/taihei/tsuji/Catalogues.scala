@@ -157,7 +157,9 @@ final class Catalogues private (
             .map:
               case ((name, arg), value) => name -> arg.toFormat(value, language, this, budget)
             .toMap
+          // A spent budget fails every later language too: it is named once, for the first.
           fallbackChain(language, d.family.sourceLanguage).iterator
+            .takeWhile(_ => !budget.spent)
             .flatMap(candidate => template(d, candidate).map(candidate -> _))
             .flatMap((candidate, t) => formatted(d, candidate, t, values, language, budget))
             .nextOption()

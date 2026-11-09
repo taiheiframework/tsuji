@@ -47,6 +47,15 @@ object CoreMessagesSpec extends ZIOSpecDefault:
         "should be on or before Dec 31, 2024",
       )
     },
+    test("the number bounds read as inclusive in English, as the checks that use them are") {
+      given Catalogues = Catalogues(CoreMessages.families)
+      assertTrue(
+        Validation.intMinimum(min = 1).localize(English) == "should be at least 1",
+        Validation.intMaximum(max = 10).localize(English) == "should be at most 10",
+        Validation.longMinimum(min = 5000000000L).localize(English) == "should be at least 5000000000",
+        Validation.longMaximum(max = -3L).localize(English) == "should be at most -3",
+      )
+    },
     test("formatErrors makes one message of the fields' errors, in field order") {
       given Catalogues = Catalogues(CoreMessages.families)
       val errors = Validation.formatErrors(

@@ -121,13 +121,13 @@ object CoreMessages:
 
     val stringShouldEqual = message[(otherName: String)]("should equal {$otherName}")
 
-    val intMinimum = message[(min: Int)]("should be minimum {$min}")
+    val intMinimum = message[(min: Int)]("should be at least {$min}")
 
-    val intMaximum = message[(max: Int)]("should be maximum {$max}")
+    val intMaximum = message[(max: Int)]("should be at most {$max}")
 
-    val longMinimum = message[(min: Long)]("should be minimum {$min}")
+    val longMinimum = message[(min: Long)]("should be at least {$min}")
 
-    val longMaximum = message[(max: Long)]("should be maximum {$max}")
+    val longMaximum = message[(max: Long)]("should be at most {$max}")
 
     val dateMinimum = message[(min: LocalDate)]("should be on or after {$min :date}")
 

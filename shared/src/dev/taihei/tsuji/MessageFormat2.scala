@@ -3,7 +3,6 @@ package dev.taihei.tsuji
 import java.time.{LocalDate, LocalDateTime, LocalTime}
 
 import scala.collection.mutable
-import scala.util.Try
 import scala.util.control.NonFatal
 
 /**
@@ -704,10 +703,17 @@ object MessageFormat2:
     options: Map[String, String],
     locale: String,
   ): String =
-    Try(value.toString.toDouble) match
-      case scala.util.Success(num) =>
-        PlatformNumberFormatter.formatNumber(num, options.get("style"), locale)
-      case _                       => value.toString
+    numberOf(value) match
+      case Some(num) => PlatformNumberFormatter.formatNumber(num, options.get("style"), locale)
+      case None      => value.toString
+
+  // The longest text read as a number, the bound the JSON reader puts on a number.
+  private val MaxNumberText = JsonTreeReader.MaxNumberLength
+
+  // A value as a number, or None. The text is bounded and read with `toDoubleOption`, which checks
+  // the syntax before it parses, so the read takes time linear in the text on both platforms.
+  private[tsuji] def numberOf(value: Any): Option[Double] =
+    Option(value).map(_.toString).filter(_.length <= MaxNumberText).flatMap(_.toDoubleOption)
 
   // Rounded half away from zero, digits only; a value that is no number shows as it is.
   private def formatInteger(value: Any): String =

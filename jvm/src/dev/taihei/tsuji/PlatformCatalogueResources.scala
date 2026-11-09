@@ -13,7 +13,8 @@ private[tsuji] object PlatformCatalogueResources:
   /** Whether there is a classpath to read catalogues from. */
   val available: Boolean = true
 
-  // UTF-8 takes at most four bytes per character.
+  // UTF-8 takes at most four bytes per character. An Int, as readNBytes takes one: it stays well
+  // below Int.MaxValue as long as a catalogue is at most some 500 million characters.
   private val MaxBytes = Catalogue.MaxLength * 4
 
   def path(prefix: String, tag: String): String = s"META-INF/taihei-tsuji/$prefix/$tag.json"

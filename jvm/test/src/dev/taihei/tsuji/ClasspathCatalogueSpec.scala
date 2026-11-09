@@ -78,6 +78,20 @@ object ClasspathCatalogueSpec extends ZIOSpecDefault:
         past == Left(s"past.json is larger than $limit bytes"),
       )
     },
+    test("a stream that gives a few bytes at a time is read whole, and refused past the limit") {
+      // A jar entry gives fewer bytes than asked; this one gives at most three per call.
+      def trickle(bytes: Array[Byte]) = new java.io.FilterInputStream(ByteArrayInputStream(bytes)):
+        override def read(
+          b: Array[Byte],
+          off: Int,
+          len: Int,
+        ): Int = super.read(b, off, math.min(len, 3))
+      val text                        = "{\"ü\": \"€ 𝄞\"}" * 100
+      val small = PlatformCatalogueResources.readBounded(trickle(text.getBytes("UTF-8")), "small.json")
+      val limit = Catalogue.MaxLength * 4
+      val large = PlatformCatalogueResources.readBounded(trickle(Array.fill(limit + 1)('a'.toByte)), "large.json")
+      assertTrue(small == Right(text), large == Left(s"large.json is larger than $limit bytes"))
+    },
     test("a file that is not UTF-8 is refused, and one that is reads as its text") {
       val malformed = PlatformCatalogueResources.readBounded(
         ByteArrayInputStream(Array(0x7b, 0xc3, 0x28, 0x7d).map(_.toByte)),

@@ -388,6 +388,48 @@ object PluralRulesSpec extends ZIOSpecDefault:
           Operands.of(Double.MinPositiveValue).isDefined,
         )
       },
+      test("a null value is no number, and the * variant is chosen as in 6.0") {
+        assertTrue(
+          Operands.of(null).isEmpty,
+          MessageFormat2.format(".match {$n :plural} when one {one} when * {star}", Map("n" -> null)) == "star",
+        )
+      },
+      test("thousands of plural selectors over a costly number stay within their time") {
+        val n        = 10790
+        val declared = ".local $x = {(2.2250738585072009E-308) :plural}\n.match " + "{$x}" * n + "\n" +
+          "when " + "* " * n + "{x}"
+        val distinct = ".match " + (1 to 2000).map(i => s"{(2.22507385850${10000 + i}E-308) :plural}").mkString +
+          "\nwhen " + "* " * 2000 + "{y}"
+        val few      = ".match " + "{$n :plural}" * 3 + " when few few few {few} when * * * {other}"
+        // Before the cap, one format of `declared` took about 0.2 s on the JVM and 2 s on Scala.js.
+        TimeBudget.within("5 x 10790 and 2000 plural selectors over subnormal numbers", 500)(
+          (
+            MessageFormat2.validate(declared),
+            List.fill(5)(MessageFormat2.format(declared)).distinct.mkString,
+            MessageFormat2.format(distinct),
+            MessageFormat2.format(few, Map("n" -> 3), "pl"),
+          )
+        ) {
+          (
+            errors,
+            a,
+            b,
+            c,
+          ) =>
+            assertTrue(declared.length < 65536, errors.isEmpty, a == "x", b == "y", c == "few")
+        }
+      },
+      test("past 64 plural selectors in one match, a selector counts as no number") {
+        val keys = List.fill(65)("one")
+        val t    = ".match " + "{$n :plural}" * 65 + "\nwhen " + keys.mkString(" ") + " {all one}\nwhen " +
+          "* " * 65 + "{star}"
+        val t64  = ".match " + "{$n :plural}" * 64 + "\nwhen " + keys.take(64).mkString(" ") + " {all one}\nwhen " +
+          "* " * 64 + "{star}"
+        assertTrue(
+          MessageFormat2.format(t, Map("n" -> 1)) == "star",
+          MessageFormat2.format(t64, Map("n" -> 1)) == "all one",
+        )
+      },
       test("selection over long and very long values stays within its time") {
         val long     = (1 to 200).toList.map(k => "9" * 1000 + "." + k.toString * 3)
         val tooLong  = List.fill(20)("1" * 1000000)

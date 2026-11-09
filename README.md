@@ -643,7 +643,8 @@ MessageFormat2.format(files, Map("n" -> 1.5), "pl")  // 1.5 pliku
   has one number type, so there a `Double` with a fraction that is exactly a `Float` value, such
   as `1.1f.toDouble`, reads as that `Float` (`1.1`), where the JVM reads all its digits. A negative
   number takes the category of its absolute value, and a text of more than 1100 characters counts
-  as no number, so only `other` and `*` match it.
+  as no number, so only `other` and `*` match it. So does a selector past the 64th `:plural`
+  selector of one `.match`, which bounds the work a template from a catalogue can ask for.
 - Whole numbers that are not negative keep the variant 6.0 chose in English, Dutch and French. A
   template that names `many` now gets it in French, Spanish, Italian and Portuguese for a
   million and its multiples; one without `many` still falls to `other`.

@@ -47,6 +47,7 @@ private[tsuji] object Operands:
    * None when the value is no finite number within [[MaxNumberText]] digits.
    */
   def of(value: Any): Option[Operands] = value match
+    case null      => None
     case n: Int    => parse(n.toString)
     case n: Long   => parse(n.toString)
     case n: Short  => parse(n.toString)

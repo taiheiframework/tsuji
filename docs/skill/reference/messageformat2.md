@@ -72,7 +72,8 @@ After declarations, a simple pattern ends at the line break.
   (1.1f is 1.1), on both platforms; on Scala.js a `Double` with a fraction that is exactly a
   `Float` value (a widened `Float`) reads as that `Float`. A text or `BigDecimal` keeps its
   fraction digits (`"1.0"` is `other` in English); a negative number takes its absolute value's category; a text over 1100
-  characters is no number (only `other` and `*` match).
+  characters is no number (only `other` and `*` match), and so is every `:plural` selector past
+  the 64th of one `.match`.
 - A `.match` on a `Language` compares its tag (`when nl {...}`).
 - Functions inside variant patterns format (`when * {{$n} on {$d :date}}`).
 

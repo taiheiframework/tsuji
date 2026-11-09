@@ -760,7 +760,10 @@ object MessageFormat2:
     out.result()
 
   private def evaluateMatch(matchStmt: MatchStatement, context: Context): String =
-    val selectorValues = matchStmt.selectors.map(s => selected(evaluateExpression(s, context)))
+    val values         = matchStmt.selectors.map(s => evaluateExpression(s, context))
+    val pluralAt       = values.zipWithIndex.collect { case (_: PluralSelector, i) => i }
+    val read           = pluralAt.take(MaxPluralSelectors).toSet
+    val selectorValues = values.zipWithIndex.map((v, i) => selected(v, read(i)))
     val matchedCase    = matchStmt.cases.find: mcase =>
       mcase.keys.size == selectorValues.size &&
       mcase.keys.zip(selectorValues).forall:
@@ -774,9 +777,15 @@ object MessageFormat2:
   // A plural selector's number and category, worked out once for all the variants.
   final private case class PluralChoice(operands: Option[Operands], category: String)
 
-  private def selected(value: Any): Any = value match
+  // Reading a number costs up to a few hundred microseconds on Scala.js (a subnormal Double is a
+  // 767-digit decimal), and a 64K template from a catalogue can name thousands of selectors. Past
+  // this many plural selectors in one `.match`, a selector counts as no number, so only `other`
+  // and `*` match it: no template a person writes comes near it.
+  private[tsuji] val MaxPluralSelectors = 64
+
+  private def selected(value: Any, read: Boolean): Any = value match
     case PluralSelector(v, locale) =>
-      val operands = Operands.of(v)
+      val operands = Option.when(read)(Operands.of(v)).flatten
       PluralChoice(operands, operands.fold("other")(PluralRules.category(locale, _)))
     case other                     => other
 

@@ -74,7 +74,7 @@ object Catalogue:
    */
   private[tsuji] def refuseByteOrderMark(name: String, text: String): Either[String, String] =
     Either.cond(
-      !text.startsWith("﻿"),
+      !text.startsWith("\uFEFF"),
       text,
       s"$name starts with a byte order mark; save it as UTF-8 without one",
     )

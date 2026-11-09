@@ -13,7 +13,7 @@ object ByteOrderMarkSpec extends ZIOSpecDefault:
   def spec = suite("a byte order mark")(
     test("at the start of a catalogue file is refused, by name") {
       assertTrue(
-        Catalogue.refuseByteOrderMark("de.json", "﻿" + File) ==
+        Catalogue.refuseByteOrderMark("de.json", "\uFEFF" + File) ==
         Left("de.json starts with a byte order mark; save it as UTF-8 without one")
       )
     },
@@ -25,11 +25,11 @@ object ByteOrderMarkSpec extends ZIOSpecDefault:
       )
     },
     test("elsewhere in the file is not this refusal: the parser judges it as any other character") {
-      val inTemplate    = File.replace("Storniert", "Stor﻿niert")
-      val betweenTokens = File.replace("{\"format\"", "{﻿\"format\"")
+      val inTemplate    = File.replace("Storniert", "Stor\uFEFFniert")
+      val betweenTokens = File.replace("{\"format\"", "{\uFEFF\"format\"")
       assertTrue(
         Catalogue.refuseByteOrderMark("de.json", inTemplate) == Right(inTemplate),
-        Catalogue.parse(inTemplate).map(_.messages.values.toList) == Right(List("Stor﻿niert")),
+        Catalogue.parse(inTemplate).map(_.messages.values.toList) == Right(List("Stor\uFEFFniert")),
         Catalogue.refuseByteOrderMark("de.json", betweenTokens) == Right(betweenTokens),
         Catalogue.parse(betweenTokens).left.exists(_.message.startsWith("not JSON")),
       )

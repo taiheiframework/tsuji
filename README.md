@@ -328,7 +328,9 @@ The bundle holds the definitions and the source-language templates: one language
 them. The application serves the per-language files that the export writes, and loads a language
 with `CatalogueLoader.load(catalogues, language, url)`, which returns a `Future` with what went
 wrong, if anything. Until a language arrives, its messages show through the fallback chain;
-`catalogues.onAdded` says when it did. The library has no dependency on Laminar or on an effect
+`catalogues.onAdded` says when it did. `CatalogueLoader` needs a `TextDecoder` that honours
+`fatal` and `ignoreBOM`, as every current browser and Node do; with one that ignores them (an old
+polyfill) every load is a problem. The library has no dependency on Laminar or on an effect
 library. A Laminar application turns the callback into a signal:
 
 ```scala

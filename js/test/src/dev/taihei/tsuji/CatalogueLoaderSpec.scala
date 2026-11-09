@@ -103,6 +103,9 @@ object CatalogueLoaderSpec extends ZIOSpecDefault:
 
   private val Mark = bytes(0xef, 0xbb, 0xbf)
 
+  // GermanFile behind a byte order mark, in one piece.
+  private val Marked = bytes((Seq(0xef, 0xbb, 0xbf) ++ GermanFile.getBytes("UTF-8").map(_ & 0xff))*)
+
   private val MarkRefusal = s"the file at $Url starts with a byte order mark; save it as UTF-8 without one"
 
   def spec = suite("CatalogueLoader")(
@@ -265,8 +268,7 @@ object CatalogueLoaderSpec extends ZIOSpecDefault:
       // The decoder used to drop the mark, so the file loaded here and was refused on the JVM.
       for
         streamed <- withFetch(answering(response(Body(Mark, utf8(GermanFile)))))(load(c, German, Url))
-        whole    <- withFetch(answering(streamless(bytes((Seq(0xef, 0xbb, 0xbf) ++
-        GermanFile.getBytes("UTF-8").map(_ & 0xff))*))))(load(c, German, Url))
+        whole    <- withFetch(answering(streamless(Marked)))(load(c, German, Url))
       yield assertTrue(
         streamed.map(_.message) == List(MarkRefusal),
         whole.map(_.message) == List(MarkRefusal),

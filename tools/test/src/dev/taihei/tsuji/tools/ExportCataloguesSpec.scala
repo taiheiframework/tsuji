@@ -73,6 +73,54 @@ object ExportCataloguesSpec extends ZIOSpecDefault:
       val (status, _, e) = run("--out", file.toString, "--family", "dev.taihei.tsuji.tools.Shop")
       assertTrue(status == 1, e.contains("cannot write"))
     },
+    test("the count line says message for one and messages otherwise") {
+      val dir           = Files.createTempDirectory("taihei-export")
+      val (_, shop, _)  = run("--out", dir.toString, "--family", "dev.taihei.tsuji.tools.Shop")
+      val (_, broke, _) =
+        run("--out", Files.createTempDirectory("taihei-export").toString, "--family", "dev.taihei.tsuji.tools.Broken")
+      assertTrue(
+        shop.contains(s"1 message in de: ${dir.resolve("de.json")}"),
+        shop.contains("2 messages in nl: "),
+        !shop.contains("1 messages"),
+        // Broken's only Dutch translation fails its checks and is left out.
+        broke.contains("0 messages in nl: "),
+        broke.contains("1 message in en: "),
+      )
+    },
+    test("a scanned family object that fails to load is reported and makes the status 1") {
+      val dir                = Files.createTempDirectory("taihei-export")
+      val (status, out, err) = run(
+        "--out",
+        dir.toString,
+        "--family",
+        "dev.taihei.tsuji.tools.Shop",
+        "--scan",
+        "dev.taihei.tsuji.tools.exploding",
+      )
+      assertTrue(
+        status == 1,
+        err.contains("dev.taihei.tsuji.tools.exploding: dev.taihei.tsuji.tools.exploding.Exploding$: "),
+        !err.contains("null"),
+        out.contains("2 messages in nl"),
+      )
+    },
+    test("an exception without a message is described by its class, never as null") {
+      assertTrue(
+        ExportCatalogues.describe(new IllegalStateException()) == "java.lang.IllegalStateException",
+        ExportCatalogues.describe(new IllegalStateException("")) == "java.lang.IllegalStateException",
+        ExportCatalogues.describe(new IllegalStateException("full")) == "full",
+      )
+    },
+    test("the usage names the version from the jar's manifest, and none without one") {
+      val plain = "usage: ExportCatalogues --out <directory> [--scan <package>]... [--family <object>]..."
+      assertTrue(
+        ExportCatalogues.usage(Some("6.0.1")) == s"taihei-tsuji-tools 6.0.1\n$plain",
+        ExportCatalogues.usage(None) == plain,
+        // The tests run from compiled classes, which have no manifest.
+        run()._3.contains(plain),
+        !run()._3.contains("taihei-tsuji-tools "),
+      )
+    },
     test("usage errors") {
       assertTrue(
         run()._1 == 2,

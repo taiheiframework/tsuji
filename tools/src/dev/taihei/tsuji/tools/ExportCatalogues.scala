@@ -36,8 +36,15 @@ object ExportCatalogues:
     val status = run(args.toList, System.out, System.err)
     if status != 0 then sys.exit(status)
 
-  private val Usage =
-    "usage: ExportCatalogues --out <directory> [--scan <package>]... [--family <object>]..."
+  private val Usage = usage(
+    Option(getClass.getPackage).flatMap(p => Option(p.getImplementationVersion))
+  )
+
+  // The version comes from the jar's manifest, so a run from compiled classes names none.
+  private[tools] def usage(version: Option[String]): String =
+    val line =
+      "usage: ExportCatalogues --out <directory> [--scan <package>]... [--family <object>]..."
+    version.fold(line)(v => s"taihei-tsuji-tools $v\n$line")
 
   final private case class Options(
     out: Option[Path],
@@ -72,7 +79,7 @@ object ExportCatalogues:
           Option(Thread.currentThread.getContextClassLoader).getOrElse(getClass.getClassLoader)
         val entries  = Classpath.entries(loader)
         val found    = named.map(n => n -> Classpath.family(n, loader)) ++
-          scan.flatMap(p => Classpath.familiesIn(p, entries, loader).map(f => p -> Right(f)))
+          scan.flatMap(p => Classpath.familiesIn(p, entries, loader).map(p -> _))
         val missing  = found.collect { case (n, Left(e)) => s"$n: $e" }
         val families = found.collect { case (_, Right(f)) => f }.distinct.sortBy(_.prefix)
         missing.foreach(err.println)
@@ -83,9 +90,22 @@ object ExportCatalogues:
             try write(dir, families, entries, out, err)
             catch
               case NonFatal(e) =>
-                err.println(s"cannot write to $dir: ${e.getMessage}")
+                err.println(s"cannot write to $dir: ${describe(e)}")
                 1
           if missing.nonEmpty then 1 else status
+
+  // An exception's message, or its class's name when it has none, never "null".
+  private[tools] def describe(e: Throwable): String =
+    Option(e.getMessage).filter(_.nonEmpty).getOrElse(e.getClass.getName)
+
+  // "0 messages", "1 message", "2 messages".
+  private[tools] def countLine(
+    count: Int,
+    language: Language,
+    file: Path,
+  ): String =
+    val noun = if count == 1 then "message" else "messages"
+    s"$count $noun in ${language.tag}: $file"
 
   private def write(
     dir: Path,
@@ -129,7 +149,7 @@ object ExportCatalogues:
         Catalogue(language, messages.toMap).toJsonPretty + "\n",
         StandardCharsets.UTF_8,
       )
-      out.println(s"${messages.size} messages in ${language.tag}: $file")
+      out.println(countLine(messages.size, language, file))
 
     problems.foreach(p => err.println(s"problem: $p"))
     if problems.isEmpty then 0 else 1
@@ -180,34 +200,64 @@ private object Classpath:
       .flatMap(n => Language.parse(n.stripSuffix(".json")).toOption)
       .distinct
 
+  // Every family object in the package and below; one that fails to load is a Left, so that the
+  // export reports it instead of leaving its messages out without a word.
   def familiesIn(
     pkg: String,
     entries: List[File],
     loader: ClassLoader,
-  ): List[MessageFamily] =
+  ): List[Either[String, MessageFamily]] =
     names(entries, pkg.replace('.', '/') + "/")
       .filter(_.endsWith("$.class"))
       .map(_.stripSuffix(".class").replace('/', '.'))
-      .flatMap(binaryName => instance(binaryName, loader).toOption)
+      .flatMap: binaryName =>
+        instance(binaryName, loader) match
+          case Left(e)        => List(Left(s"$binaryName: $e"))
+          case Right(Some(f)) => List(Right(f))
+          case Right(None)    => Nil
 
   // An object `a.b.C.D` is the class a.b.C$D$; try the dots from the right as nesting.
   def family(name: String, loader: ClassLoader): Either[String, MessageFamily] =
     val parts      = name.split('.').toList
     val candidates = (parts.size to 1 by -1).map: i =>
       parts.take(i).mkString(".") + parts.drop(i).map("$" + _).mkString + "$"
-    candidates.iterator.map(instance(_, loader)).collectFirst { case Right(f) => f }
-      .toRight("not a MessageFamily object on the classpath")
+    val results    = candidates.map(instance(_, loader))
+    results.collectFirst { case Right(Some(f)) => f }
+      .toRight(
+        results.collectFirst { case Left(e) => e }
+          .getOrElse("not a MessageFamily object on the classpath")
+      )
 
-  private def instance(binaryName: String, loader: ClassLoader): Either[String, MessageFamily] =
-    try
-      val c = Class.forName(binaryName, false, loader)
-      if !classOf[MessageFamily].isAssignableFrom(c) then Left("not a MessageFamily")
-      else
+  // Right(None): no class of that name, or not a MessageFamily object. Left: a MessageFamily
+  // class whose object cannot be had, such as one whose initialiser throws.
+  private def instance(
+    binaryName: String,
+    loader: ClassLoader,
+  ): Either[String, Option[MessageFamily]] =
+    familyClass(binaryName, loader).fold(Right(None)): c =>
+      try
         c.getField("MODULE$").get(null) match
-          case f: MessageFamily => Right(f)
-          case _                => Left("not an object")
+          case f: MessageFamily => Right(Some(f))
+          case _                => Right(None)
+      catch
+        case _: NoSuchFieldException        => Right(None)
+        case e: ExceptionInInitializerError =>
+          Left(s"cannot initialise: ${describe(Option(e.getCause).getOrElse(e))}")
+        case e: LinkageError                => Left(describe(e))
+        case NonFatal(e)                    => Left(describe(e))
+
+  // A class that cannot be loaded or linked is not known to be a family, so it is not one.
+  private def familyClass(binaryName: String, loader: ClassLoader): Option[Class[?]] =
+    try
+      Option(Class.forName(
+        binaryName,
+        false,
+        loader,
+      )).filter(classOf[MessageFamily].isAssignableFrom)
     catch
-      case e: LinkageError => Left(String.valueOf(e.getMessage))
-      case NonFatal(e)     => Left(String.valueOf(e.getMessage))
+      case _: LinkageError => None
+      case NonFatal(_)     => None
+
+  private def describe(e: Throwable): String = ExportCatalogues.describe(e)
 
 end Classpath

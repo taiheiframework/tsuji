@@ -495,9 +495,12 @@ object MessageFormat2:
     )
 
   private def structureErrors(message: Message): List[TemplateError] =
-    val functions = expressions(message).collect:
+    val functions = expressions(message).flatMap:
       case FunctionAnnotation(_, f, _, at) if f.nonEmpty && !Functions(f) =>
-        TemplateError(at, s"unknown function :$f")
+        List(TemplateError(at, s"unknown function :$f"))
+      case FunctionAnnotation(_, "number" | "integer", options, at)       =>
+        numberOptionErrors(options).map(TemplateError(at, _))
+      case _                                                              => Nil
     val matches   = message.body.toOption.toList.flatMap: m =>
       val arity    = m.selectors.size
       val counts   = m.cases.collect:
@@ -676,7 +679,7 @@ object MessageFormat2:
   ): Any =
     function match
       case "number"   => formatNumber(value, options, context.locale)
-      case "integer"  => formatInteger(value)
+      case "integer"  => formatInteger(value, options, context.locale)
       case "datetime" => PlatformDateTimeFormatter.formatDateTime(value, options, context.locale)
       case "date"     =>
         val date = value match
@@ -695,7 +698,7 @@ object MessageFormat2:
             PlatformDateTimeFormatter.formatDateTime(t, options - "dateStyle", context.locale)
           case other        => other.toString
       case "plural"   => PluralSelector(value, context.pluralLocale.getOrElse(context.locale))
-      case "string"   => show(value, context.locale)
+      case "string"   => text(value, context.locale)
       case _          => value
 
   private def formatNumber(
@@ -703,9 +706,80 @@ object MessageFormat2:
     options: Map[String, String],
     locale: String,
   ): String =
-    numberOf(value) match
-      case Some(num) => PlatformNumberFormatter.formatNumber(num, options.get("style"), locale)
-      case None      => value.toString
+    format(
+      value,
+      style(options),
+      fractionDigits(options, "minimumFractionDigits"),
+      fractionDigits(options, "maximumFractionDigits"),
+      options,
+      locale,
+    )
+
+  // A value that is no finite number of ordinary size shows as it is. The digits go to the
+  // platform's formatter as they are, so a Long past 2^53 or a BigDecimal loses none of them.
+  private def format(
+    value: Any,
+    style: NumberStyle,
+    minimum: Option[Int],
+    maximum: Option[Int],
+    options: Map[String, String],
+    locale: String,
+  ): String =
+    Decimal.plain(value).fold(String.valueOf(value)): digits =>
+      PlatformNumberFormatter.format(
+        digits,
+        style,
+        minimum,
+        // Both given the wrong way round: the larger holds, where Intl would throw.
+        maximum.map(max => math.max(max, minimum.getOrElse(0))),
+        grouped(options),
+        locale,
+      )
+
+  // style=currency names its currency with currency=; without one there is no amount to write,
+  // only a number. Which options are valid is validate's to say, not formatting's.
+  private def style(options: Map[String, String]): NumberStyle =
+    (options.get("style"), options.get("currency").filter(wellFormedCurrency)) match
+      case (Some("percent"), _)           => NumberStyle.Percent
+      case (Some("currency"), Some(code)) => NumberStyle.Currency(Language.upper(code))
+      case _                              => NumberStyle.Plain
+
+  private def wellFormedCurrency(code: String): Boolean =
+    code.length == 3 && code.forall(c => (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))
+
+  // More decimals than this no platform writes.
+  private val MaxFractionDigits = 20
+
+  private def fractionDigits(options: Map[String, String], name: String): Option[Int] =
+    options.get(name).flatMap(wholeOption).filter(_ <= MaxFractionDigits)
+
+  private def wholeOption(text: String): Option[Int] =
+    Option.when(
+      text.nonEmpty && text.length <= 2 && text.forall(c => c >= '0' && c <= '9')
+    )(text.toInt)
+
+  private val GroupingOn  = Set("auto", "always", "true")
+  private val GroupingOff = Set("never", "false")
+
+  // Digits in groups, as the reader's language writes them, unless useGrouping=never.
+  private def grouped(options: Map[String, String]): Boolean =
+    !options.get("useGrouping").exists(GroupingOff)
+
+  // What is wrong with the options of :number and :integer, for validate.
+  private def numberOptionErrors(options: Map[String, String]): List[String] =
+    val currency = (options.get("style"), options.get("currency")) match
+      case (_, Some(code)) if !wellFormedCurrency(code) =>
+        List("currency= takes a three-letter currency code such as EUR")
+      case (Some("currency"), None)                     =>
+        List("style=currency needs currency=, a three-letter currency code such as EUR")
+      case _                                            => Nil
+    val digits   = List("minimumFractionDigits", "maximumFractionDigits").flatMap: name =>
+      options.get(name).filter(v => !wholeOption(v).exists(_ <= MaxFractionDigits)).map: _ =>
+        s"$name= takes a whole number from 0 to $MaxFractionDigits"
+    val grouping = options.get("useGrouping").filter(v => !GroupingOn(v) && !GroupingOff(v)).map:
+      _ =>
+        "useGrouping= takes auto, always or never"
+    currency ++ digits ++ grouping
 
   // The longest text read as a number, the bound the JSON reader puts on a number.
   private val MaxNumberText = JsonTreeReader.MaxNumberLength
@@ -715,19 +789,37 @@ object MessageFormat2:
   private[tsuji] def numberOf(value: Any): Option[Double] =
     Option(value).map(_.toString).filter(_.length <= MaxNumberText).flatMap(_.toDoubleOption)
 
-  // Rounded half away from zero, digits only; a value that is no number shows as it is.
-  private def formatInteger(value: Any): String =
-    value.toString.toDoubleOption match
-      case Some(d) if !d.isNaN && !d.isInfinite => math.round(d).toString
-      case _                                    => value.toString
+  // A whole number, a half rounded away from zero (2.5 gives 3, -2.5 gives -3), written as the
+  // reader's language writes numbers.
+  private def formatInteger(
+    value: Any,
+    options: Map[String, String],
+    locale: String,
+  ): String =
+    format(value, NumberStyle.Plain, Some(0), Some(0), options, locale)
 
   final private[tsuji] case class PluralSelector(value: Any, locale: String)
 
-  // How a value shows in a pattern: a language by its name in the reader's language.
+  // How a value shows in a pattern: a language by its name in the reader's language, a number
+  // and a date or time as :number and :datetime write them without options. Text that happens
+  // to read as a number is text.
   private[tsuji] def show(value: Any, locale: String): String = value match
-    case PluralSelector(v, _) => v.toString
-    case l: Language          => Language.nameIn(l, locale)
-    case other                => other.toString
+    case PluralSelector(v, _)                           => show(v, locale)
+    case l: Language                                    => Language.nameIn(l, locale)
+    case _: LocalDate | _: LocalDateTime | _: LocalTime =>
+      PlatformDateTimeFormatter.formatDateTime(value, Map.empty, locale)
+    case number if Decimal.isNumber(number)             =>
+      format(number, NumberStyle.Plain, None, None, Map.empty, locale)
+    case other                                          => other.toString
+
+  // What :string gives: the value as text, unformatted. A number is its digits, the same on both
+  // platforms (an order number 12345 stays 12345, the Double 1 is 1); anything else shows as it
+  // would without a function.
+  private def text(value: Any, locale: String): String = value match
+    case PluralSelector(v, _)               => text(v, locale)
+    case number if Decimal.isNumber(number) => Decimal.plain(number).getOrElse(number.toString)
+    case _: LocalDate | _: LocalDateTime | _: LocalTime => value.toString
+    case other                                          => show(other, locale)
 
   private def evaluatePattern(pattern: Pattern, context: Context): String =
     val out                       = new StringBuilder
@@ -775,10 +867,16 @@ object MessageFormat2:
       mcase.keys.zip(selectorValues).forall:
         case (key, p: PluralChoice) => matchesPluralKey(p, key)
         case (key, l: Language)     => key == "*" || key == l.tag
-        case (key, value)           => key == value.toString || key == "*"
+        case (key, value)           => key == "*" || matchesValue(key, value)
     matchedCase match
       case Some(mcase) => evaluatePattern(mcase.pattern, context)
       case None        => "[no match]"
+
+  // A selector without :plural against a key: a number by its value (the Double 1 matches the
+  // key `1` on both platforms, as the Int 1 does), anything else by its text.
+  private def matchesValue(key: String, value: Any): Boolean =
+    key == value.toString ||
+    (Decimal.isNumber(value) && Decimal.plain(value).exists(Decimal.sameNumber(_, key)))
 
   // A plural selector's number and category, worked out once for all the variants.
   final private case class PluralChoice(operands: Option[Operands], category: String)

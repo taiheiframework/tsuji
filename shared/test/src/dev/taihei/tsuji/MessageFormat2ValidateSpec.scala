@@ -21,7 +21,10 @@ object MessageFormat2ValidateSpec extends ZIOSpecDefault:
           "Hello World",
           "",
           "Hello {$name}",
-          "Price: {$price :number style=currency}",
+          "{$n :number minimumFractionDigits=2 maximumFractionDigits=4 useGrouping=never}",
+          "{$n :integer useGrouping=always}",
+          "Price: {$price :number style=currency currency=EUR}",
+          "Price: {$price :number style=currency currency=eur}",
           "{$d :datetime dateStyle=long}",
           ".input {$count :number}\nCount: {$count}",
           ".let {$greeting = (Hello)}\n{$greeting} World",
@@ -35,6 +38,36 @@ object MessageFormat2ValidateSpec extends ZIOSpecDefault:
       }
     ),
     suite("validate refuses, with a position")(
+      test("a currency that is not a three-letter code") {
+        def refused(code: String) =
+          MessageFormat2.validate(s"Price: {$$price :number style=currency currency=$code}")
+        assertTrue(
+          refused("euro").map(_.message) ==
+          List("currency= takes a three-letter currency code such as EUR"),
+          refused("euro").head.position == 15,
+          refused("E1").size == 1,
+          refused("EUR1").size == 1,
+        )
+      },
+      // Up to 6.0.0 this was US dollars, whatever the application meant.
+      test("style=currency without a currency") {
+        assertTrue(
+          MessageFormat2.validate("Price: {$price :number style=currency}").map(_.message) ==
+          List("style=currency needs currency=, a three-letter currency code such as EUR")
+        )
+      },
+      test("number options that are no number of decimals and no grouping") {
+        def message(options: String) = MessageFormat2.validate(s"{$$n :number $options}").map(_.message)
+        assertTrue(
+          message("minimumFractionDigits=two") ==
+          List("minimumFractionDigits= takes a whole number from 0 to 20"),
+          message("maximumFractionDigits=21") ==
+          List("maximumFractionDigits= takes a whole number from 0 to 20"),
+          message("maximumFractionDigits=-1").nonEmpty,
+          message("useGrouping=sometimes") == List("useGrouping= takes auto, always or never"),
+          MessageFormat2.validate("{$n :integer useGrouping=no}").size == 1,
+        )
+      },
       test("an unclosed placeholder") {
         val e = MessageFormat2.validate("Hello {$name")
         assertTrue(e.size == 1, e.head.position == 6, e.head.message.contains("not closed"))

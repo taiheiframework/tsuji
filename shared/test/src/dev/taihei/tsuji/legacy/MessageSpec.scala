@@ -221,7 +221,7 @@ object MessageSpec extends ZIOSpecDefault:
         val msg = Message.withNamedArgs(
           Language.English -> "Value: {$value}"
         )("value" -> 9999999999L)
-        assertTrue(msg.translate(Language.English).contains("9999999999"))
+        assertTrue(msg.translate(Language.English) == "Value: 9,999,999,999")
       },
       test("supports Double arguments") {
         val msg = Message.withNamedArgs(
@@ -240,7 +240,7 @@ object MessageSpec extends ZIOSpecDefault:
         val msg  = Message.withNamedArgs(
           Language.English -> "Date: {$value}"
         )("value" -> date)
-        assertTrue(msg.translate(Language.English).contains("2024-01-15"))
+        assertTrue(msg.translate(Language.English) == "Date: Jan 15, 2024")
       },
     ),
     suite("Message translation")(

@@ -27,13 +27,13 @@ final case class TemplateError private[tsuji] (position: Int, message: String)  
 
 | Syntax | Effect |
 | --- | --- |
-| `{$name}` | the variable; a `Language` shows as its name in the reader's language |
-| `{$n :number}` | a number for the locale; `style=percent`, `style=currency` (USD) |
-| `{$n :integer}` | rounded to a whole number |
+| `{$name}` | the variable; a `Language` shows as its name in the reader's language, a number as `:number` writes it, a date or time as `:datetime` writes it; text stays text |
+| `{$n :number}` | grouped digits and up to three decimals as the reader's language writes them, every digit kept (`Long`, `BigInt`, `BigDecimal`); options `minimumFractionDigits`, `maximumFractionDigits` (0 to 20), `useGrouping=never`, `style=percent`, `style=currency currency=EUR` (the code is required) |
+| `{$n :integer}` | rounded to a whole number (a half away from zero), grouped |
 | `{$d :datetime dateStyle=long timeStyle=short}` | a date and/or time; styles `short`, `medium`, `long`, `full`, any case, unknown gives `medium` |
 | `{$d :date dateStyle=long}` | the date part (of a `LocalDate` or `LocalDateTime`) |
 | `{$t :time}` | the time part (of a `LocalTime` or `LocalDateTime`) |
-| `{$x :string}` | the value as text |
+| `{$x :string}` | the value as text, unformatted: a number as its digits (an order number, a year) |
 
 A bare `{name}` formats as a variable for compatibility, but `validate` refuses it: write `{$name}`
 or a literal `{(text)}`.

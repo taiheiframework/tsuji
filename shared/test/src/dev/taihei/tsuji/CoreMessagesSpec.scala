@@ -54,7 +54,7 @@ object CoreMessagesSpec extends ZIOSpecDefault:
       assertTrue(
         Validation.intMinimum(min = 1).localize(English) == "should be at least 1",
         Validation.intMaximum(max = 10).localize(English) == "should be at most 10",
-        Validation.longMinimum(min = 5000000000L).localize(English) == "should be at least 5000000000",
+        Validation.longMinimum(min = 5000000000L).localize(English) == "should be at least 5,000,000,000",
         Validation.longMaximum(max = -3L).localize(English) == "should be at most -3",
       )
     },

@@ -120,7 +120,7 @@ object PluralRulesSpec extends ZIOSpecDefault:
           "when * {{$n} pliku}"
         assertTrue(
           List[Any](1, 3, 5, 1.5).map(n => MessageFormat2.format(files, Map("n" -> n), "pl")) ==
-          List("1 plik", "3 pliki", "5 plików", "1.5 pliku")
+          List("1 plik", "3 pliki", "5 plików", "1,5 pliku")
         )
       },
       test("Russian and Ukrainian") {

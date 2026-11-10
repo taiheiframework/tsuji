@@ -76,17 +76,17 @@ object MessageFormat2Spec extends ZIOSpecDefault:
       test(":number function formats numbers") {
         val template = "Price: {$price :number}"
         val result   = MessageFormat2.format(template, Map("price" -> 19.99))
-        assertTrue(result.contains("19.99"))
+        assertTrue(result == "Price: 19.99")
       },
       test(":number with style option") {
-        val template = "Price: {$price :number style=currency}"
+        val template = "Price: {$price :number style=currency currency=USD}"
         val result   = MessageFormat2.format(template, Map("price" -> 19.99))
-        assertTrue(result.contains("19.99"))
+        assertTrue(result == "Price: $19.99")
       },
       test(":plural function returns plural selector") {
         val template = "{$count :plural}"
         val result   = MessageFormat2.format(template, Map("count" -> 1))
-        assertTrue(result.contains("1"))
+        assertTrue(result == "1")
       },
     ),
     suite("Match statements")(
@@ -224,12 +224,8 @@ object MessageFormat2Spec extends ZIOSpecDefault:
         val resultEn = MessageFormat2.format(template, Map("price" -> 19.99), "en")
         val resultNl = MessageFormat2.format(template, Map("price" -> 19.99), "nl")
 
-        // Both should contain the price, but formatting might differ by locale
-        // English uses "." and Dutch uses "," as decimal separator
-        assertTrue(
-          resultEn.contains("19.99") || resultEn.contains("19,99"),
-          resultNl.contains("19.99") || resultNl.contains("19,99"),
-        )
+        // English writes the decimals after a point, Dutch after a comma.
+        assertTrue(resultEn == "Price: 19.99", resultNl == "Price: 19,99")
       },
       test("French plural rules: 0 and 1 are 'one'") {
         val template = """.match {$count :plural}
@@ -270,11 +266,7 @@ object MessageFormat2Spec extends ZIOSpecDefault:
         val resultEn = MessageFormat2.format(template, Map("date" -> date), "en")
         val resultFr = MessageFormat2.format(template, Map("date" -> date), "fr")
 
-        // Both should contain parts of the date
-        assertTrue(
-          resultEn.contains("2024") || resultEn.contains("Jan") || resultEn.contains("15"),
-          resultFr.contains("2024") || resultFr.contains("janv") || resultFr.contains("15"),
-        )
+        assertTrue(resultEn == "Jan 15, 2024", resultFr == "15 janv. 2024")
       },
       test("formats LocalDate with different dateStyle options") {
         import java.time.LocalDate
@@ -285,12 +277,7 @@ object MessageFormat2Spec extends ZIOSpecDefault:
         val resultShort = MessageFormat2.format(templateShort, Map("date" -> date), "en")
         val resultLong  = MessageFormat2.format(templateLong, Map("date" -> date), "en")
 
-        // Both should format the date, long should be more verbose
-        assertTrue(
-          resultShort.nonEmpty,
-          resultLong.nonEmpty,
-          resultLong.length >= resultShort.length,
-        )
+        assertTrue(resultShort == "1/15/24", resultLong == "January 15, 2024")
       },
       test("formats LocalDateTime with locale") {
         import java.time.LocalDateTime
@@ -299,10 +286,13 @@ object MessageFormat2Spec extends ZIOSpecDefault:
         val resultEn = MessageFormat2.format(template, Map("datetime" -> datetime), "en")
         val resultNl = MessageFormat2.format(template, Map("datetime" -> datetime), "nl")
 
-        // Should contain date and time components
+        // The space before PM is a plain one or U+202F, and the Dutch month and the separator
+        // between date and time differ, by the version of the platform's locale data.
         assertTrue(
-          resultEn.contains("2024") || resultEn.contains("14") || resultEn.contains("30"),
-          resultNl.contains("2024") || resultNl.contains("14") || resultNl.contains("30"),
+          resultEn.replace('\u202f', ' ') == "Jan 15, 2024, 2:30:00 PM",
+          resultNl.startsWith("15 jan"),
+          resultNl.contains("2024"),
+          resultNl.endsWith("14:30:00"),
         )
       },
       test("formats LocalTime with locale") {
@@ -312,11 +302,7 @@ object MessageFormat2Spec extends ZIOSpecDefault:
         val resultEn = MessageFormat2.format(template, Map("time" -> time), "en")
         val resultFr = MessageFormat2.format(template, Map("time" -> time), "fr")
 
-        // Should contain time components
-        assertTrue(
-          resultEn.contains("14") || resultEn.contains("30") || resultEn.contains("2:30"),
-          resultFr.contains("14") || resultFr.contains("30"),
-        )
+        assertTrue(resultEn.replace('\u202f', ' ') == "2:30:00 PM", resultFr == "14:30:00")
       },
     ),
     suite("Edge cases")(
@@ -416,6 +402,38 @@ object MessageFormat2Spec extends ZIOSpecDefault:
         val date         = LocalDate.of(2024, 1, 15)
         def f(t: String) = MessageFormat2.format(t, Map("v" -> date), "en")
         assertTrue(f("{$v :datetime dateStyle=LONG}") == f("{$v :datetime dateStyle=long}"))
+      },
+    ),
+    suite("Counts that are not whole")(
+      // The count was once cut to an Int: 1.5 read "One item", in every language.
+      test("a fraction is neither one nor an exact number") {
+        val template                          = """.match {$count :plural}
+                                                  |when =0 {none}
+                                                  |when 1 {exactly one}
+                                                  |when one {one}
+                                                  |when other {other}
+                                                  |when * {default}""".stripMargin
+        def f(count: Any, tag: String = "en") =
+          MessageFormat2.format(template, Map("count" -> count), tag).trim
+        assertTrue(
+          f(1.5) == "other",
+          f(0.5) == "other",
+          // French counts everything below 2 as one, but 0.5 is still not the number 1.
+          f(0.5, "fr") == "one",
+          f(1.5, "fr") == "one",
+          f(1.0) == "exactly one",
+          f(1) == "exactly one",
+          f(0) == "none",
+          f(1e12) == "other",
+          f(Double.NaN) == "other",
+        )
+      },
+      test("the language of one is read without the default locale") {
+        val template = ".match {$count :plural}\nwhen one {one}\nwhen * {other}"
+        assertTrue(
+          MessageFormat2.format(template, Map("count" -> 0), "FR-be").trim == "one",
+          MessageFormat2.format(template, Map("count" -> 0), "en-GB").trim == "other",
+        )
       },
     ),
     suite("Parsing in place")(

@@ -15,7 +15,11 @@ format through templates (`:number`, `:integer`, `:datetime`, `:date`, `:time`) 
   no zone); Scala.js prints `UTC`.
 - On Scala.js a date after year 275760 or before year -271821 (outside the JavaScript Date range)
   formats as its ISO text, such as `+300000-01-01`; the JVM formats it in the style asked.
-- `:number style=currency` always formats USD.
+- Numbers go to the platform formatter as their decimal digits, so both platforms write the
+  same text and no digit is lost; a half rounds away from zero on both.
+- `:number style=currency` needs `currency=<ISO 4217 code>` and is written as the reader's
+  language writes amounts.
+- A bare `{$n}` or `{$d}` is formatted as `:number` or `:datetime`; `:string` gives the raw text.
 
 ## Cross-platform rules
 

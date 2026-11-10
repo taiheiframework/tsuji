@@ -12,3 +12,13 @@ object PlatformExpectations:
     case 17          => Set("20 okt. 2026")
     case v if v < 21 => Set("20 okt. 2026", "20 okt 2026")
     case _           => Set("20 okt 2026")
+
+  /** 14:30 in the long and the full time style: no zone to print, so the medium style. */
+  val longTime: String = "2:30:00 PM"
+  val fullTime: String = "2:30:00 PM"
+
+  /** The JDK names the language and the region. */
+  val dutchOfBelgium: String   = "Dutch (Belgium)"
+  val englishOfBritain: String = "English (United Kingdom)"
+
+end PlatformExpectations

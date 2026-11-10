@@ -51,6 +51,16 @@ object MessageFamilySpec extends ZIOSpecDefault:
           Assertion.isLeft(Assertion.containsString("not closed"))
         )
       },
+      test("a currency that is not a three-letter code") {
+        for
+          bad  <- typeCheck(
+            """object Bad extends MessageFamily("bad") { val a = message[(n: Int)]("{$n :number style=currency currency=euro}") }"""
+          )
+          good <- typeCheck(
+            """object Ok extends MessageFamily("ok") { val a = message[(n: Int)]("{$n :number style=currency currency=EUR}") }"""
+          )
+        yield assertTrue(bad.left.exists(_.contains("three-letter currency code")), good.isRight)
+      },
       test("a variable that is not an argument") {
         assertZIO(
           typeCheck("""object Bad extends MessageFamily("bad") { val a = message[(name: String)]("Hi {$nmae}") }""")

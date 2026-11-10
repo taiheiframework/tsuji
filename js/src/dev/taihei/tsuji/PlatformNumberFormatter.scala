@@ -8,47 +8,41 @@ import scala.scalajs.js.annotation.JSGlobal
 @JSGlobal("Intl.NumberFormat")
 private[tsuji] class NumberFormat(@unused locale: String, @unused options: js.Dictionary[Any])
   extends js.Object:
-  def format(value: Double): String = js.native
+  // A number, or the decimal digits of one as text, which Intl formats without rounding them to
+  // a Double first.
+  def format(value: js.Any): String = js.native
 
 private[tsuji] object PlatformNumberFormatter:
 
-  def formatNumber(
-    value: Double,
-    style: Option[String],
+  /**
+   * The number with the plain decimal digits `digits`, written as the language of `locale`
+   * writes numbers. Without `minimum` and `maximum` a number has up to three decimals, a
+   * percentage none and an amount as many as its currency has; `Intl` rounds a half away from
+   * zero. A runtime from before `Intl` took digits as text reads them as a `Double` first, and
+   * may lose the last digits of a very long number.
+   */
+  def format(
+    digits: String,
+    style: NumberStyle,
+    minimum: Option[Int],
+    maximum: Option[Int],
+    grouped: Boolean,
     locale: String,
   ): String =
-    val jsLocale = PlatformLocales.jsLocale(locale)
-
+    // "always", which true stands for in every runtime: the default "auto" leaves 1234 without a
+    // separator in the languages that group from five digits on (Spanish, Polish), which the JDK
+    // does not do.
+    val options = js.Dictionary[Any]("useGrouping" -> grouped)
     style match
-      case Some("percent") =>
-        val options = js.Dictionary[Any](
-          "style" -> "percent",
-          "minimumFractionDigits" -> 0,
-          "maximumFractionDigits" -> 0,
-        )
-        new NumberFormat(jsLocale, options).format(value)
+      case NumberStyle.Plain          => ()
+      case NumberStyle.Percent        => options("style") = "percent"
+      case NumberStyle.Currency(code) =>
+        options("style") = "currency"
+        options("currency") = code
+    minimum.foreach(options("minimumFractionDigits") = _)
+    maximum.foreach(options("maximumFractionDigits") = _)
+    new NumberFormat(PlatformLocales.jsLocale(locale), options).format(digits)
 
-      case Some("currency") =>
-        val options = js.Dictionary[Any](
-          "style" -> "currency",
-          "currency" -> "USD", // Always USD for now
-          "minimumFractionDigits" -> 2,
-          "maximumFractionDigits" -> 2,
-        )
-        new NumberFormat(jsLocale, options).format(value)
-
-      case _ =>
-        if value == value.toInt then
-          value.toInt.toString
-        else
-          val options = js.Dictionary[Any](
-            "minimumFractionDigits" -> 2,
-            "maximumFractionDigits" -> 2,
-          )
-          new NumberFormat(jsLocale, options).format(value)
-
-    end match
-
-  end formatNumber
+  end format
 
 end PlatformNumberFormatter

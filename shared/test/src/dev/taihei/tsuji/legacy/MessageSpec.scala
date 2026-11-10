@@ -448,6 +448,47 @@ object MessageSpec extends ZIOSpecDefault:
           json.fromJson[Message].left.exists(_.contains("1000 arguments")),
         )
       } @@ TestAspect.timeout(zio.Duration.fromSeconds(15)),
+      // Within the 1000 arguments a message may hold: names with one hash code and a long common
+      // start once went into a map as they were, half a million comparisons of long strings.
+      test("argument names that share a hash code are refused before they are keys of a map") {
+        def message(count: Int) =
+          val names = (0 until count).map(i =>
+            "n" * 4000 + (0 until 10).map(b => if (i >> b & 1) == 1 then "Aa" else "BB").mkString
+          )
+          names -> names.map(n => s""""$n":"v"""").mkString(
+            """{"args":[],"namedArgs":{""",
+            ",",
+            """},"translationTemplates":{"en":"x"}}""",
+          )
+        val (many, refused)     = message(1000)
+        val (few, accepted)     = message(16)
+        assertTrue(
+          many.map(_.hashCode).distinct.size == 1,
+          refused.fromJson[Message].left.exists(_.contains("argument names of a message share a hash code")),
+          few.map(_.hashCode).distinct.size == 1,
+          accepted.fromJson[Message].map(_.namedArgs.size) == Right(16),
+        )
+      } @@ TestAspect.timeout(zio.Duration.fromSeconds(15)),
+      test("template languages that share a hash code are refused before they are keys of a map") {
+        // "an" and "c0" have the same hashCode; these private-use tags are well formed.
+        def message(count: Int) =
+          val tags = (0 until count).map(i =>
+            "en-x-" + (0 until 8).map(b => if (i >> b & 1) == 1 then "an" else "c0").mkString("-")
+          )
+          tags -> tags.map(t => s""""$t":"x"""").mkString(
+            """{"args":[],"namedArgs":{},"translationTemplates":{""",
+            ",",
+            "}}",
+          )
+        val (many, refused)     = message(200)
+        val (few, accepted)     = message(16)
+        assertTrue(
+          many.map(_.hashCode).distinct.size == 1,
+          refused.fromJson[Message].left.exists(_.contains("template languages of a message share a hash code")),
+          few.map(_.hashCode).distinct.size == 1,
+          accepted.fromJson[Message].map(_.translationTemplates.size) == Right(16),
+        )
+      },
       test("many template languages with one hash are counted before they are hashed") {
         // "an" and "c0" have the same hashCode; these private-use tags are well formed.
         val tags = (0 until (1 << 16)).map(i =>

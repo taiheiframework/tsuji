@@ -150,7 +150,7 @@ object Message:
           args      <- field.get("args").toRight("a 4.x message needs \"args\"").flatMap(strings)
           named     <- field.get("namedArgs") match
             case None | Some(JsonTree.Null) => Right(Map.empty[String, MessageArg])
-            case Some(o)                    => pairs(o, MaxArgs, "arguments").map(_.toMap)
+            case Some(o)                    => pairs(o, MaxArgs, "arguments").flatMap(named)
           templates <-
             field.get("translationTemplates").toRight("a 4.x message needs \"translationTemplates\"")
               .flatMap(pairs(_, MaxTemplates, "templates"))
@@ -179,11 +179,25 @@ object Message:
         if read.size == fields.size then Right(read) else Left(s"one of the $what is not a string")
       case _                    => Left(s"the $what are not an object")
 
+  // The names come from the wire and are about to be the keys of a map. A thousand long names
+  // with one hash code and a common start cost a map half a million comparisons of long strings,
+  // so their length and their hash codes are checked first. A name given more than 16 times
+  // shares its hash code with itself and is refused with them; 4.x never wrote a name twice.
+  private def named(pairs: Vector[(String, String)]): Either[String, Map[String, MessageArg]] =
+    if pairs.exists((name, _) => tooLong(name)) then
+      Left(s"an argument name is longer than $MaxStringLength characters")
+    else if SharedHashes.exceed(pairs.map(_._1)) then
+      Left(s"more than ${SharedHashes.Max} argument names of a message share a hash code")
+    else Right(pairs.toMap)
+
   // The keys are read as the codec of Language reads them; the error leaves the key out.
   private def languages(pairs: Vector[(String, String)]): Either[String, Map[Language, String]] =
     val read =
       pairs.map((tag, template) => Language.fromTree(JsonTree.Str(tag)).toOption.map(_ -> template))
     if read.exists(_.isEmpty) then Left("a template key is not a language")
+    // The tags become the keys of a map, as the argument names do: see `named`.
+    else if SharedHashes.exceed(read.flatten.map(_._1.tag)) then
+      Left(s"more than ${SharedHashes.Max} template languages of a message share a hash code")
     else Right(read.flatten.toMap)
 
   /**

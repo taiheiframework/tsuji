@@ -726,6 +726,7 @@ object MessageFormat2:
       case f: Float                                        => Some(("float", f))
       case d: Double                                       => Some(("double", d))
       case s: String if s.length <= Operands.MaxNumberText => Some(s)
+      case _: LocalDate | _: LocalDateTime | _: LocalTime  => Some(value)
       case _                                               => None
 
     // What reading a value as its digits costs, in characters: those of its text, and for a
@@ -734,6 +735,9 @@ object MessageFormat2:
       (value match
         // First, as in `key`: in JavaScript a whole number is a Float and a Double too.
         case _: Byte | _: Short | _: Int | _: Long => 0
+        // A whole number costs the same in a Double as in an Int, on both platforms.
+        case f: Float if small(f.toDouble)         => 0
+        case d: Double if small(d)                 => 0
         case f: Float                              => exactDigits(f.toDouble)
         case d: Double                             => exactDigits(d)
         case s: String                             => math.min(s.length, Operands.MaxNumberText)
@@ -744,6 +748,9 @@ object MessageFormat2:
         case _                       => 0)
 
     val Base = 8
+
+    // Whole and below 2^53: its exact value is its few digits.
+    private def small(d: Double): Boolean = d.isWhole && math.abs(d) < 9007199254740992.0
 
     // About the digits of the exact value of a Double: each binary place below one is a decimal
     // place, and ten binary places above it are three digits. The smallest have 1074 places.
@@ -784,6 +791,9 @@ object MessageFormat2:
 
   private def evaluate(message: Message, initialContext: Context): String =
     val context = message.declarations.foldLeft(initialContext): (ctx, decl) =>
+      // A declaration writes nothing, and a template can hold thousands: each is a step of the
+      // work a message may do, as each piece, selector and variant is.
+      ctx.budget.charge(Step)
       ctx.copy(variables = ctx.variables + (decl.name -> evaluateExpression(decl.expr, ctx)))
     message.body match
       case Left(pattern)    => evaluatePattern(pattern, context)
@@ -814,6 +824,21 @@ object MessageFormat2:
       case _                    => applyTo(operand, function, options, context)
 
   end applyFunction
+
+  // A date or a time written as the reader's language writes it. Writing one costs a formatter,
+  // whether or not the text is shown: it is charged to the budget, and one evaluation writes a
+  // value with the same styles once.
+  private def temporal(
+    value: Any,
+    options: Map[String, String],
+    locale: String,
+    numbers: Digits,
+  ): String =
+    numbers
+      .once("datetime", options, value):
+        numbers.budget.charge(FormatCost)
+        PlatformDateTimeFormatter.formatDateTime(value, options, locale)
+      .toString
 
   /**
    * A number that `:number` or `:integer` wrote: the value it was given, the number as it is
@@ -877,22 +902,20 @@ object MessageFormat2:
             context.locale,
           ),
         )
-      case "datetime" => PlatformDateTimeFormatter.formatDateTime(value, options, context.locale)
+      case "datetime" => temporal(value, options, context.locale, context.numbers)
       case "date"     =>
         val date = value match
           case ldt: LocalDateTime => ldt.toLocalDate
           case other              => other
         date match
-          case d: LocalDate =>
-            PlatformDateTimeFormatter.formatDateTime(d, options - "timeStyle", context.locale)
+          case d: LocalDate => temporal(d, options - "timeStyle", context.locale, context.numbers)
           case other        => asItIs(other)
       case "time"     =>
         val time = value match
           case ldt: LocalDateTime => ldt.toLocalTime
           case other              => other
         time match
-          case t: LocalTime =>
-            PlatformDateTimeFormatter.formatDateTime(t, options - "dateStyle", context.locale)
+          case t: LocalTime => temporal(t, options - "dateStyle", context.locale, context.numbers)
           case other        => asItIs(other)
       case "plural"   => PluralSelector(value, context.pluralLocale.getOrElse(context.locale))
       case "string"   => text(value, context.locale, context.numbers)
@@ -963,6 +986,11 @@ object MessageFormat2:
   // What a number costs to write beyond its digits, in the characters of the budget: on
   // Scala.js a formatter that is not at hand is built, which is the larger part.
   private val FormatCost = 32
+
+  // What a step of an evaluation costs that writes nothing: a declaration, a placeholder, a
+  // selector, a key tried. With them, how long one message can take depends on its budget and
+  // not on how a template from a catalogue spends its 64K characters.
+  private val Step = 1
 
   // A value that is not formatted shows as its own text. A BigInt has no limit of its own, and
   // writing one out costs time that grows with the square of its length, seconds in JavaScript
@@ -1048,7 +1076,7 @@ object MessageFormat2:
     case PluralSelector(v, _)                           => show(v, locale, numbers)
     case l: Language                                    => Language.nameIn(l, locale)
     case _: LocalDate | _: LocalDateTime | _: LocalTime =>
-      PlatformDateTimeFormatter.formatDateTime(value, Map.empty, locale)
+      temporal(value, Map.empty, locale, numbers)
     case number if Decimal.isNumber(number)             =>
       numbers.once("", Map.empty, number):
         format(
@@ -1087,6 +1115,8 @@ object MessageFormat2:
     def piece(p: Pattern): String = p match
       case Text(value)        => value
       case Placeholder(expr)  =>
+        // A placeholder that shows nothing is still a step.
+        context.budget.charge(Step)
         show(evaluateExpression(expr, context), context.locale, context.numbers)
       case PatternSequence(_) => ""
     pattern match
@@ -1122,7 +1152,10 @@ object MessageFormat2:
     val pluralAt       = values.zipWithIndex.collect { case (_: PluralSelector, i) => i }
     val read           = pluralAt.take(MaxPluralSelectors).toSet
     val selectorValues = values.zipWithIndex.map((v, i) => selected(v, read(i), context))
+    // Selecting writes nothing: every selector, and every key a variant is tried with, is a step.
+    context.budget.charge(Step * selectorValues.size)
     val matchedCase    = matchStmt.cases.find: mcase =>
+      context.budget.charge(Step * mcase.keys.size)
       mcase.keys.size == selectorValues.size &&
       mcase.keys.zip(selectorValues).forall:
         case (key, p: PluralChoice) => matchesPluralKey(p, key)
@@ -1151,9 +1184,15 @@ object MessageFormat2:
     private lazy val number = read.flatMap(_.number)
 
     def matches(key: String): Boolean =
-      key == text ||
-      (Operands.parse(key).isDefined &&
-      number.exists(_.compareTo(new java.math.BigDecimal(key)) == 0))
+      key == text || comparable(key).exists(k => number.exists(_.compareTo(k) == 0))
+
+    // A key that is a number, read as one: its digits are read, which is charged.
+    private def comparable(key: String): Option[java.math.BigDecimal] =
+      Option
+        .when(key.nonEmpty && (key.head.isDigit || key.head == '-' || key.head == '+')):
+          budget.charge(key.length)
+          Operands.parse(key).map(_ => new java.math.BigDecimal(key))
+        .flatten
 
   end ValueChoice
 

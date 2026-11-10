@@ -39,12 +39,35 @@ private[tsuji] object PlatformDateTimeFormatter:
       case _                  => (Seq.empty, None)
 
     instant.fold(MessageFormat2.asItIs(value)): date =>
-      val jsOptions = js.Dictionary[Any](
-        (("timeZone" -> "UTC") +: styles.map(key => key -> styleOf(options, key)))*
-      )
-      new DateTimeFormat(jsLocale, jsOptions).format(date)
+      val chosen = styles.map(key => key -> styleOf(options, key))
+      formatter(
+        s"$locale|${chosen.map((key, style) => s"$key=$style").mkString("|")}",
+        jsLocale,
+        js.Dictionary[Any]((("timeZone" -> "UTC") +: chosen)*),
+      ).format(date)
 
   end formatDateTime
+
+  // Building an Intl.DateTimeFormat costs far more than formatting with one, and a message with
+  // nested messages that each show a date builds the same one thousands of times. The latest few
+  // are kept, the oldest going first: a reader's language can come from a request. JavaScript
+  // runs one thing at a time, so a plain map is enough.
+  private val Kept       = 64
+  private val formatters = js.Dictionary.empty[DateTimeFormat]
+
+  private def formatter(
+    key: String,
+    locale: String,
+    options: js.Dictionary[Any],
+  ): DateTimeFormat =
+    formatters.getOrElse(
+      key, {
+        if formatters.size >= Kept then formatters.remove(formatters.keys.head)
+        val made = new DateTimeFormat(locale, options)
+        formatters(key) = made
+        made
+      },
+    )
 
   // Intl throws a RangeError on a style it does not know. Like the JVM side, take the style in
   // any case and fall back to medium for anything else.

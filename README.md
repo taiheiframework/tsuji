@@ -614,10 +614,11 @@ in Tsuji's own codecs, whatever `ReaderConfig` you read with:
   request header to the languages you support before you show messages in it
   (`Language.negotiate`, see From a request), or each new tag costs a lookup per family.
 - One message, with its nested messages, list elements and fallbacks, produces at most four
-  million characters; past that it shows its own template. The work on its numbers counts
-  against the same limit, in the characters read and written: about forty for an ordinary
-  number, a few hundred for one of hundreds of digits, and up to a thousand to read a `Double`
-  whose exact value has that many (the smallest ones). A message that shows a hundred thousand
+  million characters; past that it shows its own template. The work it does counts against the
+  same limit, also when nothing is shown for it: one for every declaration, placeholder,
+  selector and key tried, about forty for an ordinary number or a date that is written, a few
+  hundred for a number of hundreds of digits, and up to a thousand to read a `Double` whose
+  exact value has that many (the smallest ones). A message that shows a hundred thousand
   numbers, or a list of ten thousand different such `Double`s, falls back as one that writes
   too much text does; no message a person reads comes near it.
 

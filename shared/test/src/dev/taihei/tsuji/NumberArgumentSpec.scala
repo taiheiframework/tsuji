@@ -200,6 +200,61 @@ object NumberArgumentSpec extends ZIOSpecDefault:
             small == (1000, Some("b")),
           )
     },
+    // A date written into a declaration or selected on shows nothing, and a formatter was built
+    // for each: 1300 declarations in each of thousands of nested messages took a minute for a
+    // 60 KB message. Every step of an evaluation now costs the budget something.
+    test("work that writes nothing spends the budget too: dates, declarations, selectors, variants") {
+      import java.time.{LocalDate, LocalTime}
+      val day      = LocalDate.of(2026, 11, 10)
+      val declared = MessageFormat2.parse(
+        (1 to 1300).map(i => s".local $$b$i = {$$d :date dateStyle=full}\n").mkString + "{(x)}"
+      ).message
+      val selected = MessageFormat2.parse(
+        ".match " + "{$d :date} " * 3700 + "\nwhen " + "* " * 3700 + "{x}"
+      ).message
+      val variants = MessageFormat2.parse(
+        ".match {$d}\n" + (1 to 4500).map(i => s"when $i {a}\n").mkString + "when * {x}"
+      ).message
+      val times    = MessageFormat2.parse("{$t :time timeStyle=short}" * 2400).message
+      def evaluations(message: MessageFormat2.Message, args: Map[String, Any]): Int =
+        val budget = Budget.fresh()
+        Iterator
+          .continually(MessageFormat2.formatted(message, args, "en", budget))
+          .take(100000)
+          .takeWhile(_.isRight)
+          .size
+      TimeBudget.within("evaluations that write one character, until the budget is spent", 20000)(
+        (
+          evaluations(declared, Map("d" -> day)),
+          evaluations(selected, Map("d" -> day)),
+          evaluations(variants, Map("d" -> 0)),
+          evaluations(times, Map("t" -> LocalTime.of(14, 5))),
+        )
+      ):
+        (
+          declarations,
+          selectors,
+          keys,
+          shown,
+        ) =>
+          assertTrue(
+            // Each fits the budget many times over, and none without end.
+            declarations > 100 && declarations < 5000,
+            selectors > 100 && selectors < 5000,
+            keys > 50 && keys < 1000,
+            shown > 100 && shown < 1000,
+          )
+    },
+    test("a list of whole Doubles costs what a list of Ints costs, on both platforms") {
+      given Catalogues = Catalogues(Seq(Readings))
+      def left(values: List[Double]): Boolean =
+        // Four lists of ten thousand in one budget: all four are shown.
+        val budget = Budget.fresh()
+        (1 to 4).forall(_ =>
+          summon[Catalogues].renderWithin(Readings.all(values = values), Language.English, budget).startsWith("0, 1, 2")
+        )
+      assertTrue(left(List.tabulate(10000)(_.toDouble)))
+    },
     test("the shortest digits of a Float are those that rounding its exact value finds, for 20000 values") {
       def reference(f: Float): String =
         val exact = new java.math.BigDecimal(math.abs(f.toDouble))

@@ -61,6 +61,13 @@ object MessageFamilySpec extends ZIOSpecDefault:
           )
         yield assertTrue(bad.left.exists(_.contains("three-letter currency code")), good.isRight)
       },
+      test("style=currency without a currency") {
+        assertZIO(
+          typeCheck(
+            """object Bad extends MessageFamily("bad") { val a = message[(n: Int)]("{$n :number style=currency}") }"""
+          )
+        )(Assertion.isLeft(Assertion.containsString("style=currency needs currency=")))
+      },
       test("a variable that is not an argument") {
         assertZIO(
           typeCheck("""object Bad extends MessageFamily("bad") { val a = message[(name: String)]("Hi {$nmae}") }""")

@@ -680,12 +680,17 @@ MessageFormat2.format("Order {$id :string}, {$year :number useGrouping=never}", 
   `{$n}` of 1234567 is `1,234,567`, `{$d}` of a `LocalDate` is `Oct 20, 2026`. Use `:string` for
   a number that is a name and not an amount, such as an order number or a year: it gives the
   digits as they are.
-- Every digit is kept: an `Int`, `Long`, `BigInt` and `BigDecimal` go to the formatter as their
-  digits, a `Double` and a `Float` as the fewest digits that read back as the same value (the
+- Every digit is kept, up to 300 whole digits (a longer number is shown as it is, unformatted):
+  an `Int`, `Long`, `BigInt` and `BigDecimal` go to the formatter as their digits, a `Double` and a `Float` as the fewest digits that read back as the same value (the
   `Float` 1.1 is `1.1`, not `1.100000023841858`). Text that reads as a number is formatted by
   `:number`, and shown as text without a function.
 - `.match {$x} when 3` compares a number by its value: the `Double` 3.0, the `Long` 3 and the
-  `BigDecimal` 3.00 all match.
+  `BigDecimal` 3.00 all match. A number declared with a function (`.input {$n :number}`) is
+  still that number to a later `.match`, `:plural` or function; only a placeholder shows its
+  text.
+- `validate` and the macro refuse what a number function cannot do: `style=currency` without
+  `currency=`, a `currency=` that is not three letters, a number of decimals outside 0 to 20, a
+  `useGrouping` other than `auto`, `always` or `never`, and `style=` on `:integer`.
 
 Coming from 6.0.0: a whole number had no grouping (`1234567`), any other number exactly two
 decimals (`1.50`), `:integer` rounded -2.5 to -2, `style=currency` always wrote US dollars, and
@@ -714,7 +719,7 @@ MessageFormat2.format(files, Map("n" -> 1.5), Language("pl"))  // 1,5 pliku
   English template because Russian has none, 21 is `other` and says "21 items"; the number itself
   is formatted for the reader. A template found by cutting subtags off the reader's own tag keeps
   the reader's regional rules (a `pt-PT` reader of the `pt` template has `pt-PT`'s). The 4.x
-  `legacy.Message` does the same, also for its fallback to the reader's base language. `MessageFormat2.format` uses its one `locale` for both.
+  `legacy.Message` does the same, also for its fallback to the reader's base language. `MessageFormat2.format` uses its one `language` for both.
 - A language is found as the fallback chain walks a tag: `pt-PT` has rules of its own, `pt-BR`
   falls back to `pt`, `sr-Latn-RS` to `sr`. A language CLDR has no rules for takes CLDR's root,
   where every number is `other`.

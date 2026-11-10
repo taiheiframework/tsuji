@@ -171,6 +171,33 @@ object PlatformFormatterSpec extends ZIOSpecDefault:
         shown(2026) == "2,026",
       )
     },
+    // :number writes 1000 as 1,000, which is no number to match on. Up to 6.0.0 a whole number
+    // came out as bare digits, so these templates selected by accident.
+    test("a number declared with :number is still that number to a later .match or function") {
+      def shown(
+        template: String,
+        n: Any,
+        language: Language = Language.English,
+      )           =
+        MessageFormat2.format(template, Map("n" -> n), language).trim
+      val plural  = ".input {$n :number}\n.match {$n :plural}\nwhen =1000 {a thousand}\n" +
+        "when one {one}\nwhen few {few}\nwhen many {many}\nwhen * {{$n} others}"
+      val byValue = ".match {$n :number}\nwhen 1234 {found}\nwhen * {other}"
+      val local   = ".local $x = {$n :integer}\n.match {$x}\nwhen 1234 {found {$x}}\nwhen * {other}"
+      assertTrue(
+        shown(plural, 1000) == "a thousand",
+        shown(plural, 1) == "one",
+        shown(plural, 5000) == "5,000 others",
+        shown(plural, 1000000, Language.French) == "many",
+        shown(plural, 1002, Language("pl")) == "few",
+        shown(byValue, 1234) == "found",
+        shown(byValue, 1235) == "other",
+        shown(local, 1234) == "found 1,234",
+        // A function gets the number, not its text: formatted once more, or shown as it is.
+        shown(".local $x = {$n :number}\n{$x} {$x :number minimumFractionDigits=2} {$x :string}", 1234.5) ==
+        "1,234.5 1,234.50 1234.5",
+      )
+    },
     test("a number or a date without a function is written as :number and :datetime write it") {
       def shown(value: Any, tag: String = "en") = MessageFormat2.formatIn("{$x}", Map("x" -> value), tag)
       assertTrue(
@@ -203,8 +230,8 @@ object PlatformFormatterSpec extends ZIOSpecDefault:
         amount("en", code = "eur") == "€1,234.50",
         // The yen has no decimals.
         amount("en", 1234, "JPY") == "¥1,234",
-        amount("en", 1234.5, "ZZZ").contains("ZZZ"),
-        amount("en", 1234.5, "ZZZ").contains("1,234.50"),
+        // No currency of that code: the code stands in its place, with or without a space.
+        amount("en", 1234.5, "ZZZ") == PlatformExpectations.unknownCurrency,
       )
     },
     // Up to 6.0.0 an amount was US dollars whatever the template said, on the JVM in the US
@@ -235,6 +262,7 @@ object PlatformFormatterSpec extends ZIOSpecDefault:
       val template = "{$n :number} {$n :integer}"
       assertTrue(
         MessageFormat2.format(template, Map("n" -> huge), Language.English) == template,
+        MessageFormat2.format("{$n} {$n :string}", Map("n" -> huge), Language.English) == "{$n} {$n :string}",
         MessageFormat2.format("{$n :number style=percent}", Map("n" -> huge), Language.English) ==
         "{$n :number style=percent}",
         MessageFormat2.format("{$n :number useGrouping=never}", Map("n" -> BigInt(10).pow(30)), Language.English) ==

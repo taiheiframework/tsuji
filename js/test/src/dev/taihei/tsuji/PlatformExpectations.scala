@@ -13,3 +13,8 @@ object PlatformExpectations:
   /** `Intl` has names of its own for some languages with a region. */
   val dutchOfBelgium: String   = "Flemish"
   val englishOfBritain: String = "British English"
+
+  /** 1234.5 in a currency no platform knows, in English: the code where the symbol would be. */
+  val unknownCurrency: String = "ZZZ\u00a01,234.50"
+
+end PlatformExpectations

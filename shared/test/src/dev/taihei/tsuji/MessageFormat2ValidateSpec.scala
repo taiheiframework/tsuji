@@ -66,6 +66,8 @@ object MessageFormat2ValidateSpec extends ZIOSpecDefault:
           message("maximumFractionDigits=-1").nonEmpty,
           message("useGrouping=sometimes") == List("useGrouping= takes auto, always or never"),
           MessageFormat2.validate("{$n :integer useGrouping=no}").size == 1,
+          MessageFormat2.validate("{$n :integer style=percent}").map(_.message) ==
+          List("style= is an option of :number, not of :integer"),
         )
       },
       test("an unclosed placeholder") {

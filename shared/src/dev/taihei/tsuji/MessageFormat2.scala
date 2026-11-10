@@ -18,7 +18,7 @@ final case class TemplateError private[tsuji] (position: Int, message: String):
  * `.match {$n :plural}` with variants `when one {...}` and a default `when * {...}`.
  *
  * {{{
- * MessageFormat2.format("Hello {$name}", Map("name" -> "Alice"), "en")   // Hello Alice
+ * MessageFormat2.format("Hello {$name}", Map("name" -> "Alice"), Language.English)   // Hello Alice
  * MessageFormat2.validate("Hello {$name")                                 // one TemplateError
  * }}}
  */
@@ -515,8 +515,11 @@ object MessageFormat2:
     val functions = expressions(message).flatMap:
       case FunctionAnnotation(_, f, _, at) if f.nonEmpty && !Functions(f) =>
         List(TemplateError(at, s"unknown function :$f"))
-      case FunctionAnnotation(_, "number" | "integer", options, at)       =>
+      case FunctionAnnotation(_, "number", options, at)                   =>
         numberOptionErrors(options).map(TemplateError(at, _))
+      case FunctionAnnotation(_, "integer", options, at)                  =>
+        (options.get("style").toList.map(_ => "style= is an option of :number, not of :integer") ++
+        numberOptionErrors(options - "style" - "currency")).map(TemplateError(at, _))
       case _                                                              => Nil
     val matches   = message.body.toOption.toList.flatMap: m =>
       val arity    = m.selectors.size
@@ -694,9 +697,29 @@ object MessageFormat2:
     options: Map[String, String],
     context: Context,
   ): Any =
+    // What a function gets is the value itself, also when an earlier function wrote it out.
+    applyTo(unformatted(value), function, options, context)
+
+  /**
+   * A number that `:number` or `:integer` wrote, with the number it was. A declaration can hold
+   * one (`.input {$n :number}`) for a `.match` or another function to read later, and those read
+   * the number: its text is grouped and localised (`1,000`, `1.000`), which names no number.
+   */
+  final private case class Formatted(value: Any, text: String)
+
+  private def unformatted(value: Any): Any = value match
+    case Formatted(number, _) => number
+    case other                => other
+
+  private def applyTo(
+    value: Any,
+    function: String,
+    options: Map[String, String],
+    context: Context,
+  ): Any =
     function match
-      case "number"   => formatNumber(value, options, context.locale)
-      case "integer"  => formatInteger(value, options, context.locale)
+      case "number"   => Formatted(value, formatNumber(value, options, context.locale))
+      case "integer"  => Formatted(value, formatInteger(value, options, context.locale))
       case "datetime" => PlatformDateTimeFormatter.formatDateTime(value, options, context.locale)
       case "date"     =>
         val date = value match
@@ -742,9 +765,10 @@ object MessageFormat2:
     options: Map[String, String],
     locale: String,
   ): String =
-    Decimal.plain(value).fold(String.valueOf(value)): digits =>
+    Decimal.plain(value).filter(writable).fold(asItIs(value)): digits =>
       PlatformNumberFormatter.format(
-        digits,
+        // Zero has no sign: the JDK reads the text -0 as 0, Intl writes it as -0.
+        if isZero(digits) then digits.stripPrefix("-") else digits,
         style,
         minimum,
         // Both given the wrong way round: the larger holds, where Intl would throw.
@@ -752,6 +776,27 @@ object MessageFormat2:
         grouped(options),
         locale,
       )
+
+  // A JavaScript number ends near 1.8e308, and Intl writes digits past that as infinity where
+  // the JDK writes them all: a number of more whole digits than a Double has is shown as it is,
+  // on both platforms.
+  private val MaxWholeDigits = 300
+
+  // A value that is not formatted shows as its own text. A BigInt has no limit of its own, and
+  // writing one out costs more than linear time: past the bits of a million digits it is refused
+  // as the text it would make is, before it is made.
+  private def asItIs(value: Any): String = value match
+    case big: BigInt if big.bitLength > MaxBits               => throw new TooLong
+    case big: java.math.BigInteger if big.bitLength > MaxBits => throw new TooLong
+    case other                                                => String.valueOf(other)
+
+  private val MaxBits = 3400000
+
+  private def writable(digits: String): Boolean =
+    digits.stripPrefix("-").takeWhile(_ != '.').length <= MaxWholeDigits
+
+  private def isZero(digits: String): Boolean =
+    digits.forall(c => c == '-' || c == '0' || c == '.')
 
   // style=currency names its currency with currency=; without one there is no amount to write,
   // only a number. Which options are valid is validate's to say, not formatting's.
@@ -798,14 +843,6 @@ object MessageFormat2:
         "useGrouping= takes auto, always or never"
     currency ++ digits ++ grouping
 
-  // The longest text read as a number, the bound the JSON reader puts on a number.
-  private val MaxNumberText = JsonTreeReader.MaxNumberLength
-
-  // A value as a number, or None. The text is bounded and read with `toDoubleOption`, which checks
-  // the syntax before it parses, so the read takes time linear in the text on both platforms.
-  private[tsuji] def numberOf(value: Any): Option[Double] =
-    Option(value).map(_.toString).filter(_.length <= MaxNumberText).flatMap(_.toDoubleOption)
-
   // A whole number, a half rounded away from zero (2.5 gives 3, -2.5 gives -3), written as the
   // reader's language writes numbers.
   private def formatInteger(
@@ -821,6 +858,7 @@ object MessageFormat2:
   // and a date or time as :number and :datetime write them without options. Text that happens
   // to read as a number is text.
   private[tsuji] def show(value: Any, locale: String): String = value match
+    case Formatted(_, written)                          => written
     case PluralSelector(v, _)                           => show(v, locale)
     case l: Language                                    => Language.nameIn(l, locale)
     case _: LocalDate | _: LocalDateTime | _: LocalTime =>
@@ -834,7 +872,7 @@ object MessageFormat2:
   // would without a function.
   private def text(value: Any, locale: String): String = value match
     case PluralSelector(v, _)               => text(v, locale)
-    case number if Decimal.isNumber(number) => Decimal.plain(number).getOrElse(number.toString)
+    case number if Decimal.isNumber(number) => Decimal.plain(number).getOrElse(asItIs(number))
     case _: LocalDate | _: LocalDateTime | _: LocalTime => value.toString
     case other                                          => show(other, locale)
 
@@ -891,9 +929,12 @@ object MessageFormat2:
 
   // A selector without :plural against a key: a number by its value (the Double 1 matches the
   // key `1` on both platforms, as the Int 1 does), anything else by its text.
-  private def matchesValue(key: String, value: Any): Boolean =
-    key == value.toString ||
-    (Decimal.isNumber(value) && Decimal.plain(value).exists(Decimal.sameNumber(_, key)))
+  private def matchesValue(key: String, value: Any): Boolean = value match
+    // A number that :number wrote is still that number: `when 1234` matches it, `1,234` is no key.
+    case Formatted(number, _) => matchesValue(key, number)
+    case _                    =>
+      key == value.toString ||
+      (Decimal.isNumber(value) && Decimal.plain(value).exists(Decimal.sameNumber(_, key)))
 
   // A plural selector's number and category, worked out once for all the variants.
   final private case class PluralChoice(operands: Option[Operands], category: String)

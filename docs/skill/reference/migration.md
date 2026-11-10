@@ -10,6 +10,7 @@ format is unchanged.
 | `{$n :number}`: `1234567`, `1,234.50` | `1,234,567`, `1,234.5` (up to three decimals; `minimumFractionDigits`, `maximumFractionDigits`, `useGrouping=never`) |
 | `{$n :integer}` of -2.5: `-2` | `-3`, grouped |
 | `style=currency` (US dollars) | `style=currency currency=EUR`, required; the reader's language decides how the amount is written |
+| number options were not checked | `validate` and the macro refuse a `currency=` that is not three letters, decimals outside 0 to 20, a `useGrouping` other than `auto`, `always`, `never`, and `style=` on `:integer` |
 | `{$n}`, `{$d}` as `toString` | as `:number` and `:datetime`; `{$n :string}` for the raw digits (an order number, a year) |
 | `.match {$x} when 3` on a `Double` 3.0: JavaScript only | both platforms |
 | `:plural`: `one` and `other`, by the reader's language | CLDR's categories, by the template's language; `=1` for the number 1 alone |

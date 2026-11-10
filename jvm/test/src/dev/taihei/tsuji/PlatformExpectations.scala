@@ -21,4 +21,7 @@ object PlatformExpectations:
   val dutchOfBelgium: String   = "Dutch (Belgium)"
   val englishOfBritain: String = "English (United Kingdom)"
 
+  /** 1234.5 in a currency no platform knows, in English: the code where the symbol would be. */
+  val unknownCurrency: String = "ZZZ1,234.50"
+
 end PlatformExpectations

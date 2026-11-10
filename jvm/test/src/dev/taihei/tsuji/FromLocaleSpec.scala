@@ -111,8 +111,8 @@ object FromLocaleSpec extends ZIOSpecDefault:
           Language("az-latn-IR").tag == "az-Latn-IR",
           Language("en-x-PRIV").tag == "en-x-priv",
           // French counts 0 as one; "FR-IT" names French whatever the default locale.
-          MessageFormat2.format(plural, Map("count" -> 0), "FR-IT").trim == "one",
-          MessageFormat2.format(plural, Map("count" -> 0), "IT").trim == "other",
+          MessageFormat2.formatIn(plural, Map("count" -> 0), "FR-IT").trim == "one",
+          MessageFormat2.formatIn(plural, Map("count" -> 0), "IT").trim == "other",
         )
       finally Locale.setDefault(saved)
     },

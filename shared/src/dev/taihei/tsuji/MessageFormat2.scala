@@ -25,11 +25,28 @@ final case class TemplateError private[tsuji] (position: Int, message: String):
 object MessageFormat2:
 
   /**
-   * The template formatted with `args` in the locale given by the BCP 47 tag `locale`. A variable
-   * without a value shows as `$name`; it never throws: a template that cannot be formatted, or
-   * whose text would pass a million characters, comes back as it was written.
+   * The template formatted with `args` for a reader of `language`. A variable without a value
+   * shows as `$name`; it never throws: a template that cannot be formatted, or whose text would
+   * pass a million characters, comes back as it was written.
+   *
+   * {{{
+   * MessageFormat2.format("{$n :number}", Map("n" -> 1234.5), Language("nl-BE"))   // 1.234,5
+   * }}}
+   *
+   * Up to 6.x the language was a tag as text, and one that was no tag formatted as English
+   * without a word: `Language.parse` says what is wrong with a tag, and `Language.of` falls back
+   * to English when that is what the application wants.
    */
   def format(
+    template: String,
+    args: Map[String, Any] = Map.empty,
+    language: Language = Language.English,
+  ): String =
+    formatIn(template, args, language.tag)
+
+  // As format, with the reader's tag as text: what the library's own callers have, and what the
+  // tests use to show that text that is no tag, of any length, does no harm.
+  private[tsuji] def formatIn(
     template: String,
     args: Map[String, Any] = Map.empty,
     locale: String = "en",

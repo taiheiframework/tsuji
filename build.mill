@@ -64,7 +64,7 @@ object release extends Module {
   // The first release of the major line main is on. MiMa compares only within a major line: a
   // major may break, so a release of the previous major is no baseline for it. Raise this when
   // work on the next major starts on main; release-prepare TYPE=major still sets none.
-  val majorLine = "6.0.0"
+  val majorLine = "7.0.0"
 
   // The family's Maven repository, the one repository this build adds to Coursier's defaults
   // (Maven Central), after them. It serves the libraries' immutable GitHub Releases, and so every

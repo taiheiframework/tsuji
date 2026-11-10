@@ -216,13 +216,13 @@ object MessageFormat2Spec extends ZIOSpecDefault:
     ),
     suite("Locale support")(
       test("format accepts locale parameter") {
-        val result = MessageFormat2.format("Hello {$name}", Map("name" -> "World"), "en")
+        val result = MessageFormat2.format("Hello {$name}", Map("name" -> "World"), Language.English)
         assertTrue(result == "Hello World")
       },
       test("different locales can be specified") {
         val template = "Price: {$price :number}"
-        val resultEn = MessageFormat2.format(template, Map("price" -> 19.99), "en")
-        val resultNl = MessageFormat2.format(template, Map("price" -> 19.99), "nl")
+        val resultEn = MessageFormat2.format(template, Map("price" -> 19.99), Language.English)
+        val resultNl = MessageFormat2.format(template, Map("price" -> 19.99), Language.Dutch)
 
         // English writes the decimals after a point, Dutch after a comma.
         assertTrue(resultEn == "Price: 19.99", resultNl == "Price: 19,99")
@@ -231,9 +231,9 @@ object MessageFormat2Spec extends ZIOSpecDefault:
         val template = """.match {$count :plural}
                          |when one {un élément}
                          |when other {plusieurs éléments}""".stripMargin
-        val result0  = MessageFormat2.format(template, Map("count" -> 0), "fr")
-        val result1  = MessageFormat2.format(template, Map("count" -> 1), "fr")
-        val result2  = MessageFormat2.format(template, Map("count" -> 2), "fr")
+        val result0  = MessageFormat2.format(template, Map("count" -> 0), Language.French)
+        val result1  = MessageFormat2.format(template, Map("count" -> 1), Language.French)
+        val result2  = MessageFormat2.format(template, Map("count" -> 2), Language.French)
 
         assertTrue(
           result0.trim == "un élément",        // French: 0 is "one"
@@ -245,10 +245,10 @@ object MessageFormat2Spec extends ZIOSpecDefault:
         val template  = """.match {$count :plural}
                           |when one {singular}
                           |when other {plural}""".stripMargin
-        val resultEn0 = MessageFormat2.format(template, Map("count" -> 0), "en")
-        val resultEn1 = MessageFormat2.format(template, Map("count" -> 1), "en")
-        val resultNl0 = MessageFormat2.format(template, Map("count" -> 0), "nl")
-        val resultNl1 = MessageFormat2.format(template, Map("count" -> 1), "nl")
+        val resultEn0 = MessageFormat2.format(template, Map("count" -> 0), Language.English)
+        val resultEn1 = MessageFormat2.format(template, Map("count" -> 1), Language.English)
+        val resultNl0 = MessageFormat2.format(template, Map("count" -> 0), Language.Dutch)
+        val resultNl1 = MessageFormat2.format(template, Map("count" -> 1), Language.Dutch)
 
         assertTrue(
           resultEn0.trim == "plural",   // English: 0 is "other"
@@ -263,8 +263,8 @@ object MessageFormat2Spec extends ZIOSpecDefault:
         import java.time.LocalDate
         val date     = LocalDate.of(2024, 1, 15)
         val template = "{$date :datetime}"
-        val resultEn = MessageFormat2.format(template, Map("date" -> date), "en")
-        val resultFr = MessageFormat2.format(template, Map("date" -> date), "fr")
+        val resultEn = MessageFormat2.format(template, Map("date" -> date), Language.English)
+        val resultFr = MessageFormat2.format(template, Map("date" -> date), Language.French)
 
         assertTrue(resultEn == "Jan 15, 2024", resultFr == "15 janv. 2024")
       },
@@ -274,8 +274,8 @@ object MessageFormat2Spec extends ZIOSpecDefault:
         val templateShort = "{$date :datetime dateStyle=short}"
         val templateLong  = "{$date :datetime dateStyle=long}"
 
-        val resultShort = MessageFormat2.format(templateShort, Map("date" -> date), "en")
-        val resultLong  = MessageFormat2.format(templateLong, Map("date" -> date), "en")
+        val resultShort = MessageFormat2.format(templateShort, Map("date" -> date), Language.English)
+        val resultLong  = MessageFormat2.format(templateLong, Map("date" -> date), Language.English)
 
         assertTrue(resultShort == "1/15/24", resultLong == "January 15, 2024")
       },
@@ -283,8 +283,8 @@ object MessageFormat2Spec extends ZIOSpecDefault:
         import java.time.LocalDateTime
         val datetime = LocalDateTime.of(2024, 1, 15, 14, 30)
         val template = "{$datetime :datetime}"
-        val resultEn = MessageFormat2.format(template, Map("datetime" -> datetime), "en")
-        val resultNl = MessageFormat2.format(template, Map("datetime" -> datetime), "nl")
+        val resultEn = MessageFormat2.format(template, Map("datetime" -> datetime), Language.English)
+        val resultNl = MessageFormat2.format(template, Map("datetime" -> datetime), Language.Dutch)
 
         // The space before PM is a plain one or U+202F, and the Dutch month and the separator
         // between date and time differ, by the version of the platform's locale data.
@@ -299,8 +299,8 @@ object MessageFormat2Spec extends ZIOSpecDefault:
         import java.time.LocalTime
         val time     = LocalTime.of(14, 30, 0)
         val template = "{$time :datetime}"
-        val resultEn = MessageFormat2.format(template, Map("time" -> time), "en")
-        val resultFr = MessageFormat2.format(template, Map("time" -> time), "fr")
+        val resultEn = MessageFormat2.format(template, Map("time" -> time), Language.English)
+        val resultFr = MessageFormat2.format(template, Map("time" -> time), Language.French)
 
         assertTrue(resultEn.replace('\u202f', ' ') == "2:30:00 PM", resultFr == "14:30:00")
       },
@@ -376,7 +376,7 @@ object MessageFormat2Spec extends ZIOSpecDefault:
         val date                 = LocalDate.of(2024, 1, 15)
         val dt                   = LocalDateTime.of(2024, 1, 15, 14, 30)
         val time                 = LocalTime.of(14, 30)
-        def f(t: String, v: Any) = MessageFormat2.format(t, Map("v" -> v), "en")
+        def f(t: String, v: Any) = MessageFormat2.format(t, Map("v" -> v), Language.English)
         val medium               = f("{$v :datetime dateStyle=medium}", date)
         assertTrue(
           medium.nonEmpty,
@@ -389,7 +389,7 @@ object MessageFormat2Spec extends ZIOSpecDefault:
         import java.time.{LocalDateTime, LocalTime}
         val dt                   = LocalDateTime.of(2024, 1, 15, 14, 30)
         val time                 = LocalTime.of(14, 30)
-        def f(t: String, v: Any) = MessageFormat2.format(t, Map("v" -> v), "en")
+        def f(t: String, v: Any) = MessageFormat2.format(t, Map("v" -> v), Language.English)
         val results              =
           for
             style  <- List("long", "full")
@@ -400,7 +400,7 @@ object MessageFormat2Spec extends ZIOSpecDefault:
       test("a style is read in any case, as on the JVM") {
         import java.time.LocalDate
         val date         = LocalDate.of(2024, 1, 15)
-        def f(t: String) = MessageFormat2.format(t, Map("v" -> date), "en")
+        def f(t: String) = MessageFormat2.format(t, Map("v" -> date), Language.English)
         assertTrue(f("{$v :datetime dateStyle=LONG}") == f("{$v :datetime dateStyle=long}"))
       },
     ),
@@ -414,7 +414,7 @@ object MessageFormat2Spec extends ZIOSpecDefault:
                                                   |when other {other}
                                                   |when * {default}""".stripMargin
         def f(count: Any, tag: String = "en") =
-          MessageFormat2.format(template, Map("count" -> count), tag).trim
+          MessageFormat2.formatIn(template, Map("count" -> count), tag).trim
         assertTrue(
           f(1.5) == "other",
           f(0.5) == "other",
@@ -431,8 +431,8 @@ object MessageFormat2Spec extends ZIOSpecDefault:
       test("the language of one is read without the default locale") {
         val template = ".match {$count :plural}\nwhen one {one}\nwhen * {other}"
         assertTrue(
-          MessageFormat2.format(template, Map("count" -> 0), "FR-be").trim == "one",
-          MessageFormat2.format(template, Map("count" -> 0), "en-GB").trim == "other",
+          MessageFormat2.formatIn(template, Map("count" -> 0), "FR-be").trim == "one",
+          MessageFormat2.format(template, Map("count" -> 0), Language("en-GB")).trim == "other",
         )
       },
     ),

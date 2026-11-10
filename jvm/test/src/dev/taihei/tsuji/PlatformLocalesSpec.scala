@@ -292,7 +292,7 @@ object PlatformLocalesSpec extends ZIOSpecDefault:
       val pattern = "{$a :number} {$b :number} {$c :number} {$d :number} {$e :number}"
       val args    = Map("a" -> 1, "b" -> 2, "c" -> 3, "d" -> 4, "e" -> 5)
       TimeBudget.within("five numbers in two locales of a megabyte", 2000)(
-        List(legacy, plain).map(t => MessageFormat2.format(pattern, args, t))
+        List(legacy, plain).map(t => MessageFormat2.formatIn(pattern, args, t))
       ): out =>
         assertTrue(legacy.length > 1000000, plain.length > 1000000, out == List("1 2 3 4 5", "1 2 3 4 5"))
     },
@@ -334,7 +334,7 @@ object ManyLanguages:
     variants.zipWithIndex.foreach { (v, i) =>
       val long  = s"de-DE-$v-" + List.fill(900)(v).mkString("-")
       val short = s"de-DE-$v-" + List.fill(27)(v).mkString("-")
-      MessageFormat2.format("{$d :date}", Map("d" -> day), long)
+      MessageFormat2.formatIn("{$d :date}", Map("d" -> day), long)
       PlatformLanguageNames.displayName(short, short.take(255))
       PlatformLanguageNames.displayName("de", PlatformLocalesSpec.tags(1, i.toLong).head)
     }

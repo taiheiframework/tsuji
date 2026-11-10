@@ -398,7 +398,7 @@ wrong, if anything. Until a language arrives, its messages show through the fall
 `catalogues.onAdded` says when it did. `CatalogueLoader` needs a `TextDecoder` that honours
 `fatal` and `ignoreBOM`, as every current browser and Node do; with one that ignores them (an old
 polyfill) every load is a problem. A server that answers slowly or not at all keeps a load
-waiting; since 6.1.0, `CatalogueLoader.load(catalogues, language, url, timeout = Some(10.seconds))`
+waiting; since 7.0.0, `CatalogueLoader.load(catalogues, language, url, timeout = Some(10.seconds))`
 gives up after that time with a problem, aborts the request and lets its body go. Without a
 timeout it waits as long as the server and the runtime let it. The library has no dependency on
 Laminar or on an effect library. A Laminar application turns the callback into a signal:
@@ -466,7 +466,7 @@ assertTrue(ClasspathCatalogues.verify(Seq(Orders), Seq(Dutch, French), required 
 `verify` checks every template in the code and in the catalogues against the definition of its
 key, that no catalogue has a key without a definition, that every **required** language has every
 key (inline or in a file; other languages may be partial and fall back), that keys are unique
-across families, and, since 6.1.0, that no `:plural` key is one its template's language can never
+across families, and, since 7.0.0, that no `:plural` key is one its template's language can never
 select (`few` in an English template). Completeness of files is a test-time check: checking files when the code compiles
 would make the build read files a compiler cannot track.
 
@@ -629,8 +629,8 @@ directly:
 ```scala
 val tmpl = ".match {$count :plural} when one {You have one item} when * {You have {$count} items}"
 
-MessageFormat2.format(tmpl, Map("count" -> 1), "en")  // You have one item
-MessageFormat2.format(tmpl, Map("count" -> 5), "en")  // You have 5 items
+MessageFormat2.format(tmpl, Map("count" -> 1), Language.English)  // You have one item
+MessageFormat2.format(tmpl, Map("count" -> 5), Language.English)  // You have 5 items
 MessageFormat2.validate("Hello {$name")               // List(at 6: a placeholder is not closed with })
 ```
 
@@ -652,13 +652,13 @@ A number is written as the reader's language writes numbers, the same on the JVM
 Scala.js:
 
 ```scala
-MessageFormat2.format("{$n :number}", Map("n" -> 1234567), "en")       // 1,234,567
-MessageFormat2.format("{$n :number}", Map("n" -> 1234.5), "nl")        // 1.234,5
-MessageFormat2.format("{$n :integer}", Map("n" -> 2.5), "en")          // 3
-MessageFormat2.format("{$n :number style=percent}", Map("n" -> 0.5), "fr")                        // 50 %
-MessageFormat2.format("{$n :number style=currency currency=EUR}", Map("n" -> 1234.5), "nl")       // € 1.234,50
-MessageFormat2.format("{$n :number minimumFractionDigits=2}", Map("n" -> 1.5), "en")              // 1.50
-MessageFormat2.format("Order {$id :string}, {$year :number useGrouping=never}", Map("id" -> 12345, "year" -> 2026), "en")
+MessageFormat2.format("{$n :number}", Map("n" -> 1234567), Language.English)       // 1,234,567
+MessageFormat2.format("{$n :number}", Map("n" -> 1234.5), Language.Dutch)        // 1.234,5
+MessageFormat2.format("{$n :integer}", Map("n" -> 2.5), Language.English)          // 3
+MessageFormat2.format("{$n :number style=percent}", Map("n" -> 0.5), Language.French)                        // 50 %
+MessageFormat2.format("{$n :number style=currency currency=EUR}", Map("n" -> 1234.5), Language.Dutch)       // € 1.234,50
+MessageFormat2.format("{$n :number minimumFractionDigits=2}", Map("n" -> 1.5), Language.English)              // 1.50
+MessageFormat2.format("Order {$id :string}, {$year :number useGrouping=never}", Map("id" -> 12345, "year" -> 2026), Language.English)
 // Order 12345, 2026
 ```
 
@@ -686,17 +686,17 @@ decimals (`1.50`), `:integer` rounded -2.5 to -2, `style=currency` always wrote 
 
 ### Plurals
 
-Since 6.1.0, `:plural` follows CLDR's cardinal plural rules for every language, from one table
+Since 7.0.0, `:plural` follows CLDR's cardinal plural rules for every language, from one table
 that the JVM and Scala.js share (CLDR 49), so a variant is chosen the same way on both:
 
 ```scala
 val files = ".match {$n :plural} when one {{$n} plik} when few {{$n} pliki} when many {{$n} plików} " +
   "when * {{$n} pliku}"
 
-MessageFormat2.format(files, Map("n" -> 1), "pl")    // 1 plik
-MessageFormat2.format(files, Map("n" -> 3), "pl")    // 3 pliki
-MessageFormat2.format(files, Map("n" -> 5), "pl")    // 5 plików
-MessageFormat2.format(files, Map("n" -> 1.5), "pl")  // 1,5 pliku
+MessageFormat2.format(files, Map("n" -> 1), Language("pl"))    // 1 plik
+MessageFormat2.format(files, Map("n" -> 3), Language("pl"))    // 3 pliki
+MessageFormat2.format(files, Map("n" -> 5), Language("pl"))    // 5 plików
+MessageFormat2.format(files, Map("n" -> 1.5), Language("pl"))  // 1,5 pliku
 ```
 
 - The keys are CLDR's categories `zero`, `one`, `two`, `few`, `many` and `other`, and exact numbers
@@ -749,16 +749,49 @@ CoreMessages.Validation.formatErrors(Map("email" -> List(CoreMessages.Validation
 
 In Scala.js the Dutch and French files reach the browser through the export, like your own.
 
-Since 6.1.0, `CoreMessages.Validation.missingTranslations` takes the languages themselves and
-names each one in the reader's language: `missingTranslations(languages = List(Language("de"),
+`CoreMessages.Validation.missingTranslations` takes the languages themselves and names each one
+in the reader's language: `missingTranslations(languages = List(Language("de"),
 Language.French))` shows as `missing translations for: German, French` in English and as
-`ontbrekende vertalingen voor: Duits, Frans` in Dutch. The form that takes one joined `String`
-still compiles, with a deprecation warning, and shows that string as it is; it is removed in
-7.0.0. The list form is a message of its own, `taihei.validation.missingTranslationsFor`, so a
-message written by 6.0 with the string still reads. To move, pass the `Language` values instead
-of their joined names. A catalogue of your own that translates CoreMessages needs the new key, or
-`Catalogues.verify` with that language in `required` reports it missing. A reader still on 6.0
-does not know the new key, so update the readers before the writers.
+`ontbrekende vertalingen voor: Duits, Frans` in Dutch.
+
+## Coming from Tsuji 6.x
+
+7.0.0 changes what formatted text looks like, takes messages out of `CoreMessages` that belong to
+other libraries, and gives `MessageFormat2.format` a `Language`. The wire format of a message is
+unchanged: 6.x and 7.x read each other's JSON, with the two exceptions below.
+
+### Formatted text
+
+| 6.0.0 | 7.0.0 |
+| --- | --- |
+| `{$n :number}` of 1234567 is `1234567`, of 1234.5 is `1,234.50` | `1,234,567` and `1,234.5`: grouped, up to three decimals; `minimumFractionDigits=2` for `1,234.50` |
+| `{$n :number}` of a `Long` past 2^53 or a `BigDecimal` loses digits | every digit is kept |
+| `{$n :integer}` of -2.5 is `-2`, without grouping | `-3`: a half rounds away from zero, on both platforms; grouped |
+| `{$n :number style=currency}` is US dollars | `style=currency currency=EUR`; without `currency=` it does not compile, and `validate` refuses it |
+| `{$n}` and `{$d}` show `toString` (`1234567`, `1.0`, `2026-10-20`) | as `:number` and `:datetime` write them (`1,234,567`, `1`, `Oct 20, 2026`); `{$n :string}` for the digits as they are |
+| `.match {$x} when 3` matches the `Double` 3.0 in JavaScript only | on both platforms |
+| `:plural` knows `one` (1, and 0 in French) and `other`, by the reader's language | CLDR's categories for every language, by the language the template is written in: see [Plurals](#plurals) |
+
+An order number or a year held in an `Int` and shown as `{$id}` is now grouped (`12,345`): write
+`{$id :string}`, or `{$year :number useGrouping=never}`.
+
+### API
+
+| 6.0.0 | 7.0.0 |
+| --- | --- |
+| `MessageFormat2.format(template, args, "nl")` | `MessageFormat2.format(template, args, Language.Dutch)`; for a tag that came as text, `Language.parse(tag)` says what is wrong with it, `Language.of(tag)` falls back to English |
+| `CoreMessages.Validation.missingTranslations(languages = "nl, fr")` | `missingTranslations(languages = List(Language.Dutch, Language.French))`, named in the reader's language; its key is `taihei.validation.missingTranslationsFor` |
+| `CoreMessages.Exceptions.commandVeto`, `eventFailure`, `stateFailure`, `revisionMismatch`, `revisionMismatchBetween` | gone: they are the language of validation and event sourcing, not of an i18n library. Define them in a family of your own, with the same templates |
+| `CoreMessages.Exceptions.personAlreadyLinked`, `imageNotFound`, `mediaProcessingFailed`, `CoreMessages.Authorization.accountNotSystem`, `registerPersonForDifferentAccount` | gone: they belonged to one application. Define them in a family of your own |
+| `CatalogueLoader.load(catalogues, language, url)` | the same, and `load(catalogues, language, url, timeout = Some(10.seconds))` gives up after that time |
+| `ExportCatalogues` exits 0 when a `--scan` finds nothing or a jar cannot be read | prints it and exits 1 |
+
+On the wire, a message with one of the removed keys, or with the 6.x key
+`taihei.validation.missingTranslations`, is a message a 7.x reader does not know: it shows the
+`text` the writer sent with it, in the writer's source language. A catalogue of your own that
+translates `CoreMessages` drops the removed keys and needs `taihei.validation.missingTranslationsFor`,
+or `Catalogues.verify` reports it. A 4.x message whose argument names or template languages
+share one hash code more than 16 times is refused when it is read.
 
 ## Coming from Tsuji 5.x
 

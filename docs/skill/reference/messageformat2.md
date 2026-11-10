@@ -5,14 +5,14 @@ on a raw template.
 
 ```scala
 object MessageFormat2:
-  def format(template: String, args: Map[String, Any] = Map.empty, locale: String = "en"): String
+  def format(template: String, args: Map[String, Any] = Map.empty, language: Language = Language.English): String
   def validate(template: String): List[TemplateError]
-  def warnings(template: String, language: Language): List[TemplateError]  // since 6.1.0
+  def warnings(template: String, language: Language): List[TemplateError]  // since 7.0.0
 
 final case class TemplateError private[tsuji] (position: Int, message: String)  // read, not built
 ```
 
-- `format` never throws; a variable without a value shows as `$name`; `locale` is a BCP 47 tag. A
+- `format` never throws; a variable without a value shows as `$name`; `language` is the reader's (a `String` tag up to 6.x). A
   template whose text would pass a million characters is returned as written (a message falls back).
 - Error messages escape anything but printable ASCII and are cut short, so they can be logged.
 - `validate` reports syntax errors, unknown functions, a `.match` without a `*` variant, a variant
@@ -57,7 +57,7 @@ After declarations, a simple pattern ends at the line break.
   or on several.
 - A `when * {...}` variant (every key `*`) is required by `validate` and the macro.
 - Plural keys: CLDR's categories `zero`, `one`, `two`, `few`, `many`, `other`, and exact `=0`,
-  `=1`, `2` (a whole number in `Int` range; `=1` matches 1 and 1.0, not 1.5). Since 6.1.0 the
+  `=1`, `2` (a whole number in `Int` range; `=1` matches 1 and 1.0, not 1.5). Since 7.0.0 the
   category is CLDR's (CLDR 49) for every language, the same on the JVM and Scala.js: Polish 3 is
   `few`, 5 `many`; Arabic 0 is `zero`; 1.5 is `other` in English and `one` in French.
 - Variants are tried in template order: an exact key before a category wins. `other` and `*`

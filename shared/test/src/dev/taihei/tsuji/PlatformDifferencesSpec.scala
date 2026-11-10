@@ -12,7 +12,7 @@ import zio.test.*
 object PlatformDifferencesSpec extends ZIOSpecDefault:
 
   private def shown(template: String, value: Any): String =
-    MessageFormat2.format(template, Map("x" -> value), "en")
+    MessageFormat2.format(template, Map("x" -> value), Language.English)
 
   // The JDKs and Intl differ in the space before AM and PM (a plain one or U+202F), which is not
   // the difference these tests are about.

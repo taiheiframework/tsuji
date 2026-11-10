@@ -42,7 +42,7 @@ object RuntimeZoneSpec extends ZIOSpecDefault:
         show(far) == "+300000-01-01",
         show(LocalDateTime.of(far, LocalTime.of(2, 30))) == "+300000-01-01T02:30",
         show(LocalDate.of(-300000, 1, 1)) == "-300000-01-01",
-        MessageFormat2.format("on {$d :date}", Map("d" -> far), "de") == "on +300000-01-01",
+        MessageFormat2.format("on {$d :date}", Map("d" -> far), Language("de")) == "on +300000-01-01",
       )
     },
     test("the first and last day the Date range holds are still formatted") {

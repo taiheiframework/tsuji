@@ -1,4 +1,22 @@
-# migration - from Tsuji 5.x to 6.0.0, and from taihei-i18n 4.x to Tsuji 5.x and on
+# migration - from Tsuji 6.x to 7.0.0, from 5.x to 6.0.0, and from taihei-i18n 4.x to Tsuji 5.x and on
+
+## From Tsuji 6.x to 7.0.0
+
+7.0.0 changes formatted text, thins `CoreMessages` and types the language of `format`. The wire
+format is unchanged.
+
+| 6.0.0 | 7.0.0 |
+| --- | --- |
+| `{$n :number}`: `1234567`, `1,234.50` | `1,234,567`, `1,234.5` (up to three decimals; `minimumFractionDigits`, `maximumFractionDigits`, `useGrouping=never`) |
+| `{$n :integer}` of -2.5: `-2` | `-3`, grouped |
+| `style=currency` (US dollars) | `style=currency currency=EUR`, required; the reader's language decides how the amount is written |
+| `{$n}`, `{$d}` as `toString` | as `:number` and `:datetime`; `{$n :string}` for the raw digits (an order number, a year) |
+| `.match {$x} when 3` on a `Double` 3.0: JavaScript only | both platforms |
+| `:plural`: `one` and `other`, by the reader's language | CLDR's categories, by the template's language; `=1` for the number 1 alone |
+| `MessageFormat2.format(t, args, "nl")` | `MessageFormat2.format(t, args, Language.Dutch)` |
+| `Validation.missingTranslations(languages = "nl, fr")` | `missingTranslations(List(Language.Dutch, Language.French))` |
+| `Exceptions.commandVeto`, `eventFailure`, `stateFailure`, `revisionMismatch`, `revisionMismatchBetween`, `personAlreadyLinked`, `imageNotFound`, `mediaProcessingFailed`; `Authorization.accountNotSystem`, `registerPersonForDifferentAccount` | gone: a family of your own |
+| `ExportCatalogues` silent on an empty `--scan` or an unreadable jar | exit 1 |
 
 ## From Tsuji 5.x to 6.0.0
 

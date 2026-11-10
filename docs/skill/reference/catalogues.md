@@ -40,7 +40,7 @@ Orders.cancelled.localize(Language("lb-LU"))
 - The chain for language L: L, L without its extensions and private use, then without its last
   subtag step by step, the configured fallbacks of each of those (walked the same way), the
   family's source language. Numbers and dates always formatted for L; a plural variant chosen by
-  the rules of the template's own language (since 6.1.0).
+  the rules of the template's own language (since 7.0.0).
   `catalogues.fallbackChain(language, source)` shows it.
 - In a language, a catalogue file wins over an inline translation; in the source language the
   code's template wins.
@@ -68,13 +68,13 @@ another family in a family's file are left out with a problem.
 
 ```scala
 CatalogueLoader.load(catalogues, Language("de"), "/i18n/de.json"): Future[List[CatalogueProblem]]
-CatalogueLoader.load(catalogues, Language("de"), "/i18n/de.json", timeout = Some(10.seconds)) // 6.1.0
+CatalogueLoader.load(catalogues, Language("de"), "/i18n/de.json", timeout = Some(10.seconds)) // 7.0.0
 ```
 
 Takes a `given ExecutionContext`, uses the global `fetch`, never fails the `Future`. Needs a
 `TextDecoder` that honours `fatal` and `ignoreBOM` (every current browser and Node); with one that
 ignores them every load is a problem. `timeout` (`Option[FiniteDuration]`, default `None`, since
-6.1.0): a file not arrived in full by then is the problem `cannot fetch <url>: timed out after
+7.0.0): a file not arrived in full by then is the problem `cannot fetch <url>: timed out after
 <timeout>`, the request is aborted and its body let go; without it a slow server keeps the load
 waiting. Pass one in an application. Until a language is loaded, messages show through the
 chain; `onAdded` tells when to re-render. No dependency on Laminar or an effect library. Inline
@@ -89,7 +89,7 @@ Catalogues.verify(families, catalogues, required = Set(Language.Dutch)): List[Ca
 Empty means all is well. It checks every template (code, inline, files) against its definition,
 user argument types included; keys without a definition; every required language complete (inline
 or file); duplicate prefixes and keys; a language given twice inline; an inline translation in the
-source language; and (since 6.1.0) a `:plural` key the template's language never selects, such as
+source language; and (since 7.0.0) a `:plural` key the template's language never selects, such as
 `few` in English, which is reported but still shown.
 
 ## Export: taihei-tsuji-tools

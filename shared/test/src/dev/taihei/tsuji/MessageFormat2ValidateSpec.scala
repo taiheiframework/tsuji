@@ -145,8 +145,8 @@ object MessageFormat2ValidateSpec extends ZIOSpecDefault:
     suite("formatting fixed in 5.0")(
       test("a function inside a .match variant formats, on one line") {
         val date = LocalDate.of(2026, 10, 23)
-        val one  = MessageFormat2.format(shipped, Map("count" -> 1, "on" -> date), "en")
-        val many = MessageFormat2.format(shipped, Map("count" -> 3, "on" -> date), "en")
+        val one  = MessageFormat2.format(shipped, Map("count" -> 1, "on" -> date), Language.English)
+        val many = MessageFormat2.format(shipped, Map("count" -> 3, "on" -> date), Language.English)
         assertTrue(
           one.startsWith("One item shipped on "),
           one.contains("2026"),
@@ -163,7 +163,7 @@ object MessageFormat2ValidateSpec extends ZIOSpecDefault:
       },
       test(":integer rounds, :date and :time take their part of a date and time") {
         val dt                   = LocalDateTime.of(2024, 1, 15, 14, 30)
-        def f(t: String, v: Any) = MessageFormat2.format(t, Map("v" -> v), "en")
+        def f(t: String, v: Any) = MessageFormat2.format(t, Map("v" -> v), Language.English)
         assertTrue(
           f("{$v :integer}", 41.5) == "42",
           f("{$v :integer}", "n/a") == "n/a",
@@ -174,7 +174,7 @@ object MessageFormat2ValidateSpec extends ZIOSpecDefault:
         )
       },
       test("a language shows as its name in the reader's language") {
-        def f(l: Language, locale: String) = MessageFormat2.format("{$l}", Map("l" -> l), locale)
+        def f(l: Language, locale: String) = MessageFormat2.formatIn("{$l}", Map("l" -> l), locale)
         assertTrue(
           f(Language.Dutch, "en") == "Dutch",
           f(Language.Dutch, "fr") == "Néerlandais",

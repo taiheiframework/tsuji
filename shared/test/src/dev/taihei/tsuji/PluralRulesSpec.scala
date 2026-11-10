@@ -11,7 +11,7 @@ object PluralRulesSpec extends ZIOSpecDefault:
     ".match {$n :plural} when zero {zero} when one {one} when two {two} when few {few} when many {many} " +
     "when * {other}"
 
-  private def cat(n: Any, locale: String): String = MessageFormat2.format(all, Map("n" -> n), locale)
+  private def cat(n: Any, locale: String): String = MessageFormat2.formatIn(all, Map("n" -> n), locale)
 
   // A CLDR sample: a plain decimal, or a compact one such as 1.1c6, which is 1100000 with e = 6.
   private def sample(text: String): Operands =
@@ -119,7 +119,7 @@ object PluralRulesSpec extends ZIOSpecDefault:
         val files = ".match {$n :plural} when one {{$n} plik} when few {{$n} pliki} when many {{$n} plików} " +
           "when * {{$n} pliku}"
         assertTrue(
-          List[Any](1, 3, 5, 1.5).map(n => MessageFormat2.format(files, Map("n" -> n), "pl")) ==
+          List[Any](1, 3, 5, 1.5).map(n => MessageFormat2.format(files, Map("n" -> n), Language("pl"))) ==
           List("1 plik", "3 pliki", "5 plików", "1,5 pliku")
         )
       },
@@ -202,7 +202,7 @@ object PluralRulesSpec extends ZIOSpecDefault:
           for
             locale <- old6Locales
             n      <- numbers
-            if MessageFormat2.format(keys, Map("n" -> n), locale) != old6(n, locale)
+            if MessageFormat2.formatIn(keys, Map("n" -> n), locale) != old6(n, locale)
           yield s"$locale $n"
         assertTrue(wrong.isEmpty)
       },
@@ -212,7 +212,7 @@ object PluralRulesSpec extends ZIOSpecDefault:
           cat(1000000, "fr") == "many",
           cat(1000001, "fr") == "other",
           cat(2000000, "es") == "many",
-          MessageFormat2.format(keys, Map("n" -> 1000000), "fr") == "other",
+          MessageFormat2.format(keys, Map("n" -> 1000000), Language.French) == "other",
         )
       },
     ),
@@ -279,21 +279,21 @@ object PluralRulesSpec extends ZIOSpecDefault:
         val oneFirst   = ".match {$n :plural} when one {one} when =1 {exact} when * {other}"
         val bare       = ".match {$n :plural} when 0 {zero} when =2 {two} when * {other}"
         assertTrue(
-          MessageFormat2.format(exactFirst, Map("n" -> 1), "en") == "exact",
-          MessageFormat2.format(oneFirst, Map("n" -> 1), "en") == "one",
-          MessageFormat2.format(exactFirst, Map("n" -> 1.0), "en") == "exact",
-          MessageFormat2.format(exactFirst, Map("n" -> "1.0"), "en") == "exact",
-          MessageFormat2.format(bare, Map("n" -> 0), "pl") == "zero",
-          MessageFormat2.format(bare, Map("n" -> 2), "pl") == "two",
-          MessageFormat2.format(bare, Map("n" -> -2), "pl") == "other",
-          MessageFormat2.format(bare, Map("n" -> 1), "en") == "other",
+          MessageFormat2.format(exactFirst, Map("n" -> 1), Language.English) == "exact",
+          MessageFormat2.format(oneFirst, Map("n" -> 1), Language.English) == "one",
+          MessageFormat2.format(exactFirst, Map("n" -> 1.0), Language.English) == "exact",
+          MessageFormat2.format(exactFirst, Map("n" -> "1.0"), Language.English) == "exact",
+          MessageFormat2.format(bare, Map("n" -> 0), Language("pl")) == "zero",
+          MessageFormat2.format(bare, Map("n" -> 2), Language("pl")) == "two",
+          MessageFormat2.format(bare, Map("n" -> -2), Language("pl")) == "other",
+          MessageFormat2.format(bare, Map("n" -> 1), Language.English) == "other",
         )
       },
       test("a decimal is not the whole number it starts with") {
         val exact = ".match {$n :plural} when =1 {exact} when 2 {two} when * {other}"
         assertTrue(
-          MessageFormat2.format(exact, Map("n" -> 1.5), "en") == "other",
-          MessageFormat2.format(exact, Map("n" -> "2.5"), "en") == "other",
+          MessageFormat2.format(exact, Map("n" -> 1.5), Language.English) == "other",
+          MessageFormat2.format(exact, Map("n" -> "2.5"), Language.English) == "other",
         )
       },
       test("a value that is no number takes only other and *") {
@@ -347,7 +347,7 @@ object PluralRulesSpec extends ZIOSpecDefault:
         assertTrue(
           MessageFormat2.validate(t).isEmpty,
           MessageFormat2.check(t, Map("n" -> ArgKind.Number))._1.isEmpty,
-          MessageFormat2.format(t, Map("n" -> 3), "en") == "other",
+          MessageFormat2.format(t, Map("n" -> 3), Language.English) == "other",
         )
       },
       test("are reported by Catalogues.verify, in the template's language") {
@@ -407,7 +407,7 @@ object PluralRulesSpec extends ZIOSpecDefault:
             MessageFormat2.validate(declared),
             List.fill(5)(MessageFormat2.format(declared)).distinct.mkString,
             MessageFormat2.format(distinct),
-            MessageFormat2.format(few, Map("n" -> 3), "pl"),
+            MessageFormat2.format(few, Map("n" -> 3), Language("pl")),
           )
         ) {
           (
@@ -435,7 +435,7 @@ object PluralRulesSpec extends ZIOSpecDefault:
         val tooLong  = List.fill(20)("1" * 1000000)
         val template = all
         TimeBudget.within("plural selection of 220 long values", 2000)(
-          (long ++ tooLong).map(v => MessageFormat2.format(template, Map("n" -> v), "pl"))
+          (long ++ tooLong).map(v => MessageFormat2.format(template, Map("n" -> v), Language("pl")))
         )(results => assertTrue(results.size == 220, results.forall(_ == "other")))
       },
     ),

@@ -15,10 +15,10 @@ object PlatformFormatterSpec extends ZIOSpecDefault:
 
   private val date = LocalDate.of(2026, 10, 20)
 
-  private def number(tag: String) = MessageFormat2.format("{$n :number}", Map("n" -> 1234.5), tag)
+  private def number(tag: String) = MessageFormat2.formatIn("{$n :number}", Map("n" -> 1234.5), tag)
 
   private def percent(tag: String) =
-    MessageFormat2.format("{$n :number style=percent}", Map("n" -> 0.5), tag)
+    MessageFormat2.formatIn("{$n :number style=percent}", Map("n" -> 0.5), tag)
 
   private def medium(tag: String) = PlatformDateTimeFormatter.formatDateTime(date, Map.empty, tag)
 
@@ -39,7 +39,7 @@ object PlatformFormatterSpec extends ZIOSpecDefault:
         percent("en") == "50%",
         medium("en") == "Oct 20, 2026",
         long("en") == "October 20, 2026",
-        MessageFormat2.format("{$n :number style=currency currency=USD}", Map("n" -> 1234.5), "en") ==
+        MessageFormat2.format("{$n :number style=currency currency=USD}", Map("n" -> 1234.5), Language.English) ==
         "$1,234.50",
       )
     },
@@ -59,7 +59,7 @@ object PlatformFormatterSpec extends ZIOSpecDefault:
       val template =
         "{$n :number} {$i :integer} {$d :date dateStyle=long} {$t :time timeStyle=short} {$d :datetime}"
       val args     = Map("n" -> 1234.5, "i" -> 2.5, "d" -> date, "t" -> LocalTime.of(14, 5))
-      val shown    = MessageFormat2.format(template, args, Language.Dutch.tag)
+      val shown    = MessageFormat2.formatIn(template, args, Language.Dutch.tag)
       assertTrue(
         Language.Dutch.tag == "nl",
         shown.startsWith("1.234,5 3 20 oktober 2026 14:05 "),
@@ -106,7 +106,7 @@ object PlatformFormatterSpec extends ZIOSpecDefault:
         PlatformDateTimeFormatter.formatDateTime(year50, Map.empty, "de") == "01.01.50",
         PlatformDateTimeFormatter.formatDateTime(year50, Map("dateStyle" -> "long"), "en") ==
         "January 1, 50",
-        MessageFormat2.format("{$d :date dateStyle=long}", Map("d" -> year50), "de") ==
+        MessageFormat2.format("{$d :date dateStyle=long}", Map("d" -> year50), Language("de")) ==
         "1. Januar 50",
       )
     },
@@ -129,7 +129,7 @@ object PlatformFormatterSpec extends ZIOSpecDefault:
         template: String = "{$n :number}",
         tag: String = "en",
       ) =
-        MessageFormat2.format(template, Map("n" -> n), tag)
+        MessageFormat2.formatIn(template, Map("n" -> n), tag)
       assertTrue(
         shown(1234567) == "1,234,567",
         shown(1234567, tag = "nl") == "1.234.567",
@@ -153,7 +153,7 @@ object PlatformFormatterSpec extends ZIOSpecDefault:
         options: String = "",
         tag: String = "en",
       ) =
-        MessageFormat2.format(s"{$$n :number $options}", Map("n" -> n), tag)
+        MessageFormat2.formatIn(s"{$$n :number $options}", Map("n" -> n), tag)
       assertTrue(
         shown(1.5) == "1.5",
         shown(1.0) == "1",
@@ -172,7 +172,7 @@ object PlatformFormatterSpec extends ZIOSpecDefault:
       )
     },
     test("a number or a date without a function is written as :number and :datetime write it") {
-      def shown(value: Any, tag: String = "en") = MessageFormat2.format("{$x}", Map("x" -> value), tag)
+      def shown(value: Any, tag: String = "en") = MessageFormat2.formatIn("{$x}", Map("x" -> value), tag)
       assertTrue(
         shown(1234567) == "1,234,567",
         shown(1234.5, "nl") == "1.234,5",
@@ -183,9 +183,9 @@ object PlatformFormatterSpec extends ZIOSpecDefault:
         // Text is text, also when it reads as a number.
         shown("1234567") == "1234567",
         // :string is the way to show a number as it is: an order number, a year.
-        MessageFormat2.format("{$x :string}", Map("x" -> 1234567), "en") == "1234567",
-        MessageFormat2.format("{$x :string}", Map("x" -> 1.0), "en") == "1",
-        MessageFormat2.format("{$x :string}", Map("x" -> date), "en") == "2026-10-20",
+        MessageFormat2.format("{$x :string}", Map("x" -> 1234567), Language.English) == "1234567",
+        MessageFormat2.format("{$x :string}", Map("x" -> 1.0), Language.English) == "1",
+        MessageFormat2.format("{$x :string}", Map("x" -> date), Language.English) == "2026-10-20",
       )
     },
     test("an amount in a named currency is written as the reader's language writes amounts") {
@@ -194,7 +194,7 @@ object PlatformFormatterSpec extends ZIOSpecDefault:
         value: Any = 1234.5,
         code: String = "EUR",
       ) =
-        MessageFormat2.format(s"{$$a :number style=currency currency=$code}", Map("a" -> value), tag)
+        MessageFormat2.formatIn(s"{$$a :number style=currency currency=$code}", Map("a" -> value), tag)
       assertTrue(
         amount("en") == "€1,234.50",
         amount("nl") == "€\u00a01.234,50",
@@ -210,7 +210,7 @@ object PlatformFormatterSpec extends ZIOSpecDefault:
     // Up to 6.0.0 an amount was US dollars whatever the template said, on the JVM in the US
     // format whatever the reader's language.
     test("without a currency there is no amount, only a number") {
-      def amount(template: String) = MessageFormat2.format(template, Map("a" -> 1234.5), "en")
+      def amount(template: String) = MessageFormat2.format(template, Map("a" -> 1234.5), Language.English)
       assertTrue(
         amount("{$a :number style=currency}") == "1,234.5",
         amount("{$a :number style=currency currency=euro}") == "1,234.5",
@@ -224,20 +224,20 @@ object PlatformFormatterSpec extends ZIOSpecDefault:
       val long   = "de-x-" + "abcdefgh-" * 120000 + "z"
       val plural = ".match {$n :plural}\nwhen one {one}\nwhen few {few}\nwhen * {other}"
       assertTrue(
-        Set("1,234.5", "1.234,5")(MessageFormat2.format("{$n :number}", Map("n" -> 1234.5), long)),
-        Set("Oct 20, 2026", "20.10.2026")(MessageFormat2.format("{$d :date}", Map("d" -> date), long)),
-        MessageFormat2.format(plural, Map("n" -> 1), long).trim == "one",
-        MessageFormat2.format(plural, Map("n" -> 3), "pl-x-" + "abcdefgh-" * 120000 + "z").trim == "few",
+        Set("1,234.5", "1.234,5")(MessageFormat2.formatIn("{$n :number}", Map("n" -> 1234.5), long)),
+        Set("Oct 20, 2026", "20.10.2026")(MessageFormat2.formatIn("{$d :date}", Map("d" -> date), long)),
+        MessageFormat2.formatIn(plural, Map("n" -> 1), long).trim == "one",
+        MessageFormat2.formatIn(plural, Map("n" -> 3), "pl-x-" + "abcdefgh-" * 120000 + "z").trim == "few",
       )
     },
     test("a whole number of more than a million digits is not written out") {
       val huge     = BigInt(2).pow(3500000)
       val template = "{$n :number} {$n :integer}"
       assertTrue(
-        MessageFormat2.format(template, Map("n" -> huge), "en") == template,
-        MessageFormat2.format("{$n :number style=percent}", Map("n" -> huge), "en") ==
+        MessageFormat2.format(template, Map("n" -> huge), Language.English) == template,
+        MessageFormat2.format("{$n :number style=percent}", Map("n" -> huge), Language.English) ==
         "{$n :number style=percent}",
-        MessageFormat2.format("{$n :number useGrouping=never}", Map("n" -> BigInt(10).pow(30)), "en") ==
+        MessageFormat2.format("{$n :number useGrouping=never}", Map("n" -> BigInt(10).pow(30)), Language.English) ==
         "1" + "0" * 30,
       )
     },

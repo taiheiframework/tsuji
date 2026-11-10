@@ -104,7 +104,7 @@ object ExportCatalogues:
             try write(dir, families, entries, out, err)
             catch
               case NonFatal(e) =>
-                err.println(s"cannot write to $dir: ${describe(e)}")
+                err.println(s"cannot write to $dir: ${Printable(describe(e), 400)}")
                 1
           if missing.nonEmpty then 1 else status
 

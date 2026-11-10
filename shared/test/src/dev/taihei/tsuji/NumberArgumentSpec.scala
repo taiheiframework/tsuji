@@ -119,6 +119,22 @@ object NumberArgumentSpec extends ZIOSpecDefault:
       TimeBudget.within("a list of 10000 subnormal Doubles", 5000)(message.localize(Language.English)): out =>
         assertTrue(out == List.fill(10000)("0").mkString(", "))
     },
+    // Ten thousand different ones are each read, and that is more work than one message may
+    // do: it falls back to its template, as a message that writes too much does.
+    test("a list of ten thousand different Doubles that are costly to read falls back, in time") {
+      given Catalogues = Catalogues(Seq(Readings))
+      val different = List.tabulate(10000)(i => subnormal - i * Double.MinPositiveValue)
+      val message   = Readings.all(values = different)
+      val ordinary  = Readings.all(values = List.tabulate(10000)(i => i + 0.5))
+      TimeBudget.within("lists of 10000 different Doubles, subnormal and ordinary", 5000)(
+        (message.localize(Language.English), ordinary.localize(Language.English))
+      ): (back, shown) =>
+        assertTrue(
+          different.distinct.size == 10000,
+          back == "{$values}",
+          shown.startsWith("0.5, 1.5, 2.5, ") && shown.endsWith(", 9,999.5"),
+        )
+    },
     // Every nested message is an evaluation of its own, and a message that shows one character
     // spends nothing of the limit on text: what one evaluation costs is what a wire message of a
     // thousand of them costs a thousand times. A selector was once parsed again for every
@@ -145,6 +161,63 @@ object NumberArgumentSpec extends ZIOSpecDefault:
           out(2) == "b",
           out(3) == "0 " * 5000,
         )
+    },
+    // A number that :integer made is a BigDecimal, which is not kept between uses, and a nested
+    // message is an evaluation of its own that may show nothing: a template that declared such a
+    // number and used it 2400 times cost a wire message of a thousand nested messages minutes.
+    // The work on numbers is counted against the budget the nested messages share.
+    test("work on numbers spends the budget of a message, as the text it writes does") {
+      val uses     = (1 to 2400).map(i => s".local $$b$i = {$$a :number}\n").mkString
+      val template = MessageFormat2.parse(s".local $$a = {$$x :integer}\n${uses}done").message
+      val plurals  = MessageFormat2.parse(".match " + "{$x :plural} " * 64 + "\nwhen " + "* " * 64 + "{b}").message
+      def evaluations(
+        message: MessageFormat2.Message,
+        x: Any,
+        most: Int,
+      ): (Int, Option[String]) =
+        val budget  = Budget.fresh()
+        val results = Iterator
+          .continually(MessageFormat2.formatted(message, Map("x" -> x), "en", budget))
+          .take(most)
+          .takeWhile(_.isRight)
+          .toList
+        results.size -> results.lastOption.flatMap(_.toOption)
+      TimeBudget.within("a 300-digit number used 2400 times, and 64 plural selectors, until the budget is spent", 5000)(
+        (evaluations(template, 1e299, 1000), evaluations(plurals, subnormal, 1000), evaluations(plurals, 5, 1000))
+      ):
+        (
+          large,
+          costly,
+          small,
+        ) =>
+          assertTrue(
+            // One evaluation fits the budget; a handful of nested ones spend it.
+            large._1 >= 1,
+            large._1 < 10,
+            large._2 == Some("done"),
+            // A selector named 64 times is read once: a thousand evaluations fit.
+            costly._1 == 1000,
+            small == (1000, Some("b")),
+          )
+    },
+    test("the shortest digits of a Float are those that rounding its exact value finds, for 20000 values") {
+      def reference(f: Float): String =
+        val exact = new java.math.BigDecimal(math.abs(f.toDouble))
+        val found = (1 to 9).iterator
+          .map(p => exact.round(new java.math.MathContext(p, java.math.RoundingMode.HALF_EVEN)))
+          .find(c => c.toString.toDouble.toFloat == math.abs(f))
+          .getOrElse(exact)
+          .stripTrailingZeros
+        (if f < 0 then found.negate else found).toPlainString
+      val random                      = new scala.util.Random(20261110L)
+      val sample                      = Iterator
+        .continually(java.lang.Float.intBitsToFloat(random.nextInt()))
+        // A whole Float is read as the Double it is, which the Double test covers.
+        .filter(f => !f.isNaN && !f.isInfinite && !f.isWhole)
+        .take(20000)
+        .toList
+      val differs                     = sample.filter(f => Decimal.plain(f) != Some(reference(f)))
+      assertTrue(differs.isEmpty)
     },
     // Scala.js makes another number altogether of a negative Double of 2^63 and beyond when it
     // makes a BigDecimal of it: -1e19 was shown as 37,768,931,862,957,162,000,000 there.
@@ -255,7 +328,11 @@ object NumberArgumentSpec extends ZIOSpecDefault:
     test("a null argument is no number, and a plural selector on it takes the * variant") {
       val template = ".match {$n :plural}\nwhen one {one}\nwhen * {other}"
       assertTrue(
-        MessageFormat2.format("{$n :number} {$n :integer}", Map("n" -> null)) == "null null",
+        // As in 6.0.0: a template that is given no value for a number comes back as written.
+        MessageFormat2.format("{$n :number} {$n :integer}", Map("n" -> null)) == "{$n :number} {$n :integer}",
+        MessageFormat2.format("{$n}", Map("n" -> null)) == "{$n}",
+        MessageFormat2.format(".match {$n}\nwhen null {null}\nwhen * {other}", Map("n" -> null)) ==
+        ".match {$n}\nwhen null {null}\nwhen * {other}",
         MessageFormat2.format(template, Map("n" -> null)) == "other",
       )
     },

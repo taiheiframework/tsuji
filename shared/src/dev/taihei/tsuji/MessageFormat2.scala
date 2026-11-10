@@ -649,30 +649,38 @@ object MessageFormat2:
     locale: String = "en",
     budget: Budget = Budget.fresh(),
     pluralLocale: Option[String] = None,
-    numbers: Digits = new Digits)
+    numbers: Digits)
 
   /**
-   * What one evaluation has read of its numbers. Reading a `Double` or a `Float` as its digits,
-   * and those digits or the text of an argument as a number, is the costly part of showing one
-   * (the exact value of a small `Double` has hundreds of digits), and a template from a catalogue
-   * can name one argument thousands of times, as a placeholder, under a function or as a
-   * selector: each is read once, and what `:number` or `:integer` makes of it with the same
-   * options is made once. Only a few are kept: a message has few arguments, and whole numbers
-   * are their digits already.
+   * What one evaluation has read of its numbers, and what that cost.
+   *
+   * Reading a `Double` or a `Float` as its digits, and digits or the text of an argument as a
+   * number, is the costly part of showing one (the exact value of a small `Double` has hundreds
+   * of digits), and a template from a catalogue can name one argument thousands of times, as a
+   * placeholder, under a function or as a selector. So each `Double`, `Float` and text is read
+   * once, and what a function makes of it with the same options is made once; only a few are
+   * kept, a message having few arguments.
+   *
+   * What is not kept is counted: every read and every number written is charged to the
+   * message's budget, in the characters it reads and writes. A message that shows one character
+   * and works on numbers thousands of times, in each of thousands of nested messages, spends the
+   * budget as one that writes four million characters does, and falls back as it does.
    */
-  final private[tsuji] class Digits:
+  final private[tsuji] class Digits(val budget: Budget):
 
     private val read    = mutable.HashMap.empty[Any, Read]
     private val applied = mutable.HashMap.empty[Any, Any]
 
     def of(value: Any): Read =
-      Digits.key(value).fold(new Read(Decimal.plain(value))): key =>
+      Digits.key(value).fold(fresh(value)): key =>
         read.get(key).getOrElse:
-          val made = new Read(Decimal.plain(value))
+          val made = fresh(value)
           if read.size < Digits.Kept then read(key) = made
           made
 
-    def plain(value: Any): Option[String] = of(value).digits
+    private def fresh(value: Any): Read =
+      budget.charge(Digits.cost(value))
+      new Read(Decimal.plain(value), budget)
 
     // What a function makes of a value with these options, made once for one evaluation.
     def once(
@@ -691,11 +699,21 @@ object MessageFormat2:
 
   end Digits
 
-  /** The digits of a number, and the number they are, parsed when first asked for. */
-  final private[tsuji] class Read(val digits: Option[String]):
+  /**
+   * The digits of a number, and the number and the plural operands they are, each read when
+   * first asked for and charged to the budget then.
+   */
+  final private[tsuji] class Read(val digits: Option[String], budget: Budget):
+
+    private def charged[A](read: String => Option[A]): Option[A] =
+      digits.flatMap: d =>
+        budget.charge(d.length)
+        read(d)
 
     lazy val number: Option[java.math.BigDecimal] =
-      digits.filter(d => Operands.parse(d).isDefined).map(new java.math.BigDecimal(_))
+      charged(d => Operands.parse(d).map(_ => new java.math.BigDecimal(d)))
+
+    lazy val operands: Option[Operands] = charged(Operands.parse)
 
   private[tsuji] object Digits:
 
@@ -709,6 +727,32 @@ object MessageFormat2:
       case d: Double                                       => Some(("double", d))
       case s: String if s.length <= Operands.MaxNumberText => Some(s)
       case _                                               => None
+
+    // What reading a value as its digits costs, in characters: those of its text, and for a
+    // Double or a Float those of its exact value, which is what is rounded to find the digits.
+    def cost(value: Any): Int = Base +
+      (value match
+        // First, as in `key`: in JavaScript a whole number is a Float and a Double too.
+        case _: Byte | _: Short | _: Int | _: Long => 0
+        case f: Float                              => exactDigits(f.toDouble)
+        case d: Double                             => exactDigits(d)
+        case s: String                             => math.min(s.length, Operands.MaxNumberText)
+        case n: BigInt               => math.min(n.bitLength / 3, Operands.MaxNumberText)
+        case n: java.math.BigInteger => math.min(n.bitLength / 3, Operands.MaxNumberText)
+        case d: BigDecimal           => math.min(d.precision, Operands.MaxNumberText)
+        case d: java.math.BigDecimal => math.min(d.precision, Operands.MaxNumberText)
+        case _                       => 0)
+
+    val Base = 8
+
+    // About the digits of the exact value of a Double: each binary place below one is a decimal
+    // place, and ten binary places above it are three digits. The smallest have 1074 places.
+    private def exactDigits(d: Double): Int =
+      val biased   = ((java.lang.Double.doubleToLongBits(d) >>> 52) & 0x7ff).toInt
+      val exponent = if biased == 0 then -1022 else biased - 1023
+      17 + math.max(52 - exponent, 0) + math.max(exponent, 0) / 3
+
+  end Digits
 
   // None when evaluating threw, which no input should make it do; the caller decides what to show.
   private[tsuji] def tryFormat(
@@ -727,7 +771,7 @@ object MessageFormat2:
     budget: Budget,
     pluralLocale: Option[String] = None,
   ): Either[String, String] =
-    try Right(evaluate(message, Context(args, locale, budget, pluralLocale)))
+    try Right(evaluate(message, Context(args, locale, budget, pluralLocale, new Digits(budget))))
     catch case NonFatal(e) => Left(failure(e))
 
   // The kind of cause only: an exception's message can hold text from the input, and a problem
@@ -804,7 +848,16 @@ object MessageFormat2:
           // A percentage and an amount are written in their own way; the number stays the value.
           if style(options) == NumberStyle.Plain then written(value, read, minimum, maximum)
           else value,
-          format(value, read.digits, style(options), minimum, maximum, options, context.locale),
+          format(
+            value,
+            read.digits,
+            style(options),
+            minimum,
+            maximum,
+            options,
+            context.numbers,
+            context.locale,
+          ),
         )
       case "integer"  =>
         // The value of :integer is the whole number, to a later function too.
@@ -813,7 +866,16 @@ object MessageFormat2:
         Formatted(
           whole,
           whole,
-          format(value, read.digits, NumberStyle.Plain, Some(0), Some(0), options, context.locale),
+          format(
+            value,
+            read.digits,
+            NumberStyle.Plain,
+            Some(0),
+            Some(0),
+            options,
+            context.numbers,
+            context.locale,
+          ),
         )
       case "datetime" => PlatformDateTimeFormatter.formatDateTime(value, options, context.locale)
       case "date"     =>
@@ -833,7 +895,7 @@ object MessageFormat2:
             PlatformDateTimeFormatter.formatDateTime(t, options - "dateStyle", context.locale)
           case other        => asItIs(other)
       case "plural"   => PluralSelector(value, context.pluralLocale.getOrElse(context.locale))
-      case "string"   => text(value, context.locale, context.numbers.plain)
+      case "string"   => text(value, context.locale, context.numbers)
       case _          => value
 
   // The fewest and the most decimals the options ask for. Both given the wrong way round: the
@@ -877,9 +939,12 @@ object MessageFormat2:
     minimum: Option[Int],
     maximum: Option[Int],
     options: Map[String, String],
+    numbers: Digits,
     locale: String,
   ): String =
     plain.filter(writable).fold(asItIs(value)): digits =>
+      // Writing a number costs a formatter and its digits, twice where a selector reads it too.
+      numbers.budget.charge(FormatCost + 2 * digits.length)
       PlatformNumberFormatter.format(
         // Zero has no sign: the JDK reads the text -0 as 0, Intl writes it as -0.
         if isZero(digits) then digits.stripPrefix("-") else digits,
@@ -895,13 +960,19 @@ object MessageFormat2:
   // on both platforms.
   private val MaxWholeDigits = 300
 
+  // What a number costs to write beyond its digits, in the characters of the budget: on
+  // Scala.js a formatter that is not at hand is built, which is the larger part.
+  private val FormatCost = 32
+
   // A value that is not formatted shows as its own text. A BigInt has no limit of its own, and
   // writing one out costs time that grows with the square of its length, seconds in JavaScript
   // well before the text reaches the limit on a message: past the bits of ten thousand digits
   // it is refused as text that is too long is, before it is made.
   private[tsuji] def asItIs(value: Any): String = value match
-    case big: BigInt if big.bitLength > MaxBits                              => throw new TooLong
-    case big: java.math.BigInteger if big.bitLength > MaxBits                => throw new TooLong
+    // No value at all is a caller's mistake, shown as every failure to format is: the template.
+    case null                                                 => throw new NullPointerException
+    case big: BigInt if big.bitLength > MaxBits               => throw new TooLong
+    case big: java.math.BigInteger if big.bitLength > MaxBits => throw new TooLong
     // The digits of a BigDecimal are a whole number of its own, whatever its exponent.
     case big: BigDecimal if big.bigDecimal.unscaledValue.bitLength > MaxBits => throw new TooLong
     case big: java.math.BigDecimal if big.unscaledValue.bitLength > MaxBits  => throw new TooLong
@@ -971,15 +1042,26 @@ object MessageFormat2:
   private[tsuji] def show(
     value: Any,
     locale: String,
-    plain: Any => Option[String] = Decimal.plain,
+    numbers: Digits,
   ): String = value match
     case Formatted(_, _, written)                       => written
-    case PluralSelector(v, _)                           => show(v, locale, plain)
+    case PluralSelector(v, _)                           => show(v, locale, numbers)
     case l: Language                                    => Language.nameIn(l, locale)
     case _: LocalDate | _: LocalDateTime | _: LocalTime =>
       PlatformDateTimeFormatter.formatDateTime(value, Map.empty, locale)
     case number if Decimal.isNumber(number)             =>
-      format(number, plain(number), NumberStyle.Plain, None, None, Map.empty, locale)
+      numbers.once("", Map.empty, number):
+        format(
+          number,
+          numbers.of(number).digits,
+          NumberStyle.Plain,
+          None,
+          None,
+          Map.empty,
+          numbers,
+          locale,
+        )
+      .toString
     case other                                          => asItIs(other)
 
   // What :string gives: the value as text, unformatted. A number is its digits, the same on both
@@ -988,12 +1070,13 @@ object MessageFormat2:
   private def text(
     value: Any,
     locale: String,
-    plain: Any => Option[String],
+    numbers: Digits,
   ): String = value match
-    case PluralSelector(v, _)                           => text(v, locale, plain)
-    case number if Decimal.isNumber(number)             => plain(number).getOrElse(asItIs(number))
+    case PluralSelector(v, _)                           => text(v, locale, numbers)
+    case number if Decimal.isNumber(number)             =>
+      numbers.of(number).digits.getOrElse(asItIs(number))
     case _: LocalDate | _: LocalDateTime | _: LocalTime => value.toString
-    case other                                          => show(other, locale, plain)
+    case other                                          => show(other, locale, numbers)
 
   private def evaluatePattern(pattern: Pattern, context: Context): String =
     val out                       = new StringBuilder
@@ -1004,7 +1087,7 @@ object MessageFormat2:
     def piece(p: Pattern): String = p match
       case Text(value)        => value
       case Placeholder(expr)  =>
-        show(evaluateExpression(expr, context), context.locale, context.numbers.plain)
+        show(evaluateExpression(expr, context), context.locale, context.numbers)
       case PatternSequence(_) => ""
     pattern match
       case PatternSequence(patterns) => patterns.foreach(p => append(piece(p)))
@@ -1055,7 +1138,15 @@ object MessageFormat2:
   // A selector without :plural, read once for all the variants: a number matches a key by its
   // value (the Double 1 matches `1` on both platforms, as the Int 1 does), anything by its text.
   // Nothing of the number is read until a key is compared with it: `when * *` reads nothing.
-  final private class ValueChoice(text: String, read: => Option[Read]):
+  final private class ValueChoice(
+    written: => String,
+    read: => Option[Read],
+    budget: Budget):
+
+    private lazy val text =
+      val made = written
+      budget.charge(made.length)
+      made
 
     private lazy val number = read.flatMap(_.number)
 
@@ -1063,6 +1154,8 @@ object MessageFormat2:
       key == text ||
       (Operands.parse(key).isDefined &&
       number.exists(_.compareTo(new java.math.BigDecimal(key)) == 0))
+
+  end ValueChoice
 
   // A plural selector's number and category, worked out once for all the variants.
   final private case class PluralChoice(operands: Option[Operands], category: String)
@@ -1079,13 +1172,18 @@ object MessageFormat2:
     context: Context,
   ): Any = value match
     case PluralSelector(v, locale) =>
-      val operands = Option.when(read)(Operands.of(v)).flatten
+      // Through what the evaluation has read: a selector named many times is read once.
+      val operands = Option.when(read)(context.numbers.of(v).operands).flatten
       PluralChoice(operands, operands.fold("other")(PluralRules.category(locale, _)))
     case language: Language        => language
     // A number that :number wrote is still that number: `when 1234` matches it, `1,234` is no key.
     case Formatted(_, selects, _)  => selected(selects, read, context)
     case other                     =>
-      ValueChoice(asItIs(other), Option.when(Decimal.isNumber(other))(context.numbers.of(other)))
+      ValueChoice(
+        asItIs(other),
+        Option.when(Decimal.isNumber(other))(context.numbers.of(other)),
+        context.budget,
+      )
 
   // Variants are tried in the order the template gives them, as before CLDR's rules: an exact
   // key matches the number it names, a category key the category CLDR gives the number in the
@@ -1173,8 +1271,10 @@ end MessageFormat2
 
 /**
  * How many characters one message may still produce, its nested messages, list elements and
- * fallback attempts included. Arguments from the wire can be repeated by a template; past the
- * budget, formatting stops and the message shows its own template.
+ * fallback attempts included, and how much work on numbers it may still do, counted in the
+ * characters read and written (see `MessageFormat2.Digits`). Arguments from the wire can be
+ * repeated by a template; past the budget, formatting stops and the message shows its own
+ * template.
  */
 final private[tsuji] class Budget private (private var left: Long):
 

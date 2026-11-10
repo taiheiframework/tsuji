@@ -237,12 +237,20 @@ object MessageArg:
         catalogues,
         budget,
       ) =>
+        // One reading of numbers for the whole list: an element given many times is read once,
+        // and every element written is charged to the message's budget.
+        val numbers = new MessageFormat2.Digits(budget)
         MessageFormat2.joined(
           as.map(a =>
-            MessageFormat2.show(base.toFormat(a, language, catalogues, budget), language.tag)
+            MessageFormat2.show(
+              base.toFormat(a, language, catalogues, budget),
+              language.tag,
+              numbers,
+            )
           ),
           budget,
-        ),
+        )
+      ,
       (as, budget) => JsonTree.Arr(as.iterator.map(a => base.encode(a, budget)).toVector),
       (json, context) =>
         json match

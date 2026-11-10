@@ -13,8 +13,10 @@ final case class TemplateError private[tsuji] (position: Int, message: String)  
 ```
 
 - `format` never throws; a variable without a value shows as `$name`; `language` is the reader's (a `String` tag up to 6.x). A
-  template whose text would pass a million characters, or that holds a whole number of more than
-  ten thousand digits, is returned as written (a message falls back).
+  template whose text would pass a million characters, or that holds a `BigInt` or `BigDecimal` of
+  more than ten thousand digits, or is given `null` for a value it shows, is returned as written
+  (a message falls back). The work on numbers counts against a message's budget of four million
+  characters, nested messages included.
 - Error messages escape anything but printable ASCII and are cut short, so they can be logged.
 - `validate` reports syntax errors, unknown functions, a `.match` without a `*` variant, a variant
   with the wrong number of keys, and text after the pattern. A template over 64K characters is

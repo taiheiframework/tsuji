@@ -602,7 +602,7 @@ in Tsuji's own codecs, whatever `ReaderConfig` you read with:
   message brings at most 1000 templates and 1000 arguments of at most 64K characters, a
   catalogue is at most 4M characters, 100000 messages and 16 levels of JSON nesting, and one
   template formats to at most a million characters (past that it falls back, and so it does
-  for a whole number of more than ten thousand digits). A catalogue, or an
+  for a `BigInt` or a `BigDecimal` of more than ten thousand digits). A catalogue, or an
   object in the kept arguments of an unknown message, in which more than 16 keys share one hash
   code is refused: real keys almost never share one, and maps of keys that do cost time out of
   proportion to their size.
@@ -614,7 +614,12 @@ in Tsuji's own codecs, whatever `ReaderConfig` you read with:
   request header to the languages you support before you show messages in it
   (`Language.negotiate`, see From a request), or each new tag costs a lookup per family.
 - One message, with its nested messages, list elements and fallbacks, produces at most four
-  million characters; past that it shows its own template.
+  million characters; past that it shows its own template. The work on its numbers counts
+  against the same limit, in the characters read and written: about forty for an ordinary
+  number, a few hundred for one of hundreds of digits, and up to a thousand to read a `Double`
+  whose exact value has that many (the smallest ones). A message that shows a hundred thousand
+  numbers, or a list of ten thousand different such `Double`s, falls back as one that writes
+  too much text does; no message a person reads comes near it.
 
 Versioning rules for keys, on the wire:
 
@@ -685,9 +690,8 @@ MessageFormat2.format("Order {$id :string}, {$year :number useGrouping=never}", 
   a number that is a name and not an amount, such as an order number or a year: it gives the
   digits as they are.
 - Every digit is kept, up to 300 whole digits (a longer number is shown as it is, unformatted,
-  and a whole number of more than ten thousand digits is not written at all: the template
-  falls back, as it does for text past a million characters):
-  an `Int`, `Long`, `BigInt` and `BigDecimal` go to the formatter as their digits, a `Double`
+  and a `BigInt` or `BigDecimal` of more than ten thousand digits is not written at all: the
+  template falls back, as it does for text past a million characters): an `Int`, `Long`, `BigInt` and `BigDecimal` go to the formatter as their digits, a `Double`
   and a `Float` as the fewest digits that read back as the same value (the `Float` 1.1 is `1.1`,
   not `1.100000023841858`). Text that reads as a number is formatted by
   `:number`, and shown as text without a function.
@@ -706,7 +710,10 @@ MessageFormat2.format("Order {$id :string}, {$year :number useGrouping=never}", 
 
 Coming from 6.0.0: a whole number had no grouping (`1234567`), any other number exactly two
 decimals (`1.50`), `:integer` rounded -2.5 to -2, `style=currency` always wrote US dollars, and
-`{$n}` and `{$d}` showed `toString` (`1.0` on the JVM, `1` in JavaScript, `2026-10-20`).
+`{$n}` and `{$d}` showed `toString` (`1.0` on the JVM, `1` in JavaScript, `2026-10-20`). A
+number of more than 300 whole digits was written out in full and is now shown as it is; a
+`BigInt` or `BigDecimal` of more than ten thousand digits makes the template fall back; and the
+work on numbers counts against the limit of a message (see [Bounds](#bounds)).
 
 ### Plurals
 

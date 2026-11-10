@@ -36,11 +36,6 @@ private[tsuji] object Decimal:
     case d: java.math.BigDecimal => ofDecimal(d)
     case other                   => ofText(other.toString)
 
-  /** Whether a number and the key of a `.match` variant are the same number: 1.0 and `1` are. */
-  def sameNumber(plain: String, key: String): Boolean =
-    Operands.parse(key).isDefined && Operands.parse(plain).isDefined &&
-    new java.math.BigDecimal(plain).compareTo(new java.math.BigDecimal(key)) == 0
-
   private def ofText(text: String): Option[String] =
     Option
       .when(text.length <= Operands.MaxNumberText)(text)

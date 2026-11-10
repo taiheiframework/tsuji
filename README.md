@@ -53,8 +53,11 @@ Both put the repository after Maven Central, so that it is asked only for what C
 have. The shorter `def repositories = Seq(...)` in Mill and `resolvers += ...` in sbt put it in
 front of Central, where a build would take from it whatever it serves, for every dependency: a
 build trusts each repository it names for all that the repository serves, so name this one
-last. It holds `dev.taihei` artifacts only, each signed with the release key
-`5026B2996DDB697EC4630BCF14A733E2A507702F` (see [Releasing](#releasing)).
+last. Named last it is still asked for a coordinate no repository before it has, such as a
+misspelt one. It holds `dev.taihei` artifacts only, each signed with the release key
+`5026B2996DDB697EC4630BCF14A733E2A507702F`; Mill, sbt and Coursier do not check signatures, so
+to verify a file, fetch its `.asc` and run `gpg --verify` with that key (see
+[Releasing](#releasing)).
 This address is an interim one: the repository moves to `repo.taihei.dev`, and this section
 will name the new address when it does. The versions already published stay available.
 

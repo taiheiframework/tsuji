@@ -648,7 +648,29 @@ object MessageFormat2:
     variables: Map[String, Any] = Map.empty,
     locale: String = "en",
     budget: Budget = Budget.fresh(),
-    pluralLocale: Option[String] = None)
+    pluralLocale: Option[String] = None,
+    numbers: Digits = new Digits)
+
+  /**
+   * The digits of the `Double`s and `Float`s one evaluation has read. Reading one is the costly
+   * part of showing a number (its exact value can have hundreds of digits), and a template from a
+   * catalogue can name one argument thousands of times: it is read once. Only these two types
+   * are kept, and only a few of them: other numbers are their digits already.
+   */
+  final private[tsuji] class Digits:
+
+    private val read = mutable.HashMap.empty[Any, Option[String]]
+
+    def plain(value: Any): Option[String] = value match
+      case _: Double | _: Float =>
+        read.get(value).getOrElse:
+          val digits = Decimal.plain(value)
+          if read.size < Digits.Kept then read(value) = digits
+          digits
+      case _                    => Decimal.plain(value)
+
+  private[tsuji] object Digits:
+    val Kept = 64
 
   // None when evaluating threw, which no input should make it do; the caller decides what to show.
   private[tsuji] def tryFormat(
@@ -733,16 +755,23 @@ object MessageFormat2:
     function match
       case "number"   =>
         val (minimum, maximum) = decimals(options)
+        val digits             = context.numbers.plain(value)
         Formatted(
           value,
           // A percentage and an amount are written in their own way; the number stays the value.
-          if style(options) == NumberStyle.Plain then written(value, minimum, maximum) else value,
-          formatNumber(value, options, context.locale),
+          if style(options) == NumberStyle.Plain then written(value, digits, minimum, maximum)
+          else value,
+          format(value, digits, style(options), minimum, maximum, options, context.locale),
         )
       case "integer"  =>
         // The value of :integer is the whole number, to a later function too.
-        val whole = written(value, Some(0), Some(0))
-        Formatted(whole, whole, formatInteger(value, options, context.locale))
+        val digits = context.numbers.plain(value)
+        val whole  = written(value, digits, Some(0), Some(0))
+        Formatted(
+          whole,
+          whole,
+          format(value, digits, NumberStyle.Plain, Some(0), Some(0), options, context.locale),
+        )
       case "datetime" => PlatformDateTimeFormatter.formatDateTime(value, options, context.locale)
       case "date"     =>
         val date = value match
@@ -751,7 +780,7 @@ object MessageFormat2:
         date match
           case d: LocalDate =>
             PlatformDateTimeFormatter.formatDateTime(d, options - "timeStyle", context.locale)
-          case other        => other.toString
+          case other        => asItIs(other)
       case "time"     =>
         val time = value match
           case ldt: LocalDateTime => ldt.toLocalTime
@@ -759,18 +788,10 @@ object MessageFormat2:
         time match
           case t: LocalTime =>
             PlatformDateTimeFormatter.formatDateTime(t, options - "dateStyle", context.locale)
-          case other        => other.toString
+          case other        => asItIs(other)
       case "plural"   => PluralSelector(value, context.pluralLocale.getOrElse(context.locale))
-      case "string"   => text(value, context.locale)
+      case "string"   => text(value, context.locale, context.numbers.plain)
       case _          => value
-
-  private def formatNumber(
-    value: Any,
-    options: Map[String, String],
-    locale: String,
-  ): String =
-    val (minimum, maximum) = decimals(options)
-    format(value, style(options), minimum, maximum, options, locale)
 
   // The fewest and the most decimals the options ask for. Both given the wrong way round: the
   // larger holds, where Intl would throw.
@@ -790,10 +811,11 @@ object MessageFormat2:
    */
   private def written(
     value: Any,
+    plain: Option[String],
     minimum: Option[Int],
     maximum: Option[Int],
   ): Any =
-    Decimal.plain(value).filter(writable).fold(value): digits =>
+    plain.filter(writable).fold(value): digits =>
       val number   = new java.math.BigDecimal(digits)
       val atMost   = maximum.getOrElse(math.max(DefaultDecimals, minimum.getOrElse(0)))
       val atLeast  = minimum.getOrElse(0)
@@ -808,13 +830,14 @@ object MessageFormat2:
   // platform's formatter as they are, so a Long past 2^53 or a BigDecimal loses none of them.
   private def format(
     value: Any,
+    plain: Option[String],
     style: NumberStyle,
     minimum: Option[Int],
     maximum: Option[Int],
     options: Map[String, String],
     locale: String,
   ): String =
-    Decimal.plain(value).filter(writable).fold(asItIs(value)): digits =>
+    plain.filter(writable).fold(asItIs(value)): digits =>
       PlatformNumberFormatter.format(
         // Zero has no sign: the JDK reads the text -0 as 0, Intl writes it as -0.
         if isZero(digits) then digits.stripPrefix("-") else digits,
@@ -834,7 +857,7 @@ object MessageFormat2:
   // writing one out costs time that grows with the square of its length, seconds in JavaScript
   // well before the text reaches the limit on a message: past the bits of ten thousand digits
   // it is refused as text that is too long is, before it is made.
-  private def asItIs(value: Any): String = value match
+  private[tsuji] def asItIs(value: Any): String = value match
     case big: BigInt if big.bitLength > MaxBits               => throw new TooLong
     case big: java.math.BigInteger if big.bitLength > MaxBits => throw new TooLong
     case other                                                => String.valueOf(other)
@@ -895,38 +918,37 @@ object MessageFormat2:
         "useGrouping= takes auto, always or never"
     currency ++ digits ++ grouping
 
-  // A whole number, a half rounded away from zero (2.5 gives 3, -2.5 gives -3), written as the
-  // reader's language writes numbers.
-  private def formatInteger(
-    value: Any,
-    options: Map[String, String],
-    locale: String,
-  ): String =
-    format(value, NumberStyle.Plain, Some(0), Some(0), options, locale)
-
   final private[tsuji] case class PluralSelector(value: Any, locale: String)
 
   // How a value shows in a pattern: a language by its name in the reader's language, a number
   // and a date or time as :number and :datetime write them without options. Text that happens
   // to read as a number is text.
-  private[tsuji] def show(value: Any, locale: String): String = value match
+  private[tsuji] def show(
+    value: Any,
+    locale: String,
+    plain: Any => Option[String] = Decimal.plain,
+  ): String = value match
     case Formatted(_, _, written)                       => written
-    case PluralSelector(v, _)                           => show(v, locale)
+    case PluralSelector(v, _)                           => show(v, locale, plain)
     case l: Language                                    => Language.nameIn(l, locale)
     case _: LocalDate | _: LocalDateTime | _: LocalTime =>
       PlatformDateTimeFormatter.formatDateTime(value, Map.empty, locale)
     case number if Decimal.isNumber(number)             =>
-      format(number, NumberStyle.Plain, None, None, Map.empty, locale)
-    case other                                          => other.toString
+      format(number, plain(number), NumberStyle.Plain, None, None, Map.empty, locale)
+    case other                                          => asItIs(other)
 
   // What :string gives: the value as text, unformatted. A number is its digits, the same on both
   // platforms (an order number 12345 stays 12345, the Double 1 is 1); anything else shows as it
   // would without a function.
-  private def text(value: Any, locale: String): String = value match
-    case PluralSelector(v, _)               => text(v, locale)
-    case number if Decimal.isNumber(number) => Decimal.plain(number).getOrElse(asItIs(number))
+  private def text(
+    value: Any,
+    locale: String,
+    plain: Any => Option[String],
+  ): String = value match
+    case PluralSelector(v, _)                           => text(v, locale, plain)
+    case number if Decimal.isNumber(number)             => plain(number).getOrElse(asItIs(number))
     case _: LocalDate | _: LocalDateTime | _: LocalTime => value.toString
-    case other                                          => show(other, locale)
+    case other                                          => show(other, locale, plain)
 
   private def evaluatePattern(pattern: Pattern, context: Context): String =
     val out                       = new StringBuilder
@@ -936,12 +958,15 @@ object MessageFormat2:
       out ++= s
     def piece(p: Pattern): String = p match
       case Text(value)        => value
-      case Placeholder(expr)  => show(evaluateExpression(expr, context), context.locale)
+      case Placeholder(expr)  =>
+        show(evaluateExpression(expr, context), context.locale, context.numbers.plain)
       case PatternSequence(_) => ""
     pattern match
       case PatternSequence(patterns) => patterns.foreach(p => append(piece(p)))
       case other                     => append(piece(other))
     out.result()
+
+  end evaluatePattern
 
   // A template repeats its placeholders, and an argument may come from the wire: the text one
   // template makes is cut off here, and formatting falls back, rather than run out of memory.
@@ -968,25 +993,28 @@ object MessageFormat2:
     val values         = matchStmt.selectors.map(s => evaluateExpression(s, context))
     val pluralAt       = values.zipWithIndex.collect { case (_: PluralSelector, i) => i }
     val read           = pluralAt.take(MaxPluralSelectors).toSet
-    val selectorValues = values.zipWithIndex.map((v, i) => selected(v, read(i)))
+    val selectorValues = values.zipWithIndex.map((v, i) => selected(v, read(i), context))
     val matchedCase    = matchStmt.cases.find: mcase =>
       mcase.keys.size == selectorValues.size &&
       mcase.keys.zip(selectorValues).forall:
         case (key, p: PluralChoice) => matchesPluralKey(p, key)
         case (key, l: Language)     => key == "*" || key == l.tag
-        case (key, value)           => key == "*" || matchesValue(key, value)
+        case (key, v: ValueChoice)  => key == "*" || v.matches(key)
+        case (key, value)           => key == "*" || key == asItIs(value)
     matchedCase match
       case Some(mcase) => evaluatePattern(mcase.pattern, context)
       case None        => "[no match]"
 
-  // A selector without :plural against a key: a number by its value (the Double 1 matches the
-  // key `1` on both platforms, as the Int 1 does), anything else by its text.
-  private def matchesValue(key: String, value: Any): Boolean = value match
-    // A number that :number wrote is still that number: `when 1234` matches it, `1,234` is no key.
-    case Formatted(_, selects, _) => matchesValue(key, selects)
-    case _                        =>
-      key == value.toString ||
-      (Decimal.isNumber(value) && Decimal.plain(value).exists(Decimal.sameNumber(_, key)))
+  end evaluateMatch
+
+  // A selector without :plural, read once for all the variants: a number matches a key by its
+  // value (the Double 1 matches `1` on both platforms, as the Int 1 does), anything by its text.
+  final private class ValueChoice(text: String, number: Option[java.math.BigDecimal]):
+
+    def matches(key: String): Boolean =
+      key == text || number.exists(n =>
+        Operands.parse(key).isDefined && n.compareTo(new java.math.BigDecimal(key)) == 0
+      )
 
   // A plural selector's number and category, worked out once for all the variants.
   final private case class PluralChoice(operands: Option[Operands], category: String)
@@ -997,11 +1025,24 @@ object MessageFormat2:
   // and `*` match it: no template a person writes comes near it.
   private[tsuji] val MaxPluralSelectors = 64
 
-  private def selected(value: Any, read: Boolean): Any = value match
+  private def selected(
+    value: Any,
+    read: Boolean,
+    context: Context,
+  ): Any = value match
     case PluralSelector(v, locale) =>
       val operands = Option.when(read)(Operands.of(v)).flatten
       PluralChoice(operands, operands.fold("other")(PluralRules.category(locale, _)))
-    case other                     => other
+    case language: Language        => language
+    // A number that :number wrote is still that number: `when 1234` matches it, `1,234` is no key.
+    case Formatted(_, selects, _)  => selected(selects, read, context)
+    case other                     =>
+      val number = Option
+        .when(Decimal.isNumber(other))(context.numbers.plain(other))
+        .flatten
+        .filter(digits => Operands.parse(digits).isDefined)
+        .map(new java.math.BigDecimal(_))
+      ValueChoice(asItIs(other), number)
 
   // Variants are tried in the order the template gives them, as before CLDR's rules: an exact
   // key matches the number it names, a category key the category CLDR gives the number in the

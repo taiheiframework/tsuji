@@ -41,8 +41,30 @@ private[tsuji] object PlatformNumberFormatter:
         options("currency") = code
     minimum.foreach(options("minimumFractionDigits") = _)
     maximum.foreach(options("maximumFractionDigits") = _)
-    new NumberFormat(PlatformLocales.jsLocale(locale), options).format(digits)
+    formatter(s"$locale|$style|$minimum|$maximum|$grouped", locale, options).format(digits)
 
   end format
+
+  // Building an Intl.NumberFormat costs some fifty times what formatting with one does, and a
+  // message with a list of numbers, or with nested messages that each show one, formats
+  // thousands of them the same way. The formatters of the latest few ways are kept; a reader's
+  // language can come from a request, so past Kept they are all let go at once. JavaScript runs
+  // one thing at a time, so a plain map is enough.
+  private val Kept       = 64
+  private val formatters = js.Dictionary.empty[NumberFormat]
+
+  private def formatter(
+    key: String,
+    locale: String,
+    options: js.Dictionary[Any],
+  ): NumberFormat =
+    formatters.getOrElse(
+      key, {
+        if formatters.size >= Kept then formatters.clear()
+        val made = new NumberFormat(PlatformLocales.jsLocale(locale), options)
+        formatters(key) = made
+        made
+      },
+    )
 
 end PlatformNumberFormatter

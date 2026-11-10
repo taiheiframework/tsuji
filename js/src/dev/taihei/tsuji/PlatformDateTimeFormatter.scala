@@ -38,7 +38,7 @@ private[tsuji] object PlatformDateTimeFormatter:
         (Seq("timeStyle"), toJsDate(ReferenceYear, 1, 1, lt))
       case _                  => (Seq.empty, None)
 
-    instant.fold(value.toString): date =>
+    instant.fold(MessageFormat2.asItIs(value)): date =>
       val jsOptions = js.Dictionary[Any](
         (("timeZone" -> "UTC") +: styles.map(key => key -> styleOf(options, key)))*
       )

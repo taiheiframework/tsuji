@@ -288,8 +288,9 @@ private object Classpath:
         // The first use of a failing initialiser throws ExceptionInInitializerError, every later
         // one NoClassDefFoundError: both are the same fault.
         case e: ExceptionInInitializerError =>
-          Left(s"cannot initialise: ${describe(Option(e.getCause).getOrElse(e))}")
-        case e: LinkageError                => Left(s"cannot initialise: ${describe(e)}")
+          Left(s"cannot initialise: ${Printable(describe(Option(e.getCause).getOrElse(e)), 400)}")
+        case e: LinkageError                =>
+          Left(s"cannot initialise: ${Printable(describe(e), 400)}")
         case NonFatal(e)                    => Left(describe(e))
 
   // A class that cannot be loaded or linked is not known to be a family, so it is not one.

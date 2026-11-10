@@ -4,7 +4,14 @@ import zio.test.*
 
 // An argument can be text from the wire, and `:number` and `:plural` read it as a number. That
 // read must take time linear in the text on both platforms, and happen once per selector.
+object Readings extends MessageFamily("readings"):
+  val all = message[(values: List[Double])]("{$values}")
+
 object NumberArgumentSpec extends ZIOSpecDefault:
+
+  // The Double whose exact value has the most digits, 767 of them: reading it as its shortest
+  // digits once rounded all 767 seventeen times, on every use.
+  private val subnormal = 2.225073858507201e-308
 
   private val longDigits = "1" * 65536 + "x"
 
@@ -92,6 +99,42 @@ object NumberArgumentSpec extends ZIOSpecDefault:
           out(4) == "10000",
           out(5) == "{$n :string}",
         )
+    },
+    // A catalogue's template can name one argument thousands of times, and a list can bring ten
+    // thousand numbers from the wire. Scala.js once took three seconds for the first and two for
+    // the last. The budgets are an order of magnitude above what each takes alone, because the
+    // specs run side by side on a machine that does other things.
+    test("a Double that is costly to read is read once, however often a template names it") {
+      val bare     = "{$x}" * 16000
+      val function = "{$x :number} " * 5000
+      val variants = ".match {$x}\n" + "when 1 {a}\n" * 5000 + "when * {none}"
+      TimeBudget.within("a subnormal Double in 16000 placeholders, 5000 functions and 5000 variants", 3000)(
+        List(bare, function, variants).map(t => MessageFormat2.format(t, Map("x" -> subnormal)))
+      ): out =>
+        assertTrue(out(0) == "0" * 16000, out(1) == "0 " * 5000, out(2) == "none")
+    },
+    test("a list of ten thousand Doubles that are costly to read is shown in time") {
+      given Catalogues = Catalogues(Seq(Readings))
+      val message = Readings.all(values = List.fill(10000)(subnormal))
+      TimeBudget.within("a list of 10000 subnormal Doubles", 5000)(message.localize(Language.English)): out =>
+        assertTrue(out == List.fill(10000)("0").mkString(", "))
+    },
+    test("the shortest digits of a Double and a Float, also of the smallest and the largest") {
+      def digits(value: Any) = Decimal.plain(value)
+      assertTrue(
+        digits(0.1) == Some("0.1"),
+        digits(0.1f) == Some("0.1"),
+        digits(1.0) == Some("1"),
+        digits(0.30000000000000004) == Some("0.30000000000000004"),
+        digits(1.0e21) == Some("1000000000000000000000"),
+        digits(123456789.125) == Some("123456789.125"),
+        // 5E-324: one digit reads back as the smallest Double, after 323 zeros.
+        digits(Double.MinPositiveValue).exists(d => d.endsWith("5") && d.length == 326),
+        digits(subnormal).exists(_.toDouble == subnormal),
+        digits(Double.MaxValue).exists(d => d.startsWith("17976931348623157") && d.length == 309),
+        digits(Float.MaxValue).exists(_.toFloat == Float.MaxValue),
+        digits(9007199254740993.0) == Some("9007199254740992"),
+      )
     },
     test("values and text read as numbers the same on both platforms") {
       val shown = List[(Any, String)](

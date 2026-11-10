@@ -91,12 +91,21 @@ private[tsuji] object Operands:
     maxDigits: Int,
     readsBack: String => Boolean,
   ): java.math.BigDecimal =
-    val exact = new java.math.BigDecimal(d)
+    // The exact value of a Double can have 767 digits (the smallest ones do), and rounding it
+    // costs in proportion: it is rounded once, to the 17 digits that always read back, and the
+    // shorter candidates are rounded from those. A candidate is taken only when it reads back as
+    // the value, so one that rounding twice got wrong is passed over, never returned.
+    val digits = new java.math.BigDecimal(d).round(context(17))
     (1 to maxDigits).iterator
-      .map(p => exact.round(new java.math.MathContext(p, java.math.RoundingMode.HALF_EVEN)))
+      .map(p => digits.round(context(p)))
       .find(c => readsBack(c.toString))
-      .getOrElse(exact)
+      .getOrElse(digits)
       .stripTrailingZeros
+
+  end shortest
+
+  private def context(precision: Int): java.math.MathContext =
+    new java.math.MathContext(precision, java.math.RoundingMode.HALF_EVEN)
 
   // Its digits are counted before the plain text is made: 1E+1000000000 is a billion digits.
   private def ofDecimal(d: java.math.BigDecimal): Option[Operands] =

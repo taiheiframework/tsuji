@@ -37,7 +37,7 @@ private[tsuji] object PlatformDateTimeFormatter:
 
       case _ =>
         // Fallback for non-date/time values
-        value.toString
+        MessageFormat2.asItIs(value)
     end match
 
   end formatDateTime

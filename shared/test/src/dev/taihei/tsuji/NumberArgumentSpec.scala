@@ -119,6 +119,84 @@ object NumberArgumentSpec extends ZIOSpecDefault:
       TimeBudget.within("a list of 10000 subnormal Doubles", 5000)(message.localize(Language.English)): out =>
         assertTrue(out == List.fill(10000)("0").mkString(", "))
     },
+    // Every nested message is an evaluation of its own, and a message that shows one character
+    // spends nothing of the limit on text: what one evaluation costs is what a wire message of a
+    // thousand of them costs a thousand times. A selector was once parsed again for every
+    // selector, a number written again for every placeholder.
+    test("a hundred evaluations of a template full of selectors or functions on a costly number") {
+      val selectors                             = ".match " + "{$x} " * 9000 + "\nwhen " + "* " * 9000 + "{b}"
+      val functions                             = "{$x :number} " * 5000
+      val text                                  = "0." + "0" * 1000 + "1"
+      def hundred(template: String, value: Any) = (1 to 100).map(_ =>
+        MessageFormat2.format(template, Map("x" -> value))
+      ).last
+      TimeBudget.within("100 x 9000 selectors and 100 x 5000 functions on a subnormal and on long text", 8000)(
+        List(
+          hundred(selectors, subnormal),
+          hundred(functions, subnormal),
+          hundred(selectors, text),
+          hundred(functions, text),
+        )
+      ): out =>
+        assertTrue(
+          selectors.length < 65536,
+          out(0) == "b",
+          out(1) == "0 " * 5000,
+          out(2) == "b",
+          out(3) == "0 " * 5000,
+        )
+    },
+    // Scala.js makes another number altogether of a negative Double of 2^63 and beyond when it
+    // makes a BigDecimal of it: -1e19 was shown as 37,768,931,862,957,162,000,000 there.
+    test("a negative number is its positive with a minus, however large") {
+      def shown(value: Any, template: String = "{$x :string}") =
+        MessageFormat2.format(template, Map("x" -> value))
+      val large = List(1e19, 1e40, 9.223372036854776e18, Double.MaxValue, 1.5e300)
+      assertTrue(
+        large.forall(d => shown(-d) == "-" + shown(d)),
+        large.forall(d => shown(-d).toDouble == -d),
+        shown(-1e19) == "-10000000000000000000",
+        shown(-1e19, "{$x :number}") == "-10,000,000,000,000,000,000",
+        shown(-1e19f) == "-" + shown(1e19f),
+        shown(-1e19f).toFloat == -1e19f,
+        shown(-1e19, ".match {$x :plural}\nwhen one {one}\nwhen * {other}") == "other",
+        shown(-1e19, ".match {$x}\nwhen -10000000000000000000 {found}\nwhen * {other}") == "found",
+      )
+    },
+    // The digits are found from seventeen of them, not from the exact value each time. They
+    // must be the digits the slow way finds: the nearest of the shortest that read back.
+    test("the shortest digits are those that rounding the exact value finds, for 20000 values") {
+      def reference(d: Double): String =
+        val exact = new java.math.BigDecimal(math.abs(d))
+        val found = (1 to 17).iterator
+          .map(p => exact.round(new java.math.MathContext(p, java.math.RoundingMode.HALF_EVEN)))
+          .find(c => c.toString.toDouble == math.abs(d))
+          .getOrElse(exact)
+          .stripTrailingZeros
+        (if d < 0 then found.negate else found).toPlainString
+      val random                       = new scala.util.Random(20261110L)
+      val sample                       = Iterator
+        .continually(java.lang.Double.longBitsToDouble(random.nextLong()))
+        .filter(d => !d.isNaN && !d.isInfinite)
+        .take(20000)
+        .toList
+      val named   = List(7.413350156306077e49, 7.844215278549737e-14, 0.1, 1.0e23, 5e-324, 9.5e-322, subnormal)
+      val differs = (sample ++ named).filter(d => Decimal.plain(d) != Some(reference(d)))
+      assertTrue(differs.isEmpty)
+    },
+    test("a Float and the Double of the same value keep their own digits, whichever is read first") {
+      val args  = Map[String, Any]("f" -> 1.1f, "d" -> 1.1f.toDouble)
+      val first = MessageFormat2.format("{$f :string}|{$d :string}", args).split('|').toList
+      val last  = MessageFormat2.format("{$d :string}|{$f :string}", args).split('|').toList
+      assertTrue(first == last.reverse, first.head == "1.1")
+    },
+    test("a BigDecimal whose digits are a very long whole number is not written out") {
+      val wide = BigDecimal(BigInt(1) << (MessageFormat2.MaxBits + 1), -400)
+      assertTrue(
+        MessageFormat2.format("{$x :number} {$x}", Map("x" -> wide)) == "{$x :number} {$x}",
+        MessageFormat2.format("{$x}", Map("x" -> BigDecimal("1E+1000000000"))) == "1E+1000000000",
+      )
+    },
     test("the shortest digits of a Double and a Float, also of the smallest and the largest") {
       def digits(value: Any) = Decimal.plain(value)
       assertTrue(

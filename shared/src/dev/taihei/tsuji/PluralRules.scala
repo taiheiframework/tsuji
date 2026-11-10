@@ -93,13 +93,25 @@ private[tsuji] object Operands:
   ): java.math.BigDecimal =
     // The exact value of a Double can have 767 digits (the smallest ones do), and rounding it
     // costs in proportion: it is rounded once, to the 17 digits that always read back, and the
-    // shorter candidates are rounded from those. A candidate is taken only when it reads back as
-    // the value, so one that rounding twice got wrong is passed over, never returned.
-    val digits = new java.math.BigDecimal(d).round(context(17))
+    // shorter candidates are rounded from those. Rounding twice gives the nearest candidate
+    // unless the 17 digits lie exactly halfway between two of them, where only the exact value
+    // knows which is nearer; then, and only then, the exact value is rounded again.
+    //
+    // The sign is set aside: Scala.js reads a negative Double of 2^63 and beyond as another
+    // number altogether when it makes a BigDecimal of it, and reads its absolute value rightly.
+    val exact                                   = new java.math.BigDecimal(math.abs(d))
+    val seventeen                               = exact.round(context(17))
+    def signed(c: java.math.BigDecimal)         = if d < 0 then c.negate else c
+    def candidate(p: Int): java.math.BigDecimal =
+      val down = seventeen.round(new java.math.MathContext(p, java.math.RoundingMode.DOWN))
+      val up   = seventeen.round(new java.math.MathContext(p, java.math.RoundingMode.UP))
+      val tie  = up.compareTo(down) != 0 &&
+        up.subtract(seventeen).compareTo(seventeen.subtract(down)) == 0
+      (if tie then exact else seventeen).round(context(p))
     (1 to maxDigits).iterator
-      .map(p => digits.round(context(p)))
+      .map(p => signed(candidate(p)))
       .find(c => readsBack(c.toString))
-      .getOrElse(digits)
+      .getOrElse(signed(seventeen))
       .stripTrailingZeros
 
   end shortest

@@ -652,25 +652,63 @@ object MessageFormat2:
     numbers: Digits = new Digits)
 
   /**
-   * The digits of the `Double`s and `Float`s one evaluation has read. Reading one is the costly
-   * part of showing a number (its exact value can have hundreds of digits), and a template from a
-   * catalogue can name one argument thousands of times: it is read once. Only these two types
-   * are kept, and only a few of them: other numbers are their digits already.
+   * What one evaluation has read of its numbers. Reading a `Double` or a `Float` as its digits,
+   * and those digits or the text of an argument as a number, is the costly part of showing one
+   * (the exact value of a small `Double` has hundreds of digits), and a template from a catalogue
+   * can name one argument thousands of times, as a placeholder, under a function or as a
+   * selector: each is read once, and what `:number` or `:integer` makes of it with the same
+   * options is made once. Only a few are kept: a message has few arguments, and whole numbers
+   * are their digits already.
    */
   final private[tsuji] class Digits:
 
-    private val read = mutable.HashMap.empty[Any, Option[String]]
+    private val read    = mutable.HashMap.empty[Any, Read]
+    private val applied = mutable.HashMap.empty[Any, Any]
 
-    def plain(value: Any): Option[String] = value match
-      case _: Double | _: Float =>
-        read.get(value).getOrElse:
-          val digits = Decimal.plain(value)
-          if read.size < Digits.Kept then read(value) = digits
-          digits
-      case _                    => Decimal.plain(value)
+    def of(value: Any): Read =
+      Digits.key(value).fold(new Read(Decimal.plain(value))): key =>
+        read.get(key).getOrElse:
+          val made = new Read(Decimal.plain(value))
+          if read.size < Digits.Kept then read(key) = made
+          made
+
+    def plain(value: Any): Option[String] = of(value).digits
+
+    // What a function makes of a value with these options, made once for one evaluation.
+    def once(
+      function: String,
+      options: Map[String, String],
+      value: Any,
+    )(
+      make: => Any
+    ): Any =
+      Digits.key(value).fold(make): key =>
+        val whole = (function, options, key)
+        applied.get(whole).getOrElse:
+          val made = make
+          if applied.size < Digits.Kept then applied(whole) = made
+          made
+
+  end Digits
+
+  /** The digits of a number, and the number they are, parsed when first asked for. */
+  final private[tsuji] class Read(val digits: Option[String]):
+
+    lazy val number: Option[java.math.BigDecimal] =
+      digits.filter(d => Operands.parse(d).isDefined).map(new java.math.BigDecimal(_))
 
   private[tsuji] object Digits:
+
     val Kept = 64
+
+    // The values worth keeping, each under a key of its own type: a Float and the Double of the
+    // same value are different digits (1.1 and 1.100000023841858), and compare as equal.
+    def key(value: Any): Option[Any] = value match
+      case _: Byte | _: Short | _: Int | _: Long           => None
+      case f: Float                                        => Some(("float", f))
+      case d: Double                                       => Some(("double", d))
+      case s: String if s.length <= Operands.MaxNumberText => Some(s)
+      case _                                               => None
 
   // None when evaluating threw, which no input should make it do; the caller decides what to show.
   private[tsuji] def tryFormat(
@@ -726,7 +764,12 @@ object MessageFormat2:
     val operand = (value, function) match
       case (Formatted(_, selects, _), "plural") => selects
       case _                                    => unformatted(value)
-    applyTo(operand, function, options, context)
+    function match
+      case "number" | "integer" =>
+        context.numbers.once(function, options, operand)(applyTo(operand, function, options, context))
+      case _                    => applyTo(operand, function, options, context)
+
+  end applyFunction
 
   /**
    * A number that `:number` or `:integer` wrote: the value it was given, the number as it is
@@ -755,22 +798,22 @@ object MessageFormat2:
     function match
       case "number"   =>
         val (minimum, maximum) = decimals(options)
-        val digits             = context.numbers.plain(value)
+        val read               = context.numbers.of(value)
         Formatted(
           value,
           // A percentage and an amount are written in their own way; the number stays the value.
-          if style(options) == NumberStyle.Plain then written(value, digits, minimum, maximum)
+          if style(options) == NumberStyle.Plain then written(value, read, minimum, maximum)
           else value,
-          format(value, digits, style(options), minimum, maximum, options, context.locale),
+          format(value, read.digits, style(options), minimum, maximum, options, context.locale),
         )
       case "integer"  =>
         // The value of :integer is the whole number, to a later function too.
-        val digits = context.numbers.plain(value)
-        val whole  = written(value, digits, Some(0), Some(0))
+        val read  = context.numbers.of(value)
+        val whole = written(value, read, Some(0), Some(0))
         Formatted(
           whole,
           whole,
-          format(value, digits, NumberStyle.Plain, Some(0), Some(0), options, context.locale),
+          format(value, read.digits, NumberStyle.Plain, Some(0), Some(0), options, context.locale),
         )
       case "datetime" => PlatformDateTimeFormatter.formatDateTime(value, options, context.locale)
       case "date"     =>
@@ -811,12 +854,11 @@ object MessageFormat2:
    */
   private def written(
     value: Any,
-    plain: Option[String],
+    read: Read,
     minimum: Option[Int],
     maximum: Option[Int],
   ): Any =
-    plain.filter(writable).fold(value): digits =>
-      val number   = new java.math.BigDecimal(digits)
+    read.digits.filter(writable).flatMap(_ => read.number).fold(value): number =>
       val atMost   = maximum.getOrElse(math.max(DefaultDecimals, minimum.getOrElse(0)))
       val atLeast  = minimum.getOrElse(0)
       val rounded  =
@@ -858,9 +900,12 @@ object MessageFormat2:
   // well before the text reaches the limit on a message: past the bits of ten thousand digits
   // it is refused as text that is too long is, before it is made.
   private[tsuji] def asItIs(value: Any): String = value match
-    case big: BigInt if big.bitLength > MaxBits               => throw new TooLong
-    case big: java.math.BigInteger if big.bitLength > MaxBits => throw new TooLong
-    case other                                                => String.valueOf(other)
+    case big: BigInt if big.bitLength > MaxBits                              => throw new TooLong
+    case big: java.math.BigInteger if big.bitLength > MaxBits                => throw new TooLong
+    // The digits of a BigDecimal are a whole number of its own, whatever its exponent.
+    case big: BigDecimal if big.bigDecimal.unscaledValue.bitLength > MaxBits => throw new TooLong
+    case big: java.math.BigDecimal if big.unscaledValue.bitLength > MaxBits  => throw new TooLong
+    case other => String.valueOf(other)
 
   private[tsuji] val MaxBits = 33220
 
@@ -1009,12 +1054,15 @@ object MessageFormat2:
 
   // A selector without :plural, read once for all the variants: a number matches a key by its
   // value (the Double 1 matches `1` on both platforms, as the Int 1 does), anything by its text.
-  final private class ValueChoice(text: String, number: Option[java.math.BigDecimal]):
+  // Nothing of the number is read until a key is compared with it: `when * *` reads nothing.
+  final private class ValueChoice(text: String, read: => Option[Read]):
+
+    private lazy val number = read.flatMap(_.number)
 
     def matches(key: String): Boolean =
-      key == text || number.exists(n =>
-        Operands.parse(key).isDefined && n.compareTo(new java.math.BigDecimal(key)) == 0
-      )
+      key == text ||
+      (Operands.parse(key).isDefined &&
+      number.exists(_.compareTo(new java.math.BigDecimal(key)) == 0))
 
   // A plural selector's number and category, worked out once for all the variants.
   final private case class PluralChoice(operands: Option[Operands], category: String)
@@ -1037,12 +1085,7 @@ object MessageFormat2:
     // A number that :number wrote is still that number: `when 1234` matches it, `1,234` is no key.
     case Formatted(_, selects, _)  => selected(selects, read, context)
     case other                     =>
-      val number = Option
-        .when(Decimal.isNumber(other))(context.numbers.plain(other))
-        .flatten
-        .filter(digits => Operands.parse(digits).isDefined)
-        .map(new java.math.BigDecimal(_))
-      ValueChoice(asItIs(other), number)
+      ValueChoice(asItIs(other), Option.when(Decimal.isNumber(other))(context.numbers.of(other)))
 
   // Variants are tried in the order the template gives them, as before CLDR's rules: an exact
   // key matches the number it names, a category key the category CLDR gives the number in the

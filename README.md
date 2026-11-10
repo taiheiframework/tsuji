@@ -598,7 +598,8 @@ in Tsuji's own codecs, whatever `ReaderConfig` you read with:
   levels and 100000 values, a list holds at most 10000 elements, a 4.x
   message brings at most 1000 templates and 1000 arguments of at most 64K characters, a
   catalogue is at most 4M characters, 100000 messages and 16 levels of JSON nesting, and one
-  template formats to at most a million characters (past that it falls back). A catalogue, or an
+  template formats to at most a million characters (past that it falls back, and so it does
+  for a whole number of more than ten thousand digits). A catalogue, or an
   object in the kept arguments of an unknown message, in which more than 16 keys share one hash
   code is refused: real keys almost never share one, and maps of keys that do cost time out of
   proportion to their size.
@@ -680,16 +681,19 @@ MessageFormat2.format("Order {$id :string}, {$year :number useGrouping=never}", 
   `{$n}` of 1234567 is `1,234,567`, `{$d}` of a `LocalDate` is `Oct 20, 2026`. Use `:string` for
   a number that is a name and not an amount, such as an order number or a year: it gives the
   digits as they are.
-- Every digit is kept, up to 300 whole digits (a longer number is shown as it is, unformatted):
+- Every digit is kept, up to 300 whole digits (a longer number is shown as it is, unformatted,
+  and a whole number of more than ten thousand digits is not written at all: the template
+  falls back, as it does for text past a million characters):
   an `Int`, `Long`, `BigInt` and `BigDecimal` go to the formatter as their digits, a `Double`
   and a `Float` as the fewest digits that read back as the same value (the `Float` 1.1 is `1.1`,
   not `1.100000023841858`). Text that reads as a number is formatted by
   `:number`, and shown as text without a function.
 - `.match {$x} when 3` compares a number by its value: the `Double` 3.0, the `Long` 3 and the
   `BigDecimal` 3.00 all match. A number declared with a function (`.input {$n :number}`) is,
-  to a later `.match`, `:plural` or function, the number as it is written: `:integer` of 0.6 is
-  1, so it shows `1` and selects `=1` and `one`; `:number minimumFractionDigits=1` of 1 is 1.0,
-  which English counts as `other`.
+  to a later `.match` or `:plural`, the number as it is written: `:integer` of 0.6 is 1, so it
+  shows `1` and selects `=1` and `one`; `:number minimumFractionDigits=1` of 1 is 1.0, which
+  English counts as `other`. A later function is given the value itself, with every decimal;
+  after `:integer` that value is the whole number.
 - `validate` and the macro refuse what a number function cannot do: `style=currency` without
   `currency=`, a `currency=` that is not three letters, a number of decimals outside 0 to 20, a
   `useGrouping` other than `auto`, `always` or `never` (MessageFormat 2.0's `min2` is not

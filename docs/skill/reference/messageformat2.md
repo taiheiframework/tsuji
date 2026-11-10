@@ -13,7 +13,8 @@ final case class TemplateError private[tsuji] (position: Int, message: String)  
 ```
 
 - `format` never throws; a variable without a value shows as `$name`; `language` is the reader's (a `String` tag up to 6.x). A
-  template whose text would pass a million characters is returned as written (a message falls back).
+  template whose text would pass a million characters, or that holds a whole number of more than
+  ten thousand digits, is returned as written (a message falls back).
 - Error messages escape anything but printable ASCII and are cut short, so they can be logged.
 - `validate` reports syntax errors, unknown functions, a `.match` without a `*` variant, a variant
   with the wrong number of keys, and text after the pattern. A template over 64K characters is
@@ -29,7 +30,7 @@ final case class TemplateError private[tsuji] (position: Int, message: String)  
 | --- | --- |
 | `{$name}` | the variable; a `Language` shows as its name in the reader's language, a number as `:number` writes it, a date or time as `:datetime` writes it; text stays text |
 | `{$n :number}` | grouped digits and up to three decimals as the reader's language writes them, every digit kept (`Long`, `BigInt`, `BigDecimal`); options `minimumFractionDigits`, `maximumFractionDigits` (0 to 20), `useGrouping=never`, `style=percent`, `style=currency currency=EUR` (the code is required) |
-| `{$n :integer}` | rounded to a whole number (a half away from zero), grouped |
+| `{$n :integer}` | rounded to a whole number (a half away from zero), grouped; `useGrouping` is its one option, `style`, `currency` and the fraction options are refused |
 | `{$d :datetime dateStyle=long timeStyle=short}` | a date and/or time; styles `short`, `medium`, `long`, `full`, any case, unknown gives `medium` |
 | `{$d :date dateStyle=long}` | the date part (of a `LocalDate` or `LocalDateTime`) |
 | `{$t :time}` | the time part (of a `LocalTime` or `LocalDateTime`) |
@@ -42,7 +43,7 @@ or a literal `{(text)}`.
 
 | Syntax | Effect |
 | --- | --- |
-| `.input {$n :number}` | an argument, with a function applied |
+| `.input {$n :number}` | an argument, with a function applied: a placeholder shows its text, a later `.match` or `:plural` selects by the number as written (`:integer` of 0.6 is 1), a later function gets the value |
 | `.local $x = {$n :number}` | a local variable (also `.local {$x = (text)}` and `.let`) |
 
 After declarations, a simple pattern ends at the line break.

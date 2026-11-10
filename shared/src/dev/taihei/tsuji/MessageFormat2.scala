@@ -699,18 +699,28 @@ object MessageFormat2:
     options: Map[String, String],
     context: Context,
   ): Any =
-    // What a function gets is the value itself, also when an earlier function wrote it out.
-    applyTo(unformatted(value), function, options, context)
+    // A function gets the value itself, also when an earlier function wrote it out; :plural
+    // selects, and a selection goes by the number the reader sees.
+    val operand = (value, function) match
+      case (Formatted(_, selects, _), "plural") => selects
+      case _                                    => unformatted(value)
+    applyTo(operand, function, options, context)
 
   /**
-   * A number that `:number` or `:integer` wrote, with the number it was. A declaration can hold
-   * one (`.input {$n :number}`) for a `.match` or another function to read later, and those read
-   * the number: its text is grouped and localised (`1,000`, `1.000`), which names no number.
+   * A number that `:number` or `:integer` wrote: the value it was given, the number as it is
+   * written, and the text. A declaration can hold one (`.input {$n :number}`) for what comes
+   * later. A placeholder shows the text, which is grouped and localised (`1,000`, `1.000`) and
+   * names no number. A function is given the value, so `{$n :number minimumFractionDigits=5}`
+   * still has every decimal. A `.match` and `:plural` select by the number as written, so that
+   * the word beside a number goes with the number the reader sees: 0.6 written as 1 is one.
    */
-  final private case class Formatted(value: Any, text: String)
+  final private case class Formatted(
+    value: Any,
+    selects: Any,
+    text: String)
 
   private def unformatted(value: Any): Any = value match
-    case Formatted(number, _)     => number
+    case Formatted(number, _, _)  => number
     case PluralSelector(count, _) => unformatted(count)
     case other                    => other
 
@@ -724,12 +734,15 @@ object MessageFormat2:
       case "number"   =>
         val (minimum, maximum) = decimals(options)
         Formatted(
+          value,
           // A percentage and an amount are written in their own way; the number stays the value.
           if style(options) == NumberStyle.Plain then written(value, minimum, maximum) else value,
           formatNumber(value, options, context.locale),
         )
       case "integer"  =>
-        Formatted(written(value, Some(0), Some(0)), formatInteger(value, options, context.locale))
+        // The value of :integer is the whole number, to a later function too.
+        val whole = written(value, Some(0), Some(0))
+        Formatted(whole, whole, formatInteger(value, options, context.locale))
       case "datetime" => PlatformDateTimeFormatter.formatDateTime(value, options, context.locale)
       case "date"     =>
         val date = value match
@@ -897,7 +910,7 @@ object MessageFormat2:
   // and a date or time as :number and :datetime write them without options. Text that happens
   // to read as a number is text.
   private[tsuji] def show(value: Any, locale: String): String = value match
-    case Formatted(_, written)                          => written
+    case Formatted(_, _, written)                       => written
     case PluralSelector(v, _)                           => show(v, locale)
     case l: Language                                    => Language.nameIn(l, locale)
     case _: LocalDate | _: LocalDateTime | _: LocalTime =>
@@ -970,8 +983,8 @@ object MessageFormat2:
   // key `1` on both platforms, as the Int 1 does), anything else by its text.
   private def matchesValue(key: String, value: Any): Boolean = value match
     // A number that :number wrote is still that number: `when 1234` matches it, `1,234` is no key.
-    case Formatted(number, _) => matchesValue(key, number)
-    case _                    =>
+    case Formatted(_, selects, _) => matchesValue(key, selects)
+    case _                        =>
       key == value.toString ||
       (Decimal.isNumber(value) && Decimal.plain(value).exists(Decimal.sameNumber(_, key)))
 

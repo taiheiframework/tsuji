@@ -241,6 +241,23 @@ object PlatformFormatterSpec extends ZIOSpecDefault:
         matched(":integer", 1.5) == "two",
         matched(":number", 2.0004) == "two",
         matched(":number", 2.004) == "2.004 other",
+        // The most decimals asked for decide what is written, and so what is selected.
+        shown(":number maximumFractionDigits=1", 1.04) == "1 exactly",
+        shown(":number maximumFractionDigits=1", 1.05) == "1.1 items",
+        // The two the wrong way round: the larger holds, 1 is written 1.000.
+        shown(":number minimumFractionDigits=3 maximumFractionDigits=1", 1) == "1.000 exactly",
+        // A later function reads the value :number was given, with every decimal; :integer's
+        // value is the whole number.
+        MessageFormat2.format(
+          ".input {$n :number}\n{$n} {$n :number minimumFractionDigits=5} {$n :number style=percent maximumFractionDigits=2} {$n :string}",
+          Map("n" -> 0.123456),
+          Language.English,
+        ).trim == "0.123 0.12346 12.35% 0.123456",
+        MessageFormat2.format(
+          ".input {$n :integer}\n{$n} {$n :number minimumFractionDigits=2} {$n :string}",
+          Map("n" -> 1.6),
+          Language.English,
+        ).trim == "2 2.00 2",
         // A plural selector handed to a function is its number.
         MessageFormat2.format(".local $p = {$n :plural}\n{$p :number}", Map("n" -> 1000), Language.English).trim ==
         "1,000",

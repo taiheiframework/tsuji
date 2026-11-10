@@ -25,8 +25,7 @@ object CoreMessagesCatalogueSpec extends ZIOSpecDefault:
       assertTrue(
         Validation.stringMinLength(min = 8).localize(Dutch) == "lengte moet minimaal 8 zijn",
         Validation.stringShouldNotBeBlank.localize(French) == "ne doit pas être vide",
-        Exceptions.commandVeto(command = "close", state = "open").localize(Dutch) ==
-        "Kan opdracht close niet uitvoeren in toestand open",
+        Validation.intBetween(min = 1, max = 2000).localize(Dutch) == "moet tussen 1 en 2.000 liggen",
         Validation.dateMinimum(min =
           LocalDate.of(2024, 1, 15)
         ).localize(Language("nl-BE")).startsWith("mag niet vroeger zijn dan 15"),
@@ -57,7 +56,7 @@ object CoreMessagesCatalogueSpec extends ZIOSpecDefault:
           (";?!".contains(t(i)) && (i == 0 || t(i - 1) != '\u202f'))
         )
       )
-      assertTrue(texts.size > 60, loose.isEmpty)
+      assertTrue(texts.size > 50, loose.isEmpty)
     },
     test("French puts a no-break space before a colon or semicolon, Dutch none") {
       given Catalogues = Catalogues(CoreMessages.families)

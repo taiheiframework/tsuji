@@ -17,9 +17,9 @@ CoreMessages.Authentication.invalidCredentials.localize(Language.French)   // Ad
 | --- | --- |
 | `General` (`taihei.general`) | `helloWorld(name)` |
 | `Authentication` (`taihei.authentication`) | `success`, `accountNotFound`, `invalidCredentials`, `emailNotVerified`, `emailAlreadyRegistered`, `weakPassword`, `passwordMismatch`, `expiredToken`, `tokenAlreadyUsed`, `cannotRemoveLastCredential`, `wrongCurrentPassword`, `verificationSent`, `passwordResetSent`, `locked` |
-| `Authorization` (`taihei.authorization`) | `accountNotActive`, `accountNotSystem`, `insufficientRole`, `insufficientGrant`, `personAccountMismatch`, `registerPersonForDifferentAccount` |
+| `Authorization` (`taihei.authorization`) | `accountNotActive`, `insufficientRole`, `insufficientGrant`, `personAccountMismatch` |
 | `Validation` (`taihei.validation`) | `invalid`, `stringShouldNotBeBlank`, `stringValidEmail`, `stringValidUrl`, `stringValidPhoneNumber`, `stringLengthBetween(min, max)`, `stringMinLength(min)`, `stringMaxLength(max)`, `stringShouldEqual(otherName)`, `intMinimum(min)`, `intMaximum(max)`, `intBetween(min, max)`, `longMinimum(min)`, `longMaximum(max)`, `dateMinimum(min: LocalDate)`, `dateMaximum(max: LocalDate)`, `dateFuture`, `datePast`, `nonEmpty`, `shouldNotEqual`, `invalidDate`, `invalidDateTime`, `dateRangeInvalid`, `missingTranslations(languages: List[Language])`, `failed(errors)`, `fieldError(field, error)`, `formatErrors(errors)` |
-| `Exceptions` (`taihei.exceptions`) | `unsupportedCommand`, `invalidCommand`, `commandVeto(command, state)`, `personAlreadyLinked`, `mediaProcessingFailed`, `eventFailure`, `stateFailure`, `invalidQuery`, `queryFailure`, `unknownError`, `notFound`, `imageNotFound`, `unauthorized`, `forbidden`, `revisionMismatch`, `revisionMismatchBetween(expected, actual)` |
+| `Exceptions` (`taihei.exceptions`) | `unsupportedCommand`, `invalidCommand`, `invalidQuery`, `queryFailure`, `unknownError`, `notFound`, `unauthorized`, `forbidden` |
 | `Languages` (`taihei.language`) | `name(language)`: what `Language.label` returns |
 
 ## Missing translations
@@ -29,10 +29,13 @@ CoreMessages.Validation.missingTranslations(languages = List(Language("de"), Lan
   .localize(Language.Dutch)  // ontbrekende vertalingen voor: Duits, Frans
 ```
 
-Since 6.1.0 each language is named in the reader's language and the names are joined with `, `.
-Key `taihei.validation.missingTranslationsFor`. The 6.0 form `missingTranslations(languages:
-String)` (key `taihei.validation.missingTranslations`) shows the string as it is; it is
-deprecated since 6.1.0 and removed in 7.0.0: pass the `Language` values instead.
+Each language is named in the reader's language and the names are joined with `, `. Key
+`taihei.validation.missingTranslationsFor`. The 6.x form that took one joined `String` (key
+`taihei.validation.missingTranslations`) is gone in 7.0.0, and so are the messages of event
+sourcing and of one application (`commandVeto`, `eventFailure`, `stateFailure`,
+`revisionMismatch`, `revisionMismatchBetween`, `personAlreadyLinked`, `imageNotFound`,
+`mediaProcessingFailed`, `accountNotSystem`, `registerPersonForDifferentAccount`): define those in
+a family of your own.
 
 ## Validation errors of several fields
 

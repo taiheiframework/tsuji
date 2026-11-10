@@ -3,10 +3,8 @@
   "language": "fr",
   "messages": {
     "taihei.authorization.accountNotActive": "le compte n'est pas actif",
-    "taihei.authorization.accountNotSystem": "le compte n'est pas un compte système",
     "taihei.authorization.insufficientGrant": "le compte n'a pas l'autorisation pour cette portée",
     "taihei.authorization.insufficientRole": "le compte n'a aucun des rôles requis",
-    "taihei.authorization.personAccountMismatch": "la personne ne correspond pas au compte authentifié",
-    "taihei.authorization.registerPersonForDifferentAccount": "tentative d'enregistrer une personne pour un compte différent de celui authentifié"
+    "taihei.authorization.personAccountMismatch": "la personne ne correspond pas au compte authentifié"
   }
 }

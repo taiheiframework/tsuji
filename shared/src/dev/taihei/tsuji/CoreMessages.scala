@@ -65,18 +65,6 @@ object CoreMessages:
 
     val invalidCommand = message("Invalid command")
 
-    val commandVeto = message[(command: String, state: String)](
-      "Cannot execute command {$command} on state {$state}"
-    )
-
-    val personAlreadyLinked = message("Cannot link: person is already linked to an account")
-
-    val mediaProcessingFailed = message("Media processing failed")
-
-    val eventFailure = message("Event failure")
-
-    val stateFailure = message("State failure")
-
     val invalidQuery = message("Invalid query")
 
     val queryFailure = message("Query failure")
@@ -85,17 +73,9 @@ object CoreMessages:
 
     val notFound = message("Not found")
 
-    val imageNotFound = message("Image not found")
-
     val unauthorized = message("Unauthorized")
 
     val forbidden = message("Forbidden: Access denied")
-
-    val revisionMismatch = message("Revision mismatch: the resource was modified by another user")
-
-    val revisionMismatchBetween = message[(expected: Long, actual: Long)](
-      "Revision mismatch: expected revision {$expected}, but current revision is {$actual}"
-    )
 
   end Exceptions
 
@@ -149,18 +129,9 @@ object CoreMessages:
 
     val dateRangeInvalid = message("start date must be before or equal to end date")
 
-    /**
-     * The languages as one string the caller joined, shown as it is: a reader of another language
-     * sees them named the caller's way. Kept for 6.x; removed in 7.0.0.
-     */
-    @deprecated(
-      "Use missingTranslations(languages: List[Language]), which names each language in the reader's language; removed in 7.0.0",
-      "6.1.0",
-    )
-    val missingTranslations = message[(languages: String)]("missing translations for: {$languages}")
-
-    // The message behind missingTranslations(languages: List[Language]). Its own key, because a
-    // message written by 6.0 under the old key carries a string, which a list cannot read.
+    // The message behind missingTranslations. Its own key: up to 6.x the key
+    // taihei.validation.missingTranslations carried one string the caller had joined, which a
+    // list cannot read, and a key is never reused for other arguments.
     private val missingTranslationsFor =
       message[(languages: List[Language])]("missing translations for: {$languages}")
 
@@ -194,16 +165,11 @@ object CoreMessages:
 
     val accountNotActive = message("account is not active")
 
-    val accountNotSystem = message("account is not a system account")
-
     val insufficientRole = message("account does not have one of the required roles")
 
     val insufficientGrant = message("account does not have permission for this scope")
 
     val personAccountMismatch = message("person does not correspond to the authenticated account")
-
-    val registerPersonForDifferentAccount =
-      message("trying to register person for a different account than the one authenticated")
 
   /** The name of a language, in the reader's language: what [[Language.label]] gives. */
   object Languages extends MessageFamily("taihei.language"):

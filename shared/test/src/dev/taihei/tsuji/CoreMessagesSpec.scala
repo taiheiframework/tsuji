@@ -2,8 +2,6 @@ package dev.taihei.tsuji
 
 import java.time.LocalDate
 
-import scala.annotation.nowarn
-
 import zio.test.*
 
 import dev.taihei.tsuji.CoreMessages.*
@@ -33,8 +31,8 @@ object CoreMessagesSpec extends ZIOSpecDefault:
       assertTrue(
         General.helloWorld(name = "Alice").localize(English) == "Hello Alice",
         Validation.stringLengthBetween(min = 5, max = 20).localize(English) == "length should be between 5 and 20",
-        Exceptions.revisionMismatchBetween(expected = 3L, actual = 4L).localize(English) ==
-        "Revision mismatch: expected revision 3, but current revision is 4",
+        Validation.intBetween(min = 1, max = 2000).localize(English) == "should be between 1 and 2,000",
+        Exceptions.notFound.localize(English) == "Not found",
         Authentication.locked.toString == "Too many failed attempts; please try again later",
       )
     },
@@ -89,27 +87,20 @@ object CoreMessagesSpec extends ZIOSpecDefault:
         "missing translations for: Dutch",
       )
     },
-    test("a message written with the joined string still reads, under its own key") {
-      given Catalogues = Catalogues(CoreMessages.families)
-      @nowarn("cat=deprecation")
-      val joined = Validation.missingTranslations(languages = "nl, fr")
-      val read   = joined.toJson.fromJson[Message]
-      assertTrue(
-        joined.key.value == "taihei.validation.missingTranslations",
-        read == Right(joined),
-        read.map(_.localize(English)) == Right("missing translations for: nl, fr"),
-      )
-    },
-    test("both forms read from the JSON a writer sends, without its text") {
+    // The key of 6.x, taihei.validation.missingTranslations, carried one joined string. It is
+    // gone and not reused: a message a 6.x writer sends under it is one this reader does not
+    // know, and shows the text the writer sent with it.
+    test("the list reads from the JSON a writer sends, and the key of 6.x is an unknown message") {
       given Catalogues = Catalogues(CoreMessages.families)
       val listed =
         """{"key":"taihei.validation.missingTranslationsFor","args":{"languages":["de","fr"]}}"""
-      val joined = """{"key":"taihei.validation.missingTranslations","args":{"languages":"nl, fr"}}"""
+      val joined =
+        """{"key":"taihei.validation.missingTranslations","args":{"languages":"nl, fr"},"text":"missing translations for: nl, fr"}"""
       assertTrue(
         listed.fromJson[Message].map(_.localize(English)) ==
         Right("missing translations for: German, French"),
         listed.fromJson[Message] == Right(Validation.missingTranslations(List(Language("de"), French))),
-        joined.fromJson[Message].map(_.localize(English)) == Right("missing translations for: nl, fr"),
+        joined.fromJson[Message].map(_.localize(Dutch)) == Right("missing translations for: nl, fr"),
       )
     },
     test("every template and translation passes verify") {

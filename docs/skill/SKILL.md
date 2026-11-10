@@ -13,7 +13,11 @@ typed arguments, so only the reader's language travels and is loaded.
 Package `dev.taihei.tsuji`. Artifacts: `dev.taihei::taihei-tsuji` (`taihei-tsuji_3` on the JVM,
 `taihei-tsuji_sjs1_3` on Scala.js), `dev.taihei::taihei-tsuji-zio-json` (zio-json codecs, package
 `dev.taihei.tsuji.ziojson`, JVM and Scala.js) and the JVM-only `dev.taihei::taihei-tsuji-tools`,
-version 6.0.0 (not on Maven Central, which has the versions up to 5.0.2), Scala 3.9 (LTS), Apache
+version 6.0.0 (not on Maven Central, which has the versions up to 5.0.2: a build names the
+family's repository after Maven Central, in Mill
+`def repositoriesTask = Task.Anon { super.repositoriesTask() :+ coursier.maven.MavenRepository("https://taiheiframework.github.io/repo/") }`,
+in sbt `externalResolvers := externalResolvers.value :+ ("Taihei Framework" at "https://taiheiframework.github.io/repo/")`,
+an interim address that moves to `repo.taihei.dev`), Scala 3.9 (LTS), Apache
 2.0. Source: <https://github.com/taiheiframework/tsuji>. The core's one runtime dependency is
 jsoniter-scala-core; ZIO and zio-json come only with `taihei-tsuji-zio-json`. Use 6.0.0 for new
 code. Tsuji 5.0.x gets security fixes for 12 months after 6.0.0; on that line use 5.0.2 or later,

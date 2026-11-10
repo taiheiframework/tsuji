@@ -12,7 +12,8 @@ taihei-i18n: see [Coming from taihei-i18n 4.x](#coming-from-taihei-i18n-4x).
 ## Modules
 
 Published under `dev.taihei`. Versions up to 5.0.2 are on Maven Central; 6.0.0 is not, it is
-published to the Taihei Framework's own Maven repository.
+published to the Taihei Framework's own Maven repository, <https://taiheiframework.github.io/repo/>,
+which your build has to name (see [Adding the repository](#adding-the-repository)).
 
 | Artifact                     | Platform | Purpose                                                       |
 | ---------------------------- | -------- | ------------------------------------------------------------- |
@@ -31,6 +32,31 @@ mvn"dev.taihei::taihei-tsuji-tools:6.0.0"       // Mill, the export program
 "dev.taihei" %%% "taihei-tsuji-zio-json" % "6.0.0" // sbt, zio-json codecs
 "dev.taihei" %% "taihei-tsuji-tools" % "6.0.0"     // sbt
 ```
+
+### Adding the repository
+
+A build finds 6.0.0 only when it names the family's repository. It needs no credentials, and
+every file in it comes from an immutable GitHub Release of the library.
+
+```scala
+// Mill: in the module that depends on Tsuji.
+def repositoriesTask = Task.Anon {
+  super.repositoriesTask() :+ coursier.maven.MavenRepository("https://taiheiframework.github.io/repo/")
+}
+
+// sbt
+externalResolvers := externalResolvers.value :+
+  ("Taihei Framework" at "https://taiheiframework.github.io/repo/")
+```
+
+Both put the repository after Maven Central, so that it is asked only for what Central does not
+have. The shorter `def repositories = Seq(...)` in Mill and `resolvers += ...` in sbt put it in
+front of Central, where a build would take from it whatever it serves, for every dependency: a
+build trusts each repository it names for all that the repository serves, so name this one
+last. It holds `dev.taihei` artifacts only, each signed with the release key
+`5026B2996DDB697EC4630BCF14A733E2A507702F` (see [Releasing](#releasing)).
+This address is an interim one: the repository moves to `repo.taihei.dev`, and this section
+will name the new address when it does. The versions already published stay available.
 
 5.0.2 is a security release: if you use 5.0.0 or 5.0.1, upgrade. See the advisory
 [GHSA-pjj4-5gjj-j2p8](https://github.com/taiheiframework/tsuji/security/advisories/GHSA-pjj4-5gjj-j2p8)
@@ -212,7 +238,8 @@ Language.fromLocale(Locale.ROOT)                    // Left(...): names no langu
 It is `Language.parse(locale.toLanguageTag)`, except that a locale without a language (`und`) is
 refused. The JDK maps its legacy codes first (`iw` gives `he`), and extensions stay as the JDK
 writes them: `th_TH_TH` gives `th-TH-u-nu-thai-x-lvariant-th`, which still finds the `th` messages
-and formats with Thai digits. `locale.stripExtensions` drops the `-u-` extensions but keeps such
+and asks the formatters for Thai digits, which the JDK writes in numbers; dates keep Latin
+digits. `locale.stripExtensions` drops the `-u-` extensions but keeps such
 a legacy variant as `-x-lvariant-`; `Language.fromLocale(locale).map(_.base)` gives the language
 alone.
 
@@ -306,9 +333,17 @@ reader's language), a nested `Message`, `Text` or `Displayable` (shown in the re
 and `Option` and `List` of these. A type of your own goes through one of them:
 
 ```scala
-final case class OrderId(value: String)
-given MessageArg[OrderId] = MessageArg.as[OrderId, String](_.value, s => Right(OrderId(s)))
+final case class OrderId private (value: String)
+
+object OrderId:
+  def parse(text: String): Either[String, OrderId] =
+    Either.cond(text.matches("[A-Z]{2}-[0-9]{1,9}"), new OrderId(text), "not an order id")
+
+given MessageArg[OrderId] = MessageArg.as[OrderId, String](_.value, OrderId.parse)
 ```
+
+The second function reads what came over the wire, which your application did not write: give
+it the check your type has, as here, rather than `s => Right(OrderId(s))`.
 
 The functions of your own types are checked by `Catalogues.verify` in your tests, not by the
 compiler.
@@ -414,7 +449,9 @@ Compile / run / fork := true
 
 `--scan <package>` finds every family object in a package; `--family <object>` names one.
 Templates that fail their checks are left out and printed, and make the exit status 1; so does
-a family object that cannot be loaded, such as one whose initialiser throws.
+a family object that cannot be loaded, such as one whose initialiser throws, a `--scan` that
+finds no family (a misspelt package), and a jar or directory of the classpath that cannot be read.
+When no family is found at all, nothing is written and the status is 2.
 
 ### Checking catalogues in your tests
 
@@ -597,7 +634,8 @@ MessageFormat2.format(tmpl, Map("count" -> 5), "en")  // You have 5 items
 MessageFormat2.validate("Hello {$name")               // List(at 6: a placeholder is not closed with })
 ```
 
-Functions: `{$n :number}` (with `style=percent` or `style=currency`), `{$n :integer}`,
+Functions: `{$n :number}` (with `style=percent`, or `style=currency currency=EUR`),
+`{$n :integer}`,
 `{$d :datetime dateStyle=long timeStyle=short}`, `{$d :date}`, `{$t :time}`, `:plural` and
 `:select` as `.match` selectors, `:string`. Declarations: `.input {$n :number}` and
 `.local $x = {$n :number}` (or `.let`). `.match` variants are `when <keys> {pattern}`, and one of
@@ -607,6 +645,44 @@ range (after year 275760 or before year -271821) shows as its ISO text, such as 
 Formats come from the platform's locale data (the JDK's CLDR version, or `Intl` in the JavaScript
 runtime), so a detail can differ between them: a medium Dutch date is `20 okt. 2026` on Java 17
 and `20 okt 2026` on later JDKs.
+
+### Numbers
+
+A number is written as the reader's language writes numbers, the same on the JVM and on
+Scala.js:
+
+```scala
+MessageFormat2.format("{$n :number}", Map("n" -> 1234567), "en")       // 1,234,567
+MessageFormat2.format("{$n :number}", Map("n" -> 1234.5), "nl")        // 1.234,5
+MessageFormat2.format("{$n :integer}", Map("n" -> 2.5), "en")          // 3
+MessageFormat2.format("{$n :number style=percent}", Map("n" -> 0.5), "fr")                        // 50 %
+MessageFormat2.format("{$n :number style=currency currency=EUR}", Map("n" -> 1234.5), "nl")       // € 1.234,50
+MessageFormat2.format("{$n :number minimumFractionDigits=2}", Map("n" -> 1.5), "en")              // 1.50
+MessageFormat2.format("Order {$id :string}, {$year :number useGrouping=never}", Map("id" -> 12345, "year" -> 2026), "en")
+// Order 12345, 2026
+```
+
+- `:number` groups the digits and writes up to three decimals; `minimumFractionDigits` and
+  `maximumFractionDigits` (0 to 20) change that, `useGrouping=never` leaves the groups out.
+  `:integer` rounds to a whole number. A half is rounded away from zero (2.5 gives 3, -2.5
+  gives -3).
+- `style=currency` needs `currency=`, a three-letter ISO 4217 code: the template says which
+  currency, the reader's language how an amount is written (`€1,234.50`, `1 234,50 €`), with the
+  currency's own number of decimals. `validate` and the macro refuse the style without a code.
+- A number or a date without a function is written as `:number` and `:datetime` write it:
+  `{$n}` of 1234567 is `1,234,567`, `{$d}` of a `LocalDate` is `Oct 20, 2026`. Use `:string` for
+  a number that is a name and not an amount, such as an order number or a year: it gives the
+  digits as they are.
+- Every digit is kept: an `Int`, `Long`, `BigInt` and `BigDecimal` go to the formatter as their
+  digits, a `Double` and a `Float` as the fewest digits that read back as the same value (the
+  `Float` 1.1 is `1.1`, not `1.100000023841858`). Text that reads as a number is formatted by
+  `:number`, and shown as text without a function.
+- `.match {$x} when 3` compares a number by its value: the `Double` 3.0, the `Long` 3 and the
+  `BigDecimal` 3.00 all match.
+
+Coming from 6.0.0: a whole number had no grouping (`1234567`), any other number exactly two
+decimals (`1.50`), `:integer` rounded -2.5 to -2, `style=currency` always wrote US dollars, and
+`{$n}` and `{$d}` showed `toString` (`1.0` on the JVM, `1` in JavaScript, `2026-10-20`).
 
 ### Plurals
 
@@ -620,7 +696,7 @@ val files = ".match {$n :plural} when one {{$n} plik} when few {{$n} pliki} when
 MessageFormat2.format(files, Map("n" -> 1), "pl")    // 1 plik
 MessageFormat2.format(files, Map("n" -> 3), "pl")    // 3 pliki
 MessageFormat2.format(files, Map("n" -> 5), "pl")    // 5 plików
-MessageFormat2.format(files, Map("n" -> 1.5), "pl")  // 1.5 pliku
+MessageFormat2.format(files, Map("n" -> 1.5), "pl")  // 1,5 pliku
 ```
 
 - The keys are CLDR's categories `zero`, `one`, `two`, `few`, `many` and `other`, and exact numbers

@@ -114,22 +114,15 @@ object LanguageTagSpec extends ZIOSpecDefault:
       } @@ TestAspect.samples(5000),
     ),
     suite("canonical form and errors")(
-      test("the case of a tag does not depend on the default locale") {
-        val turkish = java.util.Locale.forLanguageTag("tr-TR")
-        zio.ZIO.acquireReleaseWith(zio.ZIO.succeed {
-          val before = java.util.Locale.getDefault
-          java.util.Locale.setDefault(turkish)
-          before
-        })(before => zio.ZIO.succeed(java.util.Locale.setDefault(before))) { _ =>
-          zio.ZIO.succeed(
-            assertTrue(
-              Language("IT").tag == "it",
-              Language("en-in").tag == "en-IN",
-              Language("az-latn-IR").tag == "az-Latn-IR",
-              Language("en-x-PRIV").tag == "en-x-priv",
-            )
-          )
-        }
+      // Under a Turkish default locale the same holds: FromLocaleSpec, on the JVM, where a
+      // default locale exists.
+      test("a tag is written in its canonical case") {
+        assertTrue(
+          Language("IT").tag == "it",
+          Language("en-in").tag == "en-IN",
+          Language("az-latn-IR").tag == "az-Latn-IR",
+          Language("en-x-PRIV").tag == "en-x-priv",
+        )
       },
       test("an invalid tag is echoed with its control characters escaped") {
         val error = Language.parse("en\nUS\u001b[31m").swap.getOrElse("")

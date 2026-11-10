@@ -51,6 +51,8 @@ abstract class MessageFamily(val prefix: String, val sourceLanguage: Language = 
       MessageKey.trusted(s"$prefix.$name"),
       template,
       translations.toList,
+      // The macro pairs each argument with the MessageArg of its own type, and a definition
+      // only ever hands an argument's value to that one: the type is not needed after this.
       arguments.map((n, a) => n -> a.asInstanceOf[MessageArg[Any]]),
     )
     defined.synchronized(defined += definition)
@@ -93,6 +95,13 @@ end MessageFamily
  *
  * The `apply` with the named, typed parameters is a refinement of the val's type that
  * [[MessageFamily.message]] writes; it reaches [[applyDynamic]], which is not called directly.
+ *
+ * @param family
+ *   the family the message belongs to
+ * @param key
+ *   the stable key of the message, the family's prefix and the val's name: `order.shipped`
+ * @param template
+ *   the MessageFormat 2.0 template in the family's source language
  */
 final class MessageDefinition[A <: AnyNamedTuple] private[tsuji] (
   val family: MessageFamily,

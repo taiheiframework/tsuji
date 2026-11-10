@@ -39,6 +39,9 @@ object GivensSpec extends ZIOSpecDefault:
         (message: Displayable).toJson == message.toJson,
         summon[JsonDecoder[MessageKey]].decodeJson("\"golden.text.say\"") == MessageKey.parse("golden.text.say"),
         summon[JsonEncoder[MessageKey]].encodeJson(MessageKey.parse("a.b").toOption.get).toString == "\"a.b\"",
+        summon[JsonCodec[MessageKey]].decodeJson("\"a.b\"") == MessageKey.parse("a.b"),
+        summon[JsonCodec[MessageKey]].decodeJson("\"not a key\"").isLeft,
+        summon[JsonCodec[MessageKey]].encodeJson(MessageKey.parse("a.b").toOption.get, None).toString == "\"a.b\"",
       )
     },
     test("messageEncoder writes with or without the text, as the core does") {

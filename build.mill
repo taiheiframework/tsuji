@@ -304,6 +304,19 @@ trait NoZio extends PublishModule with TaiheiRepositories {
   }
 }
 
+// What every published module compiles with, on the JVM and on Scala.js: one list, so that a
+// warning switched on for one platform is on for the other.
+val PublishedScalacOptions = Seq(
+  "-Wunused:all",
+  "-unchecked",
+  "-deprecation",
+  "-feature",
+  "-Xmax-inlines:128",
+  // The message macro expands in user code: what it calls must be public in the bytecode.
+  "-WunstableInlineAccessors",
+  "-Wconf:msg=Unstable inline accessor:e",
+)
+
 // Silences the deprecation of dev.taihei.tsuji.legacy, which its tests use on purpose.
 val LegacyInTests = Seq("-Wconf:cat=deprecation&origin=dev\\.taihei\\.tsuji\\.legacy\\..*:s")
 
@@ -313,15 +326,7 @@ val LegacyInTests = Seq("-Wconf:cat=deprecation&origin=dev\\.taihei\\.tsuji\\.le
 trait TaiheiModule extends ScalaModule with ScalafmtModule with TaiheiScalafix with TaiheiPublishSettings with TaiheiMima with NoZio {
   def scalaVersion = V.scala
 
-  def scalacOptions = Seq(
-    "-Wunused:all",
-    "-unchecked",
-    "-deprecation",
-    "-feature",
-    "-Xmax-inlines:128",
-    // The message macro expands in user code: what it calls must be public in the bytecode.
-    "-WunstableInlineAccessors",
-    "-Wconf:msg=Unstable inline accessor:e",
+  def scalacOptions = PublishedScalacOptions ++ Seq(
     // Java 17 is the JVM floor (Scala 3.9's too). This compiles against the Java 17 API, not the
     // API of the JDK that runs the build, so a call added in a later Java fails here, on any JDK,
     // instead of at run time on a user's Java 17.
@@ -364,16 +369,7 @@ trait TaiheiJSModule extends ScalaJSModule with ScalafmtModule with TaiheiScalaf
   def scalaVersion   = V.scala
   def scalaJSVersion = V.scalaJS
 
-  def scalacOptions = Seq(
-    "-Wunused:all",
-    "-unchecked",
-    "-deprecation",
-    "-feature",
-    "-Xmax-inlines:128",
-    // The message macro expands in user code: what it calls must be public in the bytecode.
-    "-WunstableInlineAccessors",
-    "-Wconf:msg=Unstable inline accessor:e",
-  )
+  def scalacOptions = PublishedScalacOptions
 
   // java.time on Scala.js is provided by scala-java-time (+ tzdb for zone data).
   def jsDeps = Seq(

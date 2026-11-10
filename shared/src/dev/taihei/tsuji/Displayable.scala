@@ -20,7 +20,7 @@ abstract class Displayable private[tsuji] ():
 
 object Displayable:
 
-  @nowarn("cat=deprecation")
+  @nowarn("cat=deprecation&origin=dev\\.taihei\\.tsuji\\.legacy\\..*")
   // One budget for the texts of a whole message tree, nested messages included.
   private[tsuji] def toTree(d: Displayable, budget: Budget = Budget.fresh()): JsonTree = d match
     case m: Message        => Message.toTree(m, withText = true, budget)
@@ -113,6 +113,9 @@ end Text
  * On the wire: `{"key":"order.shipped","args":{"count":3,"on":"2026-10-23"},"text":"..."}`, the
  * arguments as typed JSON values and `text` the message in its source language, for a reader that
  * does not know the key. A message read from 4.x JSON has the key `legacy` and renders as 4.x did.
+ *
+ * @param key
+ *   the stable key of the message, its family's prefix and its name: `order.shipped`
  */
 final class Message private[tsuji] (val key: MessageKey, private[tsuji] val body: Message.Body)
   extends Displayable:
@@ -137,7 +140,7 @@ end Message
 
 object Message:
 
-  @nowarn("cat=deprecation")
+  @nowarn("cat=deprecation&origin=dev\\.taihei\\.tsuji\\.legacy\\..*")
   private[tsuji] enum Body:
     // A message of a definition the program has, with its values in the order of its arguments.
     case Defined(definition: MessageDefinition[?], args: Vector[Any])
@@ -148,7 +151,7 @@ object Message:
 
   private[tsuji] val LegacyKey: MessageKey = MessageKey.trusted("legacy")
 
-  @nowarn("cat=deprecation")
+  @nowarn("cat=deprecation&origin=dev\\.taihei\\.tsuji\\.legacy\\..*")
   private[tsuji] def toTree(
     m: Message,
     withText: Boolean,
@@ -173,7 +176,7 @@ object Message:
       )
     case Body.Legacy(message)           => legacy.Message.toTree(message)
 
-  @nowarn("cat=deprecation")
+  @nowarn("cat=deprecation&origin=dev\\.taihei\\.tsuji\\.legacy\\..*")
   private[tsuji] def decode(json: JsonTree, context: MessageArg.Context): Either[String, Message] =
     json match
       case o: JsonTree.Obj if o.get("translationTemplates").isDefined && o.get("key").isEmpty =>

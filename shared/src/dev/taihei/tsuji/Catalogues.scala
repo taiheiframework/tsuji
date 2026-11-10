@@ -82,7 +82,8 @@ final class Catalogues private (
     val id = ids.incrementAndGet()
     listeners.updateAndGet(_ :+ (id -> listener))
     () =>
-      listeners.updateAndGet(_.filterNot(_._1 == id)); ()
+      listeners.updateAndGet(_.filterNot(_._1 == id))
+      ()
 
   /**
    * What was wrong with the catalogues and translations so far, the first 1000, each once: a
@@ -91,6 +92,10 @@ final class Catalogues private (
    * [[onAdded]] listener that threw.
    */
   def problems: List[CatalogueProblem] = state.get.problems.toList
+
+  // Chains are asked for on every message shown: they are kept, up to MaxChains, then dropped
+  // all at once. A reader's language can come from a request header.
+  private val chains = new AtomicReference(Map.empty[(Language, Language), List[Language]])
 
   /** The languages tried, in order, to show a message of a family in `source` to a reader of `language`. */
   def fallbackChain(language: Language, source: Language): List[Language] =
@@ -101,10 +106,6 @@ final class Catalogues private (
         chains.updateAndGet: m =>
           (if m.size >= MaxChains then Map.empty else m).updated(language -> source, chain)
         chain
-
-  // Chains are asked for on every message shown: they are kept, up to MaxChains, then dropped
-  // all at once. A reader's language can come from a request header.
-  private val chains = new AtomicReference(Map.empty[(Language, Language), List[Language]])
 
   private def computeChain(language: Language, source: Language): List[Language] =
     val seen                    = mutable.LinkedHashSet.empty[Language]
@@ -127,7 +128,7 @@ final class Catalogues private (
     state.get.attempted(prefix -> language)
 
   // A nested message or text, within the budget of the message it is an argument of.
-  @nowarn("cat=deprecation")
+  @nowarn("cat=deprecation&origin=dev\\.taihei\\.tsuji\\.legacy\\..*")
   private[tsuji] def renderWithin(
     d: Displayable,
     language: Language,
@@ -140,7 +141,7 @@ final class Catalogues private (
         using this
       )
 
-  @nowarn("cat=deprecation")
+  @nowarn("cat=deprecation&origin=dev\\.taihei\\.tsuji\\.legacy\\..*")
   private[tsuji] def render(
     message: Message,
     language: Language,
@@ -313,11 +314,19 @@ final class Catalogues private (
   // that fails to format fails each time it is shown: a problem already kept, or one past the
   // limit, changes nothing and is passed over without a write.
   private def report(found: List[CatalogueProblem]): Unit =
-    val now = state.get.problems
-    if registers && now.size < MaxProblems && found.exists(p => !now.contains(p)) then
+    // One catalogue can bring a problem per entry, a hundred thousand of them: those are looked
+    // up in a set, where the one problem of a message that fails to format is looked up in the
+    // list as it is.
+    def kept(problems: Vector[CatalogueProblem]): CatalogueProblem => Boolean =
+      if found.lengthCompare(ManyProblems) > 0 then problems.toSet else problems.contains
+    val now                                                                   = state.get.problems
+    if registers && now.size < MaxProblems && !found.forall(kept(now)) then
       update: s =>
-        val fresh = found.filterNot(s.problems.contains)
-        s.copy(problems = (s.problems ++ fresh).take(MaxProblems))
+        // No further than the places that are left: the update runs again when another thread
+        // was first.
+        val fresh =
+          found.iterator.filterNot(kept(s.problems)).take(MaxProblems - s.problems.size).toVector
+        s.copy(problems = s.problems ++ fresh)
 
   private def notifyAdded(language: Language): Unit =
     listeners.get.foreach: (_, listener) =>
@@ -424,7 +433,7 @@ object Catalogues:
 
   // The text of a message in its source language, without any registry: what toString shows and
   // what the JSON encoder writes as "text".
-  @nowarn("cat=deprecation")
+  @nowarn("cat=deprecation&origin=dev\\.taihei\\.tsuji\\.legacy\\..*")
   private[tsuji] def sourceText(message: Message, budget: Budget = Budget.fresh()): String =
     message.body match
       case Message.Body.Defined(d, _) => sourceOnly.render(message, d.family.sourceLanguage, budget)
@@ -440,6 +449,9 @@ object Catalogues:
   private val MaxChain    = 32
   private val MaxChains   = 1024
   private val MaxProblems = 1000
+
+  // From this many problems reported at once, the kept ones are looked up in a set.
+  private val ManyProblems = 16
 
   // A plural key the language's rules never select: the template still formats and is kept, so
   // only verify reports it, for the tests that would rather know.

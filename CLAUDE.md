@@ -16,13 +16,13 @@ make mima              # against the newest tag of release.majorLine (6.x), whic
                        # (between a tag push and publish-repo it fails; MIMA_BASELINE=x.y.z)
 make test              # ./mill __.test.testForked (JS tests run under Node)
 make lint              # ./mill __.checkFormat, then __.fix --check: CI's lint steps
-TAIHEI_TEST_JAVA_HOME=<a JDK 17> ./mill tsuji.jvm.test.testForked   # the JVM tests on Java 17
+TAIHEI_TEST_JAVA_HOME=<a JDK 17> ./mill tsuji.jvm.test.testForked + tsuji.tools.test.testForked + ziojson.jvm.test.testForked   # the JVM tests on Java 17, as CI runs them
 make publish-dry-run   # the bundle Maven Central would receive, written to out/
 ```
 
 Only the maintainer releases. Until the family's release workflow takes over (ADR 0009), he
-does it on the interim route of ADR 0004 at his own terminal, as the README's Releasing section
-lists: `release-prepare TYPE=… EMBARGO=0|1 TICKET=<key>` (EMBARGO=1 when the ticket has the label
+does it on the interim route of ADR 0009 section 11 (the one signed bundle of ADR 0004) at his
+own terminal, as the README's Releasing section lists: `release-prepare TYPE=… EMBARGO=0|1 TICKET=<key>` (EMBARGO=1 when the ticket has the label
 embargo), `release-finalize` (the signed bundle, tag local), the push, `release-github` and
 `publish-repo`. An agent never runs these, nor creates or pushes a release tag; `publish-dry-run`
 and `release-test` upload nothing and stay open to it. The family's Maven repository
@@ -49,6 +49,11 @@ print `~/.edo-release.env`.
   runs them against another zio-json, the newest on Central, before every release.
 - `shared/test/src/…`: zio-test specs, run on both platforms; `jvm/test` and `js/test` for what
   exists on one platform only.
+- `golden/`: the corpus and the generators of the golden files (`Golden502`), which pin the wire
+  bytes and the exported catalogues of 5.0.2 per platform; not published.
+- `scripts/`: the release machinery's Python and its tests (`release.py`, `fake_servers.py`,
+  `test-release.sh`, `test-mill-launcher`), shared with mihon.
+- `keys/release-key.asc`: the public half of the release key.
 - `docs/skill/`: the API reference for the library's Claude Code skill.
 
 ## Rules

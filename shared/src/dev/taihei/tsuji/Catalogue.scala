@@ -58,7 +58,7 @@ end Catalogue
 object Catalogue:
 
   /** The catalogue file format this version reads and writes. */
-  val Format = 1
+  val Format: Int = 1
 
   // A catalogue is input the application did not compile. Larger files, more messages or deeper
   // nesting than these are refused before the JSON is parsed.

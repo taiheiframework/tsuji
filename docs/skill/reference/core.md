@@ -123,7 +123,9 @@ Givens for `String`, `Int`, `Long`, `Double`, `Float`, `Boolean`, `LocalDate`, `
 text and may be missing on the wire) and `List[A]` (joined with `, `). Your own type:
 
 ```scala
-given MessageArg[OrderId] = MessageArg.as[OrderId, String](_.value, s => Right(OrderId(s)))
+// OrderId.parse: String => Either[String, OrderId], the type's own smart constructor. It reads
+// what came over the wire, so never `s => Right(OrderId(s))` for a type that has an invariant.
+given MessageArg[OrderId] = MessageArg.as[OrderId, String](_.value, OrderId.parse)
 ```
 
 ## Displayable, Message, Text

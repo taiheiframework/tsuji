@@ -98,7 +98,25 @@ object FromLocaleSpec extends ZIOSpecDefault:
         assertTrue(nlBE == Vector(Language("nl-BE")), root.isEmpty)
       finally Locale.setDefault(Locale.Category.DISPLAY, saved)
     },
-    // One test sets the JVM-wide default display locale: the tests do not run side by side.
+    // Under a Turkish default locale String.toLowerCase turns "IT" into "ıt" and toUpperCase "in"
+    // into "İN". A default locale exists on the JVM only, so this test proves nothing elsewhere.
+    test("the case of a tag and the language of a plural do not depend on the default locale") {
+      val saved  = Locale.getDefault
+      val plural = ".match {$count :plural}\nwhen one {one}\nwhen * {other}"
+      try
+        Locale.setDefault(Locale.forLanguageTag("tr-TR"))
+        assertTrue(
+          Language("IT").tag == "it",
+          Language("en-in").tag == "en-IN",
+          Language("az-latn-IR").tag == "az-Latn-IR",
+          Language("en-x-PRIV").tag == "en-x-priv",
+          // French counts 0 as one; "FR-IT" names French whatever the default locale.
+          MessageFormat2.format(plural, Map("count" -> 0), "FR-IT").trim == "one",
+          MessageFormat2.format(plural, Map("count" -> 0), "IT").trim == "other",
+        )
+      finally Locale.setDefault(saved)
+    },
+    // Two tests set a JVM-wide default locale: the tests do not run side by side.
   ) @@ TestAspect.sequential
 
 end FromLocaleSpec

@@ -12,6 +12,9 @@ import com.github.plokhotnyuk.jsoniter_scala.core.*
  *
  * Equality and hash are by tag, so `Language("en") == English` and a `Map[Language, _]` built
  * from either finds the other.
+ *
+ * @param tag
+ *   the canonical BCP 47 tag: `nl`, `nl-BE`, `zh-Hant-TW`
  */
 final class Language private (val tag: String) extends Serializable:
 
@@ -119,16 +122,16 @@ object Language extends LanguagePlatform:
    * tag longer than 255 characters, after surrounding whitespace is trimmed, is refused.
    */
   def parse(tag: String): Either[String, Language] =
-    val trimmed = tag.trim.replace('_', '-')
+    // The length is checked before anything else is done with the text: it is a caller's input.
+    val trimmed = tag.trim
     if trimmed.length > MaxTagLength then
       Left(s"Not a BCP 47 language tag: longer than $MaxTagLength characters")
-    else if isWellFormed(trimmed) then Right(fromCanonical(canonical(trimmed)))
-    else Left(s"Not a BCP 47 language tag: '${printable(tag.trim)}'")
-
-  // The input as it may safely be logged: anything but printable ASCII as a \uXXXX escape, so a
-  // line break or a terminal control sequence in a caller's input does not reach a log as such.
-  private def printable(s: String): String =
-    s.flatMap(c => if c >= ' ' && c <= '~' then c.toString else "\\u%04x".format(c.toInt))
+    else
+      val dashed = trimmed.replace('_', '-')
+      // Printable: a line break or a terminal control sequence in the input does not reach a
+      // log as such. Nothing is cut, the text being no longer than MaxTagLength.
+      if isWellFormed(dashed) then Right(fromCanonical(canonical(dashed)))
+      else Left(s"Not a BCP 47 language tag: '${Printable(trimmed, MaxTagLength)}'")
 
   private def isAlpha(c: Char): Boolean = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
   private def isDigit(c: Char): Boolean = c >= '0' && c <= '9'
@@ -333,6 +336,12 @@ object Language extends LanguagePlatform:
     def encodeValue(x: Language, out: JsonWriter): Unit          = out.writeVal(x.toString)
     def nullValue: Language                                      = null
 
+  /**
+   * Languages in the order of their tags, which is the order of catalogue files and of an
+   * export: `List(French, Dutch, English).sorted` gives English, French, Dutch (`en`, `fr`, `nl`).
+   */
+  given Ordering[Language] = Ordering.by(_.tag)
+
   /** A language as the name of a JSON object's field, in the forms of its value codec. */
   given JsonKeyCodec[Language] = new JsonKeyCodec[Language]:
     def decodeKey(in: JsonReader): Language           =
@@ -344,10 +353,10 @@ object Language extends LanguagePlatform:
 
   // A well-formed tag is ASCII, so its case is changed by hand: String.toLowerCase and
   // toUpperCase follow the default locale, and under a Turkish one "IT" would become "ıt".
-  private def lower(s: String): String =
+  private[tsuji] def lower(s: String): String =
     s.map(c => if c >= 'A' && c <= 'Z' then (c + 32).toChar else c)
 
-  private def upper(s: String): String =
+  private[tsuji] def upper(s: String): String =
     s.map(c => if c >= 'a' && c <= 'z' then (c - 32).toChar else c)
 
   // RFC 5646 §2.1.1: language lower case, script title case, region upper case, the rest lower.

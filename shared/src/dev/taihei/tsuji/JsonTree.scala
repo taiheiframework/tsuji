@@ -54,7 +54,7 @@ private[tsuji] object JsonTree:
   final case class Bool(value: Boolean) extends JsonTree
 
   // Its own equality: a pattern `case JsonTree.Null` compares with ==, which must not come back
-  // to JsonTree's equals.
+  // to JsonTree's equals. The cast only lets `eq` compare with any value at all.
   case object Null extends JsonTree:
     override def equals(other: Any): Boolean = other.asInstanceOf[AnyRef] eq this
     override def hashCode: Int               = 1
@@ -386,6 +386,8 @@ private[tsuji] object TreeCodec:
     try read
     catch
       case e: JsonReaderException => throw e
+      // Tsuji's own readers do not recurse, but `read` also runs the decoder of an application's
+      // MessageArg, which may: its stack overflow is a refused input, like any other failure.
       case _: StackOverflowError  => in.decodeError("the JSON could not be read")
       case NonFatal(_)            => in.decodeError("the JSON could not be read")
 

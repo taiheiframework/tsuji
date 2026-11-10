@@ -77,6 +77,10 @@ object LanguageSpec extends ZIOSpecDefault:
       },
     ),
     suite("Language as Map key")(
+      test("languages sort by their tags") {
+        val sorted = List(Language.French, Language.Dutch, Language("nl-BE"), Language.English, Language("de")).sorted
+        assertTrue(sorted.map(_.tag) == List("de", "en", "fr", "nl", "nl-BE"))
+      },
       test("Languages can be used as Map keys") {
         val map = Map(
           Language.English -> "Hello",
@@ -88,7 +92,7 @@ object LanguageSpec extends ZIOSpecDefault:
           map(Language.Dutch) == "Dag",
           map(Language.French) == "Bonjour",
         )
-      }
+      },
     ),
   )
 

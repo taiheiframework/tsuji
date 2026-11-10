@@ -64,7 +64,7 @@ object TsujiZioJson:
       Displayable.decode(_, MessageArg.Context(catalogues, 0)),
     )
 
-  @nowarn("cat=deprecation")
+  @nowarn("cat=deprecation&origin=dev\\.taihei\\.tsuji\\.legacy\\..*")
   private val legacyMessage: Capture.Route[legacy.Message] =
     Capture.Route(summon[JsonValueCodec[legacy.Message]], legacy.Message.fromTree)
 
@@ -94,6 +94,10 @@ object TsujiZioJson:
 
   /** A key from a JSON string, checked as `MessageKey.parse` does. */
   given JsonDecoder[MessageKey] = Capture.decoder(messageKey)
+
+  /** Writes and reads a key as a JSON string. */
+  given JsonCodec[MessageKey] =
+    JsonCodec(Capture.encoder(messageKey.codec), Capture.decoder(messageKey))
 
   /** A text as `{"text":...,"language":...}`. */
   given JsonEncoder[Text] = Capture.encoder(text.codec)
@@ -140,7 +144,7 @@ object TsujiZioJson:
   ): JsonDecoder[Displayable] = Capture.decoder(displayable)
 
   /** Writes and reads a deprecated 4.x message. */
-  @nowarn("cat=deprecation")
+  @nowarn("cat=deprecation&origin=dev\\.taihei\\.tsuji\\.legacy\\..*")
   given JsonCodec[legacy.Message] =
     JsonCodec(Capture.encoder(legacyMessage.codec), Capture.decoder(legacyMessage))
 

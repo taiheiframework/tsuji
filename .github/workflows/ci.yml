@@ -104,6 +104,10 @@ jobs:
       - name: Check binary compatibility (MiMa)
         run: make mima
 
+      # Only taihei-tsuji-zio-json's POM may name dev.zio, as make validate checks.
+      - name: No ZIO in the core's dependencies (no-zio)
+        run: make no-zio
+
   # Java 17 is the oldest Java the library supports. scalac already compiles the JVM modules
   # against the Java 17 API (-java-output-version:17); this job runs the JVM tests on a Java 17
   # runtime as well, where locale data and the JDK's behaviour can differ from the newest JDK.
@@ -148,4 +152,5 @@ jobs:
           "$TAIHEI_TEST_JAVA_HOME/bin/java" -version 2>&1 | tee "$RUNNER_TEMP/java-version"
           grep -q 'version "17\.' "$RUNNER_TEMP/java-version"
           ./mill show tsuji.jvm.test.javaHome | grep -qF "$TAIHEI_TEST_JAVA_HOME"
-          ./mill tsuji.jvm.test.testForked + tsuji.tools.test.testForked
+          ./mill show ziojson.jvm.test.javaHome | grep -qF "$TAIHEI_TEST_JAVA_HOME"
+          ./mill tsuji.jvm.test.testForked + tsuji.tools.test.testForked + ziojson.jvm.test.testForked

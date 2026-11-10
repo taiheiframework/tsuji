@@ -25,7 +25,9 @@ import dev.taihei.tsuji.*
  * for the families written in it (the file to hand to translators), else the catalogue files on
  * the classpath over the inline translations. Templates that fail their checks are left out.
  *
- * Problems are printed and make the exit status 1; a usage error makes it 2. Run it as an
+ * Problems are printed and make the exit status 1: a template that fails its checks, a family
+ * that cannot be loaded, a `--scan` that finds no family, a jar or directory of the classpath
+ * that cannot be read. A usage error makes it 2. Run it as an
  * ordinary `runMain` step of the application's build, forked in sbt so that the classpath is the
  * application's.
  */
@@ -59,7 +61,8 @@ object ExportCatalogues:
       if MessageKey.isPrefix(pkg) then parse(rest, acc.copy(scan = acc.scan :+ pkg))
       else Left(s"not a package name: '${Printable(pkg)}'")
     case "--family" :: name :: rest => parse(rest, acc.copy(families = acc.families :+ name))
-    case other :: _                 => Left(s"unknown argument: $other")
+    case (option @ ("--out" | "--scan" | "--family")) :: Nil => Left(s"$option needs a value")
+    case other :: _                                          => Left(s"unknown argument: $other")
 
   /** Exports as `main` does, printing to `out` and `err`; returns the exit status. */
   def run(
@@ -69,22 +72,33 @@ object ExportCatalogues:
   ): Int =
     parse(args, Options(None, Nil, Nil)) match
       case Left(e)                                =>
-        err.println(e); err.println(Usage); 2
+        err.println(e)
+        err.println(Usage)
+        2
       case Right(Options(None, _, _))             =>
-        err.println(Usage); 2
+        err.println(Usage)
+        2
       case Right(Options(_, Nil, Nil))            =>
-        err.println("name at least one --scan or --family"); err.println(Usage); 2
+        err.println("name at least one --scan or --family")
+        err.println(Usage)
+        2
       case Right(Options(Some(dir), scan, named)) =>
         val loader   =
           Option(Thread.currentThread.getContextClassLoader).getOrElse(getClass.getClassLoader)
         val entries  = Classpath.entries(loader)
+        // A package without a family is most often a misspelt one: said, like a family that
+        // cannot be loaded, instead of exporting the rest as if it were everything.
         val found    = named.map(n => n -> Classpath.family(n, loader)) ++
-          scan.flatMap(p => Classpath.familiesIn(p, entries, loader).map(p -> _))
+          scan.flatMap: p =>
+            Some(Classpath.familiesIn(p, entries, loader))
+              .filter(_.nonEmpty)
+              .fold(List(p -> Left("no message family found in this package")))(_.map(p -> _))
         val missing  = found.collect { case (n, Left(e)) => s"$n: $e" }
         val families = found.collect { case (_, Right(f)) => f }.distinct.sortBy(_.prefix)
         missing.foreach(err.println)
         if families.isEmpty then
-          err.println("no message family found"); 2
+          err.println("no message family found")
+          2
         else
           val status =
             try write(dir, families, entries, out, err)
@@ -114,8 +128,9 @@ object ExportCatalogues:
     out: PrintStream,
     err: PrintStream,
   ): Int =
-    val fileLanguages =
-      families.map(f => f -> Classpath.catalogueLanguages(f.prefix, entries)).toMap
+    val listed        = families.map(f => f -> Classpath.catalogueLanguages(f.prefix, entries))
+    val fileLanguages = listed.map((f, found) => f -> found.names).toMap
+    val unread        = listed.flatMap(_._2.unreadable).distinct
     val read          =
       for
         f <- families
@@ -152,7 +167,8 @@ object ExportCatalogues:
       out.println(countLine(messages.size, language, file))
 
     problems.foreach(p => err.println(s"problem: $p"))
-    if problems.isEmpty then 0 else 1
+    unread.foreach(u => err.println(s"problem: $u"))
+    if problems.isEmpty && unread.isEmpty then 0 else 1
   end write
 
 end ExportCatalogues
@@ -170,35 +186,55 @@ private object Classpath:
       case _                          => Nil
     (fromProperty ++ fromLoader).filter(_.nonEmpty).distinct.map(new File(_)).filter(_.exists)
 
-  // The names of the files under `prefix/` (a path with /) in every entry.
-  private def names(entries: List[File], prefix: String): List[String] =
-    entries.flatMap: entry =>
-      try
-        if entry.isDirectory then
-          val root = entry.toPath.resolve(prefix)
-          if !Files.isDirectory(root) then Nil
-          else
-            val stream = Files.walk(root)
-            try stream.iterator.asScala.filter(Files.isRegularFile(_)).map(p =>
-                entry.toPath.relativize(p).toString.replace(File.separatorChar, '/')
-              ).toList
-            finally stream.close()
-        else if entry.getName.endsWith(".jar") then
-          val jar = new JarFile(entry)
-          try jar.entries.asScala.map(_.getName).filter(n =>
-              n.startsWith(prefix) && !n.endsWith("/")
-            ).toList
-          finally jar.close()
-        else Nil
-      catch case NonFatal(_) => Nil
-    .distinct
+  /**
+   * What was found in the class path's entries, and the entries that could not be read: a jar or
+   * a directory that is skipped may hold the family or the catalogue file the export is for, so
+   * the export says so instead of writing files that look complete.
+   */
+  final case class Found[A](names: List[A], unreadable: List[String])
 
-  def catalogueLanguages(prefix: String, entries: List[File]): List[Language] =
-    names(entries, s"META-INF/taihei-tsuji/$prefix/")
-      .map(_.stripPrefix(s"META-INF/taihei-tsuji/$prefix/"))
-      .filter(n => n.endsWith(".json") && !n.contains('/'))
-      .flatMap(n => Language.parse(n.stripSuffix(".json")).toOption)
-      .distinct
+  // The names of the files under `prefix/` (a path with /) in every entry.
+  private def names(entries: List[File], prefix: String): Found[String] =
+    val read = entries.map: entry =>
+      try
+        Right(
+          if entry.isDirectory then
+            val root = entry.toPath.resolve(prefix)
+            if !Files.isDirectory(root) then Nil
+            else
+              val stream = Files.walk(root)
+              try stream.iterator.asScala.filter(Files.isRegularFile(_)).map(p =>
+                  entry.toPath.relativize(p).toString.replace(File.separatorChar, '/')
+                ).toList
+              finally stream.close()
+          else if entry.getName.endsWith(".jar") then
+            val jar = new JarFile(entry)
+            try jar.entries.asScala.map(_.getName).filter(n =>
+                n.startsWith(prefix) && !n.endsWith("/")
+              ).toList
+            finally jar.close()
+          else Nil
+        )
+      // Printable: a file name may hold anything, and this is printed to a terminal or a log.
+      catch
+        case NonFatal(e) =>
+          Left(s"cannot read ${Printable(entry.toString, 400)}: ${Printable(describe(e), 400)}")
+    Found(
+      read.collect { case Right(found) => found }.flatten.distinct,
+      read.collect { case Left(e) => e },
+    )
+
+  end names
+
+  def catalogueLanguages(prefix: String, entries: List[File]): Found[Language] =
+    val files = names(entries, s"META-INF/taihei-tsuji/$prefix/")
+    files.copy(names =
+      files.names
+        .map(_.stripPrefix(s"META-INF/taihei-tsuji/$prefix/"))
+        .filter(n => n.endsWith(".json") && !n.contains('/'))
+        .flatMap(n => Language.parse(n.stripSuffix(".json")).toOption)
+        .distinct
+    )
 
   // Every family object in the package and below; one that fails to load is a Left, so that the
   // export reports it instead of leaving its messages out without a word.
@@ -207,7 +243,9 @@ private object Classpath:
     entries: List[File],
     loader: ClassLoader,
   ): List[Either[String, MessageFamily]] =
-    names(entries, pkg.replace('.', '/') + "/")
+    val classes = names(entries, pkg.replace('.', '/') + "/")
+    classes.unreadable.map(Left(_)) ++
+    classes.names
       .filter(_.endsWith("$.class"))
       .map(_.stripSuffix(".class").replace('/', '.'))
       .flatMap: binaryName =>
@@ -215,6 +253,8 @@ private object Classpath:
           case Left(e)        => List(Left(s"${objectName(binaryName)}: $e"))
           case Right(Some(f)) => List(Right(f))
           case Right(None)    => Nil
+
+  end familiesIn
 
   // The class a.b.C$D$ is the object `a.b.C.D`, the name --family takes.
   private def objectName(binaryName: String): String =

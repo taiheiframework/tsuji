@@ -1,10 +1,15 @@
 package dev.taihei.tsuji.tools
 
 import java.io.{ByteArrayOutputStream, PrintStream}
+import java.net.URLClassLoader
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path}
+import java.util.Comparator
+import java.util.concurrent.ConcurrentLinkedQueue
 
 import zio.test.*
+
+import zio.ZIO
 
 import dev.taihei.tsuji.*
 import dev.taihei.tsuji.Language.*
@@ -32,9 +37,23 @@ object ExportCataloguesSpec extends ZIOSpecDefault:
       .map(_.messages.map((k, v) => k.value -> v))
       .getOrElse(Map.empty)
 
+  // What the tests wrote, removed when the suite is done.
+  private val made = new ConcurrentLinkedQueue[Path]
+
+  private def kept(path: Path): Path =
+    made.add(path)
+    path
+
+  private def tempDir(): Path = kept(Files.createTempDirectory("taihei-export"))
+
+  private def remove(path: Path): Unit =
+    val tree = Files.walk(path)
+    try tree.sorted(Comparator.reverseOrder[Path]).forEach(p => Files.deleteIfExists(p): Unit)
+    finally tree.close()
+
   def spec = suite("ExportCatalogues")(
     test("merged per-language files of the named families and those of a library") {
-      val dir                = Files.createTempDirectory("taihei-export")
+      val dir                = tempDir()
       val (status, out, err) =
         run("--out", dir.toString, "--family", "dev.taihei.tsuji.tools.Shop", "--scan", "dev.taihei.tsuji")
       val en                 = messages(dir, "en")
@@ -57,7 +76,7 @@ object ExportCataloguesSpec extends ZIOSpecDefault:
       )
     },
     test("a family named twice and nested objects are found") {
-      val dir            = Files.createTempDirectory("taihei-export")
+      val dir            = tempDir()
       val (status, _, _) = run(
         "--out",
         dir.toString,
@@ -71,15 +90,15 @@ object ExportCataloguesSpec extends ZIOSpecDefault:
       assertTrue(status == 0, messages(dir, "fr").contains("taihei.validation.nonEmpty"))
     },
     test("an output directory that cannot be written is a problem, not a crash") {
-      val file           = Files.createTempFile("taihei-export", ".txt")
+      val file           = kept(Files.createTempFile("taihei-export", ".txt"))
       val (status, _, e) = run("--out", file.toString, "--family", "dev.taihei.tsuji.tools.Shop")
       assertTrue(status == 1, e.contains("cannot write"))
     },
     test("the count line says message for one and messages otherwise") {
-      val dir           = Files.createTempDirectory("taihei-export")
+      val dir           = tempDir()
       val (_, shop, _)  = run("--out", dir.toString, "--family", "dev.taihei.tsuji.tools.Shop")
       val (_, broke, _) =
-        run("--out", Files.createTempDirectory("taihei-export").toString, "--family", "dev.taihei.tsuji.tools.Broken")
+        run("--out", tempDir().toString, "--family", "dev.taihei.tsuji.tools.Broken")
       assertTrue(
         shop.contains(s"1 message in de: ${dir.resolve("de.json")}"),
         shop.contains("2 messages in nl: "),
@@ -90,7 +109,7 @@ object ExportCataloguesSpec extends ZIOSpecDefault:
       )
     },
     test("a scanned family object that fails to load is reported and makes the status 1") {
-      val dir                = Files.createTempDirectory("taihei-export")
+      val dir                = tempDir()
       val (status, out, err) = run(
         "--out",
         dir.toString,
@@ -108,7 +127,7 @@ object ExportCataloguesSpec extends ZIOSpecDefault:
       )
     },
     test("a named family object that fails to load says why") {
-      val dir                = Files.createTempDirectory("taihei-export")
+      val dir                = tempDir()
       val (status, out, err) =
         run("--out", dir.toString, "--family", "dev.taihei.tsuji.tools.exploding.Exploding")
       assertTrue(
@@ -135,6 +154,46 @@ object ExportCataloguesSpec extends ZIOSpecDefault:
         !run()._3.contains("taihei-tsuji-tools "),
       )
     },
+    // A misspelt package once exported the other families with status 0, as if they were all.
+    test("a scan that finds no family is reported and makes the status 1") {
+      val dir              = tempDir()
+      val (status, out, e) = run(
+        "--out",
+        dir.toString,
+        "--family",
+        "dev.taihei.tsuji.tools.Shop",
+        "--scan",
+        "dev.taihei.tsuji.toolz",
+      )
+      assertTrue(
+        status == 1,
+        e.contains("dev.taihei.tsuji.toolz: no message family found in this package"),
+        out.contains("2 messages in nl"),
+      )
+    },
+    // A jar that cannot be opened was once skipped without a word, with whatever it held.
+    test("a jar of the classpath that cannot be read is reported and makes the status 1") {
+      val jar              = kept(Files.createTempFile("taihei-export", ".jar"))
+      Files.writeString(jar, "not a jar")
+      val thread           = Thread.currentThread
+      val before           = thread.getContextClassLoader
+      val withJar          = new URLClassLoader(Array(jar.toUri.toURL), before)
+      val dir              = tempDir()
+      thread.setContextClassLoader(withJar)
+      val (status, out, e) =
+        try run("--out", dir.toString, "--scan", "dev.taihei.tsuji.tools")
+        finally thread.setContextClassLoader(before)
+      assertTrue(
+        status == 1,
+        e.contains(s"cannot read $jar: "),
+        e.contains(s"problem: cannot read $jar: "),
+        out.contains("2 messages in nl"),
+      )
+    },
+    test("an option without its value says which") {
+      val (status, _, e) = run("--scan", "dev.taihei.tsuji.tools", "--out")
+      assertTrue(status == 2, e.startsWith("--out needs a value"))
+    },
     test("usage errors") {
       assertTrue(
         run()._1 == 2,
@@ -142,9 +201,9 @@ object ExportCataloguesSpec extends ZIOSpecDefault:
         run("--bogus")._1 == 2,
         run("--out", "x", "--scan", "")._1 == 2,
         run("--out", "x", "--scan", "../etc")._1 == 2,
-        run("--out", Files.createTempDirectory("x").toString, "--family", "no.such.Family")._1 == 2,
+        run("--out", tempDir().toString, "--family", "no.such.Family")._1 == 2,
       )
     },
-  )
+  ) @@ TestAspect.afterAll(ZIO.succeed(made.forEach(remove)))
 
 end ExportCataloguesSpec

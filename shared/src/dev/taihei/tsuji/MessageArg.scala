@@ -13,9 +13,15 @@ import scala.util.Try
  * Your own type becomes an argument through one of these with [[MessageArg.as]]:
  *
  * {{{
- * final case class OrderId(value: String)
- * given MessageArg[OrderId] = MessageArg.as[OrderId, String](_.value, s => Right(OrderId(s)))
+ * final case class OrderId private (value: String)
+ * object OrderId:
+ *   def parse(text: String): Either[String, OrderId] =
+ *     Either.cond(text.matches("[A-Z]{2}-[0-9]{1,9}"), new OrderId(text), "not an order id")
+ *
+ * given MessageArg[OrderId] = MessageArg.as[OrderId, String](_.value, OrderId.parse)
  * }}}
+ *
+ * The second function reads what came over the wire: it is the place for the type's own check.
  *
  * An `Option` argument may be missing on the wire: a reader then sees `None`, which a template
  * shows as empty text. That is how an argument added later keeps its key.

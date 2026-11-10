@@ -35,7 +35,7 @@ private[tsuji] object Operands:
   val MaxNumberText = 1100
 
   // About MaxNumberText decimal digits.
-  private val MaxBits = 3700
+  private[tsuji] val MaxBits = 3700
 
   /**
    * The operands of a value given to `:plural`: an integer as it is, a whole `Float` or `Double`
@@ -86,7 +86,7 @@ private[tsuji] object Operands:
   // both platforms: Double.toString differs between them (Scala.js prints 1.0 as 1, and Java 17
   // does not always print the shortest digits), and a Float's text even more. 17 digits always
   // read back as a Double, 9 as a Float.
-  private def shortest(
+  private[tsuji] def shortest(
     d: Double,
     maxDigits: Int,
     readsBack: String => Boolean,
@@ -160,7 +160,7 @@ private[tsuji] object PluralRules:
   private def rulesFor(locale: String): List[(String, Condition)] =
     val subtags = locale.take(64).split("[-_]").toList.takeWhile(_.length > 1).take(3)
     (subtags.length to 1 by -1).iterator
-      .map(n => subtags.take(n).mkString("-").toLowerCase(java.util.Locale.ROOT))
+      .map(n => Language.lower(subtags.take(n).mkString("-")))
       .collectFirst(Function.unlift(table.get))
       .getOrElse(table("root"))
 
@@ -177,7 +177,7 @@ private[tsuji] object PluralRules:
     CldrPlurals.RuleSets.flatMap: (locales, rules) =>
       val parsed = rules.map((c, text) => c -> condition(text))
       locales.split(' ').toList.map(l =>
-        l.replace('_', '-').toLowerCase(java.util.Locale.ROOT) -> parsed
+        Language.lower(l.replace('_', '-')) -> parsed
       )
     .toMap
 

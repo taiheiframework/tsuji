@@ -414,15 +414,22 @@ val language         = Var(Language.English)
 val loaded           = Var(0)
 catalogues.onAdded(_ => loaded.update(_ + 1))
 
+// The files the server has. A reader of nl-BE is served nl.json: the loader fetches the one
+// file it is asked for, so the application walks the fallback chain itself.
+val served = Set(Language.Dutch, Language.French)
+
 def switchTo(l: Language): Unit =
   language.set(l)
-  CatalogueLoader.load(catalogues, l, s"/i18n/${l.tag}.json", timeout = Some(10.seconds))
+  catalogues.fallbackChain(l, Language.English).filter(served).foreach: step =>
+    CatalogueLoader.load(catalogues, step, s"/i18n/${step.tag}.json", timeout = Some(10.seconds))
 
 div(child.text <-- language.signal.combineWith(loaded.signal).map((l, _) => Orders.cancelled.localize(l)))
 ```
 
 On a language switch the application fetches the next file; it may prefetch one, the library
-does not.
+does not. This is where the platforms differ: on the JVM the registry reads the file of every
+language in the fallback chain by itself, while in a browser a language whose file was not
+loaded is skipped, so a reader of `nl-BE` sees English until `nl.json` has been loaded.
 
 ### Exporting catalogues
 

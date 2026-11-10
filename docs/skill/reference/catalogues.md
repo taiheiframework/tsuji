@@ -77,7 +77,9 @@ ignores them every load is a problem. `timeout` (`Option[FiniteDuration]`, defau
 7.0.0): a file not arrived in full by then is the problem `cannot fetch <url>: timed out after
 <timeout>`, the request is aborted and its body let go; without it a slow server keeps the load
 waiting. Pass one in an application. Until a language is loaded, messages show through the
-chain; `onAdded` tells when to re-render. No dependency on Laminar or an effect library. Inline
+chain; `onAdded` tells when to re-render. It fetches the one file it is asked for: for a reader of `nl-BE` the application loads the
+files of `catalogues.fallbackChain(language, source)` that it serves (`nl.json`), where the JVM
+reads every step of the chain by itself. No dependency on Laminar or an effect library. Inline
 translations are in the bundle: a browser application with many languages uses files.
 
 ## verify, for tests

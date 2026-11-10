@@ -681,16 +681,21 @@ MessageFormat2.format("Order {$id :string}, {$year :number useGrouping=never}", 
   a number that is a name and not an amount, such as an order number or a year: it gives the
   digits as they are.
 - Every digit is kept, up to 300 whole digits (a longer number is shown as it is, unformatted):
-  an `Int`, `Long`, `BigInt` and `BigDecimal` go to the formatter as their digits, a `Double` and a `Float` as the fewest digits that read back as the same value (the
-  `Float` 1.1 is `1.1`, not `1.100000023841858`). Text that reads as a number is formatted by
+  an `Int`, `Long`, `BigInt` and `BigDecimal` go to the formatter as their digits, a `Double`
+  and a `Float` as the fewest digits that read back as the same value (the `Float` 1.1 is `1.1`,
+  not `1.100000023841858`). Text that reads as a number is formatted by
   `:number`, and shown as text without a function.
 - `.match {$x} when 3` compares a number by its value: the `Double` 3.0, the `Long` 3 and the
-  `BigDecimal` 3.00 all match. A number declared with a function (`.input {$n :number}`) is
-  still that number to a later `.match`, `:plural` or function; only a placeholder shows its
-  text.
+  `BigDecimal` 3.00 all match. A number declared with a function (`.input {$n :number}`) is,
+  to a later `.match`, `:plural` or function, the number as it is written: `:integer` of 0.6 is
+  1, so it shows `1` and selects `=1` and `one`; `:number minimumFractionDigits=1` of 1 is 1.0,
+  which English counts as `other`.
 - `validate` and the macro refuse what a number function cannot do: `style=currency` without
   `currency=`, a `currency=` that is not three letters, a number of decimals outside 0 to 20, a
-  `useGrouping` other than `auto`, `always` or `never`, and `style=` on `:integer`.
+  `useGrouping` other than `auto`, `always` or `never` (MessageFormat 2.0's `min2` is not
+  supported), and `style=`, `currency=` or a number of decimals on `:integer`.
+- The one place the platforms differ: a currency code neither knows (`ZZZ`) is written where the
+  symbol would be, by the JDK against the number (`ZZZ1,234.50`), by `Intl` with a space.
 
 Coming from 6.0.0: a whole number had no grouping (`1234567`), any other number exactly two
 decimals (`1.50`), `:integer` rounded -2.5 to -2, `style=currency` always wrote US dollars, and
@@ -719,7 +724,8 @@ MessageFormat2.format(files, Map("n" -> 1.5), Language("pl"))  // 1,5 pliku
   English template because Russian has none, 21 is `other` and says "21 items"; the number itself
   is formatted for the reader. A template found by cutting subtags off the reader's own tag keeps
   the reader's regional rules (a `pt-PT` reader of the `pt` template has `pt-PT`'s). The 4.x
-  `legacy.Message` does the same, also for its fallback to the reader's base language. `MessageFormat2.format` uses its one `language` for both.
+  `legacy.Message` does the same, also for its fallback to the reader's base language.
+  `MessageFormat2.format` uses its one `language` for both.
 - A language is found as the fallback chain walks a tag: `pt-PT` has rules of its own, `pt-BR`
   falls back to `pt`, `sr-Latn-RS` to `sr`. A language CLDR has no rules for takes CLDR's root,
   where every number is `other`.
@@ -780,6 +786,7 @@ unchanged: 6.x and 7.x read each other's JSON, with the two exceptions below.
 | `{$n :number}` of a `Long` past 2^53 or a `BigDecimal` loses digits | every digit is kept |
 | `{$n :integer}` of -2.5 is `-2`, without grouping | `-3`: a half rounds away from zero, on both platforms; grouped |
 | `{$n :number style=currency}` is US dollars | `style=currency currency=EUR`; without `currency=` it does not compile, and `validate` refuses it |
+| options of `:number` and `:integer` were not checked | a `currency=` that is not three letters, decimals outside 0 to 20, an unknown `useGrouping`, and `style=`, `currency=` or decimals on `:integer` do not compile |
 | `{$n}` and `{$d}` show `toString` (`1234567`, `1.0`, `2026-10-20`) | as `:number` and `:datetime` write them (`1,234,567`, `1`, `Oct 20, 2026`); `{$n :string}` for the digits as they are |
 | `.match {$x} when 3` matches the `Double` 3.0 in JavaScript only | on both platforms |
 | `:plural` knows `one` (1, and 0 in French) and `other`, by the reader's language | CLDR's categories for every language, by the language the template is written in: see [Plurals](#plurals) |

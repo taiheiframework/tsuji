@@ -518,8 +518,10 @@ object MessageFormat2:
       case FunctionAnnotation(_, "number", options, at)                   =>
         numberOptionErrors(options).map(TemplateError(at, _))
       case FunctionAnnotation(_, "integer", options, at)                  =>
-        (options.get("style").toList.map(_ => "style= is an option of :number, not of :integer") ++
-        numberOptionErrors(options - "style" - "currency")).map(TemplateError(at, _))
+        // A whole number has no style, no currency and no decimals to choose.
+        val notInteger = NumberOnly.filter(options.contains).map: name =>
+          s"$name= is an option of :number, not of :integer"
+        (notInteger ++ numberOptionErrors(options -- NumberOnly)).map(TemplateError(at, _))
       case _                                                              => Nil
     val matches   = message.body.toOption.toList.flatMap: m =>
       val arity    = m.selectors.size
@@ -708,8 +710,9 @@ object MessageFormat2:
   final private case class Formatted(value: Any, text: String)
 
   private def unformatted(value: Any): Any = value match
-    case Formatted(number, _) => number
-    case other                => other
+    case Formatted(number, _)     => number
+    case PluralSelector(count, _) => unformatted(count)
+    case other                    => other
 
   private def applyTo(
     value: Any,
@@ -718,8 +721,15 @@ object MessageFormat2:
     context: Context,
   ): Any =
     function match
-      case "number"   => Formatted(value, formatNumber(value, options, context.locale))
-      case "integer"  => Formatted(value, formatInteger(value, options, context.locale))
+      case "number"   =>
+        val (minimum, maximum) = decimals(options)
+        Formatted(
+          // A percentage and an amount are written in their own way; the number stays the value.
+          if style(options) == NumberStyle.Plain then written(value, minimum, maximum) else value,
+          formatNumber(value, options, context.locale),
+        )
+      case "integer"  =>
+        Formatted(written(value, Some(0), Some(0)), formatInteger(value, options, context.locale))
       case "datetime" => PlatformDateTimeFormatter.formatDateTime(value, options, context.locale)
       case "date"     =>
         val date = value match
@@ -746,14 +756,40 @@ object MessageFormat2:
     options: Map[String, String],
     locale: String,
   ): String =
-    format(
-      value,
-      style(options),
-      fractionDigits(options, "minimumFractionDigits"),
-      fractionDigits(options, "maximumFractionDigits"),
-      options,
-      locale,
-    )
+    val (minimum, maximum) = decimals(options)
+    format(value, style(options), minimum, maximum, options, locale)
+
+  // The fewest and the most decimals the options ask for. Both given the wrong way round: the
+  // larger holds, where Intl would throw.
+  private def decimals(options: Map[String, String]): (Option[Int], Option[Int]) =
+    val minimum = fractionDigits(options, "minimumFractionDigits")
+    val maximum = fractionDigits(options, "maximumFractionDigits")
+    (minimum, maximum.map(max => math.max(max, minimum.getOrElse(0))))
+
+  // A number without a style has at most this many decimals unless the template says otherwise.
+  private val DefaultDecimals = 3
+
+  /**
+   * The number as it is written, digits and decimals, without grouping: what a later `.match`,
+   * `:plural` or function reads of a number that `:number` or `:integer` wrote. `:integer` of 0.6
+   * shows 1, and is 1 to `when =1` and to `when one`; `:number minimumFractionDigits=1` of 1 shows
+   * 1.0, which English counts as `other`. A value that is not written as a number stays itself.
+   */
+  private def written(
+    value: Any,
+    minimum: Option[Int],
+    maximum: Option[Int],
+  ): Any =
+    Decimal.plain(value).filter(writable).fold(value): digits =>
+      val number   = new java.math.BigDecimal(digits)
+      val atMost   = maximum.getOrElse(math.max(DefaultDecimals, minimum.getOrElse(0)))
+      val atLeast  = minimum.getOrElse(0)
+      val rounded  =
+        if number.scale > atMost then number.setScale(atMost, java.math.RoundingMode.HALF_UP)
+        else number
+      // Zeros at the end are written only as far as the fewest decimals ask: 1.50 shows as 1.5.
+      val shortest = rounded.stripTrailingZeros
+      shortest.setScale(math.max(shortest.scale, atLeast))
 
   // A value that is no finite number of ordinary size shows as it is. The digits go to the
   // platform's formatter as they are, so a Long past 2^53 or a BigDecimal loses none of them.
@@ -771,8 +807,7 @@ object MessageFormat2:
         if isZero(digits) then digits.stripPrefix("-") else digits,
         style,
         minimum,
-        // Both given the wrong way round: the larger holds, where Intl would throw.
-        maximum.map(max => math.max(max, minimum.getOrElse(0))),
+        maximum,
         grouped(options),
         locale,
       )
@@ -783,14 +818,15 @@ object MessageFormat2:
   private val MaxWholeDigits = 300
 
   // A value that is not formatted shows as its own text. A BigInt has no limit of its own, and
-  // writing one out costs more than linear time: past the bits of a million digits it is refused
-  // as the text it would make is, before it is made.
+  // writing one out costs time that grows with the square of its length, seconds in JavaScript
+  // well before the text reaches the limit on a message: past the bits of ten thousand digits
+  // it is refused as text that is too long is, before it is made.
   private def asItIs(value: Any): String = value match
     case big: BigInt if big.bitLength > MaxBits               => throw new TooLong
     case big: java.math.BigInteger if big.bitLength > MaxBits => throw new TooLong
     case other                                                => String.valueOf(other)
 
-  private val MaxBits = 3400000
+  private[tsuji] val MaxBits = 33220
 
   private def writable(digits: String): Boolean =
     digits.stripPrefix("-").takeWhile(_ != '.').length <= MaxWholeDigits
@@ -826,6 +862,9 @@ object MessageFormat2:
   // Digits in groups, as the reader's language writes them, unless useGrouping=never.
   private def grouped(options: Map[String, String]): Boolean =
     !options.get("useGrouping").exists(GroupingOff)
+
+  private val NumberOnly =
+    List("style", "currency", "minimumFractionDigits", "maximumFractionDigits")
 
   // What is wrong with the options of :number and :integer, for validate.
   private def numberOptionErrors(options: Map[String, String]): List[String] =

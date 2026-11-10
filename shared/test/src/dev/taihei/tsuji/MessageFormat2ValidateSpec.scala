@@ -68,6 +68,13 @@ object MessageFormat2ValidateSpec extends ZIOSpecDefault:
           MessageFormat2.validate("{$n :integer useGrouping=no}").size == 1,
           MessageFormat2.validate("{$n :integer style=percent}").map(_.message) ==
           List("style= is an option of :number, not of :integer"),
+          MessageFormat2
+            .validate("{$n :integer currency=EUR minimumFractionDigits=2 maximumFractionDigits=2}")
+            .map(_.message) == List(
+            "currency= is an option of :number, not of :integer",
+            "minimumFractionDigits= is an option of :number, not of :integer",
+            "maximumFractionDigits= is an option of :number, not of :integer",
+          ),
         )
       },
       test("an unclosed placeholder") {

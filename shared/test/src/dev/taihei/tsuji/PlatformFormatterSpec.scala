@@ -198,6 +198,54 @@ object PlatformFormatterSpec extends ZIOSpecDefault:
         "1,234.5 1,234.50 1234.5",
       )
     },
+    // The word beside a number goes with the number the reader sees: 0.6 written as 1 is one
+    // item, and 1 written as 1.0 is, in English, 1.0 items.
+    test("a number declared with a function selects as the number it is written as") {
+      def shown(
+        function: String,
+        n: Any,
+        language: Language = Language.English,
+      )                                     =
+        MessageFormat2.format(
+          s".input {$$n $function}\n.match {$$n :plural}\nwhen =1 {{$$n} exactly}\nwhen one {{$$n} item}\nwhen * {{$$n} items}",
+          Map("n" -> n),
+          language,
+        ).trim
+      def matched(function: String, n: Any) =
+        MessageFormat2.format(
+          s".input {$$n $function}\n.match {$$n}\nwhen 2 {two}\nwhen * {{$$n} other}",
+          Map("n" -> n),
+          Language.English,
+        ).trim
+      assertTrue(
+        shown(":number", 1.0004) == "1 exactly",
+        shown(":number", 0.9999) == "1 exactly",
+        shown(":number", 1.004) == "1.004 items",
+        shown(":integer", 0.6) == "1 exactly",
+        shown(":integer", 1.4) == "1 exactly",
+        shown(":integer", 1.5) == "2 items",
+        // French counts 1.5 as one, and 2 as other: the 2 that is shown decides.
+        shown(":integer", 1.5, Language.French) == "2 items",
+        shown(":number", 1.5, Language.French) == "1,5 item",
+        // 1.0 is the number 1 to an exact key, and other to English's categories, as CLDR has
+        // it ("1.0 items").
+        shown(":number minimumFractionDigits=1", 1) == "1.0 exactly",
+        MessageFormat2.format(
+          ".input {$n :number minimumFractionDigits=1}\n.match {$n :plural}\nwhen one {{$n} item}\nwhen * {{$n} items}",
+          Map("n" -> 1),
+          Language.English,
+        ).trim == "1.0 items",
+        shown(":number", BigDecimal("1.00")) == "1 exactly",
+        // A percentage keeps its value: 100% is the number 1.
+        shown(":number style=percent", 1) == "100% exactly",
+        matched(":integer", 1.5) == "two",
+        matched(":number", 2.0004) == "two",
+        matched(":number", 2.004) == "2.004 other",
+        // A plural selector handed to a function is its number.
+        MessageFormat2.format(".local $p = {$n :plural}\n{$p :number}", Map("n" -> 1000), Language.English).trim ==
+        "1,000",
+      )
+    },
     test("a number or a date without a function is written as :number and :datetime write it") {
       def shown(value: Any, tag: String = "en") = MessageFormat2.formatIn("{$x}", Map("x" -> value), tag)
       assertTrue(
@@ -257,7 +305,7 @@ object PlatformFormatterSpec extends ZIOSpecDefault:
         MessageFormat2.formatIn(plural, Map("n" -> 3), "pl-x-" + "abcdefgh-" * 120000 + "z").trim == "few",
       )
     },
-    test("a whole number of more than a million digits is not written out") {
+    test("a whole number of very many digits is not written out") {
       val huge     = BigInt(2).pow(3500000)
       val template = "{$n :number} {$n :integer}"
       assertTrue(

@@ -63,6 +63,36 @@ object NumberArgumentSpec extends ZIOSpecDefault:
           out(10) == "other",
         )
     },
+    test("the bounds on decimals and on a whole number's bits, at the bound and one past it") {
+      def shown(value: Any, template: String = "{$n :number maximumFractionDigits=20}") =
+        MessageFormat2.format(template, Map("n" -> value))
+      val longest = "0." + "0" * (Operands.MaxNumberText - 3) + "1"
+      val scaled  = BigDecimal(1, Operands.MaxNumberText)
+      val past    = BigDecimal(1, Operands.MaxNumberText + 1)
+      // A whole number of at most MaxBits bits, ten thousand digits, is written out as it is.
+      val widest  = BigInt(1) << (MessageFormat2.MaxBits - 1)
+      val wider   = BigInt(1) << MessageFormat2.MaxBits
+      TimeBudget.within("numbers at the bounds on decimals and bits", 2000)(
+        List(
+          shown(longest),
+          shown(longest + "1"),
+          shown(scaled),
+          shown(past),
+          shown(widest, "{$n :string}").length.toString,
+          shown(wider, "{$n :string}"),
+        )
+      ): out =>
+        assertTrue(
+          longest.length == Operands.MaxNumberText,
+          out(0) == "0",
+          out(1) == longest + "1",
+          out(2) == "0",
+          out(3) == past.toString,
+          widest.bitLength == MessageFormat2.MaxBits,
+          out(4) == "10000",
+          out(5) == "{$n :string}",
+        )
+    },
     test("values and text read as numbers the same on both platforms") {
       val shown = List[(Any, String)](
         12 -> "12",

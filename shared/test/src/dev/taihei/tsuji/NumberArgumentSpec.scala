@@ -203,47 +203,58 @@ object NumberArgumentSpec extends ZIOSpecDefault:
     // A date written into a declaration or selected on shows nothing, and a formatter was built
     // for each: 1300 declarations in each of thousands of nested messages took a minute for a
     // 60 KB message. Every step of an evaluation now costs the budget something.
-    test("work that writes nothing spends the budget too: dates, declarations, selectors, variants") {
+    test("work that writes nothing spends the budget too: dates, names, declarations, selectors, keys") {
       import java.time.{LocalDate, LocalTime}
-      val day      = LocalDate.of(2026, 11, 10)
-      val declared = MessageFormat2.parse(
-        (1 to 1300).map(i => s".local $$b$i = {$$d :date dateStyle=full}\n").mkString + "{(x)}"
-      ).message
-      val selected = MessageFormat2.parse(
-        ".match " + "{$d :date} " * 3700 + "\nwhen " + "* " * 3700 + "{x}"
-      ).message
-      val variants = MessageFormat2.parse(
-        ".match {$d}\n" + (1 to 4500).map(i => s"when $i {a}\n").mkString + "when * {x}"
-      ).message
-      val times    = MessageFormat2.parse("{$t :time timeStyle=short}" * 2400).message
-      def evaluations(message: MessageFormat2.Message, args: Map[String, Any]): Int =
+      val day                                                                  = LocalDate.of(2026, 11, 10)
+      def parsed(template: String)                                             = MessageFormat2.parse(template).message
+      def locals(expression: String, count: Int)                               =
+        parsed((1 to count).map(i => s".local $$b$i = {$expression}\n").mkString + "{(x)}")
+      def selectors(expression: String, count: Int)                            =
+        parsed(".match " + s"{$expression} " * count + "\nwhen " + "* " * count + "{x}")
+      val scenarios: List[(String, MessageFormat2.Message, Any)]               = List(
+        ("1300 dates declared", locals("$v :date dateStyle=full", 1300), day),
+        ("3700 dates selected", selectors("$v :date", 3700), day),
+        ("4500 number keys", parsed(".match {$v}\n" + (1 to 4500).map(i => s"when $i {a}\n").mkString + "when * {x}"), 0),
+        ("2400 times shown", parsed("{$v :time timeStyle=short}" * 2400), LocalTime.of(14, 5)),
+        ("2950 language names declared", locals("$v :string", 2950), Language("sw")),
+        ("4000 language names selected", selectors("$v :string", 4000), Language("sw")),
+        ("9000 selectors on a number of ten thousand digits", selectors("$v", 9000), BigInt(10).pow(9999)),
+        ("64 plural selectors on a costly Double", selectors("$v :plural", 64), subnormal),
+      )
+      // How many evaluations one budget pays for, and what the next five thousand cost, which
+      // is nothing: an evaluation on a spent budget stops before it does anything.
+      def evaluations(message: MessageFormat2.Message, value: Any): (Int, Int) =
         val budget = Budget.fresh()
-        Iterator
-          .continually(MessageFormat2.formatted(message, args, "en", budget))
+        val paid   = Iterator
+          .continually(MessageFormat2.formatted(message, Map("v" -> value), "en", budget))
           .take(100000)
           .takeWhile(_.isRight)
           .size
-      TimeBudget.within("evaluations that write one character, until the budget is spent", 20000)(
-        (
-          evaluations(declared, Map("d" -> day)),
-          evaluations(selected, Map("d" -> day)),
-          evaluations(variants, Map("d" -> 0)),
-          evaluations(times, Map("t" -> LocalTime.of(14, 5))),
+        paid -> (1 to 5000).count(_ => MessageFormat2.formatted(message, Map("v" -> value), "en", budget).isLeft)
+      TimeBudget.within("eight templates that write one character, until the budget is spent and after", 30000)(
+        scenarios.map(
+          (
+            name,
+            message,
+            value,
+          ) => name -> evaluations(message, value)
         )
-      ):
-        (
-          declarations,
-          selectors,
-          keys,
-          shown,
-        ) =>
-          assertTrue(
-            // Each fits the budget many times over, and none without end.
-            declarations > 100 && declarations < 5000,
-            selectors > 100 && selectors < 5000,
-            keys > 50 && keys < 1000,
-            shown > 100 && shown < 1000,
-          )
+      ): counts =>
+        // What an evaluation costs follows from the charges alone, so the counts are the same
+        // on both platforms, and exact: a charge that goes missing or changes shows here, and
+        // whoever changes one changes its count with it.
+        val expected = Map(
+          "1300 dates declared" -> 2996,
+          "3700 dates selected" -> 538,
+          "4500 number keys" -> 186,
+          "2400 times shown" -> 207,
+          "2950 language names declared" -> 1340,
+          "4000 language names selected" -> 497,
+          "9000 selectors on a number of ten thousand digits" -> 222,
+          "64 plural selectors on a costly Double" -> 2574,
+        )
+        val outside  = counts.filter((name, result) => result != (expected(name), 5000))
+        assertTrue(outside.isEmpty)
     },
     test("a list of whole Doubles costs what a list of Ints costs, on both platforms") {
       given Catalogues = Catalogues(Seq(Readings))

@@ -727,6 +727,7 @@ object MessageFormat2:
       case d: Double                                       => Some(("double", d))
       case s: String if s.length <= Operands.MaxNumberText => Some(s)
       case _: LocalDate | _: LocalDateTime | _: LocalTime  => Some(value)
+      case _: Language                                     => Some(value)
       case _                                               => None
 
     // What reading a value as its digits costs, in characters: those of its text, and for a
@@ -790,6 +791,9 @@ object MessageFormat2:
     case other         => s"formatting threw ${other.getClass.getName}"
 
   private def evaluate(message: Message, initialContext: Context): String =
+    // An evaluation is a step itself, and the first thing it does is pay for it: when the
+    // budget is spent, a nested message does nothing at all, whatever its template holds.
+    initialContext.budget.charge(Step)
     val context = message.declarations.foldLeft(initialContext): (ctx, decl) =>
       // A declaration writes nothing, and a template can hold thousands: each is a step of the
       // work a message may do, as each piece, selector and variant is.
@@ -1074,7 +1078,7 @@ object MessageFormat2:
   ): String = value match
     case Formatted(_, _, written)                       => written
     case PluralSelector(v, _)                           => show(v, locale, numbers)
-    case l: Language                                    => Language.nameIn(l, locale)
+    case l: Language                                    => named(l, locale, numbers)
     case _: LocalDate | _: LocalDateTime | _: LocalTime =>
       temporal(value, Map.empty, locale, numbers)
     case number if Decimal.isNumber(number)             =>
@@ -1091,6 +1095,19 @@ object MessageFormat2:
         )
       .toString
     case other                                          => asItIs(other)
+
+  // The name of a language in the reader's language. The platform is asked for it, which costs
+  // what writing a number does: it is charged, and one evaluation asks once for a language.
+  private def named(
+    language: Language,
+    locale: String,
+    numbers: Digits,
+  ): String =
+    numbers
+      .once("name", Map.empty, language):
+        numbers.budget.charge(FormatCost)
+        Language.nameIn(language, locale)
+      .toString
 
   // What :string gives: the value as text, unformatted. A number is its digits, the same on both
   // platforms (an order number 12345 stays 12345, the Double 1 is 1); anything else shows as it
@@ -1148,12 +1165,14 @@ object MessageFormat2:
     out.result()
 
   private def evaluateMatch(matchStmt: MatchStatement, context: Context): String =
-    val values         = matchStmt.selectors.map(s => evaluateExpression(s, context))
+    // Selecting writes nothing: every selector, and every key a variant is tried with, is a
+    // step, paid before the work it stands for is done.
+    val values         = matchStmt.selectors.map: s =>
+      context.budget.charge(Step)
+      evaluateExpression(s, context)
     val pluralAt       = values.zipWithIndex.collect { case (_: PluralSelector, i) => i }
     val read           = pluralAt.take(MaxPluralSelectors).toSet
     val selectorValues = values.zipWithIndex.map((v, i) => selected(v, read(i), context))
-    // Selecting writes nothing: every selector, and every key a variant is tried with, is a step.
-    context.budget.charge(Step * selectorValues.size)
     val matchedCase    = matchStmt.cases.find: mcase =>
       context.budget.charge(Step * mcase.keys.size)
       mcase.keys.size == selectorValues.size &&

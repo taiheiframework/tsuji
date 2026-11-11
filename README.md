@@ -616,11 +616,14 @@ in Tsuji's own codecs, whatever `ReaderConfig` you read with:
 - One message, with its nested messages, list elements and fallbacks, produces at most four
   million characters; past that it shows its own template. The work it does counts against the
   same limit, also when nothing is shown for it: one for every declaration, placeholder,
-  selector and key tried, about forty for an ordinary number or a date that is written, a few
-  hundred for a number of hundreds of digits, and up to a thousand to read a `Double` whose
-  exact value has that many (the smallest ones). A message that shows a hundred thousand
-  numbers, or a list of ten thousand different such `Double`s, falls back as one that writes
-  too much text does; no message a person reads comes near it.
+  selector and key tried, about forty for a whole number, a date or the name of a language
+  that is written, about a hundred and thirty for a `Double` with decimals, a few hundred for a
+  number of hundreds of digits, and up to a thousand to read a `Double` whose exact value has
+  that many (the smallest ones). A message that shows a hundred thousand whole numbers, thirty
+  thousand `Double`s with decimals, or a list of ten thousand different such small `Double`s,
+  falls back as one that writes too much text does; no message a person reads comes near it:
+  a thousand nested field errors use a fifteenth of the limit, a list of ten thousand prices a
+  third.
 
 Versioning rules for keys, on the wire:
 
@@ -714,7 +717,8 @@ decimals (`1.50`), `:integer` rounded -2.5 to -2, `style=currency` always wrote 
 `{$n}` and `{$d}` showed `toString` (`1.0` on the JVM, `1` in JavaScript, `2026-10-20`). A
 number of more than 300 whole digits was written out in full and is now shown as it is; a
 `BigInt` or `BigDecimal` of more than ten thousand digits makes the template fall back; and the
-work on numbers counts against the limit of a message (see [Bounds](#bounds)).
+work a message does, on numbers, dates and every step of its templates, counts against its
+limit, where only the text it wrote did (see [Bounds](#bounds)).
 
 ### Plurals
 
@@ -801,6 +805,7 @@ unchanged: 6.x and 7.x read each other's JSON, with the two exceptions below.
 | `{$n :number}` of a `Long` past 2^53 or a `BigDecimal` loses digits | every digit is kept |
 | `{$n :integer}` of -2.5 is `-2`, without grouping | `-3`: a half rounds away from zero, on both platforms; grouped |
 | `{$n :number style=currency}` is US dollars | `style=currency currency=EUR`; without `currency=` it does not compile, and `validate` refuses it |
+| a message falls back to its template past four million characters of text | also past that much work: see [Bounds](#bounds); a `BigInt` or `BigDecimal` of more than ten thousand digits falls back; a number of more than 300 whole digits is shown unformatted |
 | options of `:number` and `:integer` were not checked | a `currency=` that is not three letters, decimals outside 0 to 20, an unknown `useGrouping`, and `style=`, `currency=` or decimals on `:integer` do not compile |
 | `{$n}` and `{$d}` show `toString` (`1234567`, `1.0`, `2026-10-20`) | as `:number` and `:datetime` write them (`1,234,567`, `1`, `Oct 20, 2026`); `{$n :string}` for the digits as they are |
 | `.match {$x} when 3` matches the `Double` 3.0 in JavaScript only | on both platforms |

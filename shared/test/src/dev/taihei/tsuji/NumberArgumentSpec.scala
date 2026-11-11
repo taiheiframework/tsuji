@@ -256,6 +256,31 @@ object NumberArgumentSpec extends ZIOSpecDefault:
         val outside  = counts.filter((name, result) => result != (expected(name), 5000))
         assertTrue(outside.isEmpty)
     },
+    // What a function made of a value was once looked up by its options, all of them, at
+    // every use: an option of 60,000 characters, which means nothing and which validate lets
+    // pass, was read through each time, for a step's worth of budget.
+    test("options that mean nothing cost nothing: 20000 evaluations with a 60K option, or 2000 options") {
+      import java.time.LocalDate
+      val day    = LocalDate.of(2026, 11, 10)
+      val long   = "x" * 60000
+      val many   = (1 to 2000).map(i => s"o$i=aaaaaaaaaaaaaa").mkString(" ")
+      val shapes = List(
+        s".match {$$v :date o=$long}\nwhen * {}" -> day,
+        s"{$$v :date dateStyle=long o=$long}" -> day,
+        s"{$$v :number minimumFractionDigits=2 o=$long}" -> 1.5,
+        s".match {$$v :date $many}\nwhen * {}" -> day,
+      ).map((template, value) => MessageFormat2.parse(template).message -> value)
+      TimeBudget.within("4 x 20000 evaluations of a function with a 60K option or 2000 options", 5000)(
+        shapes.map: (message, value) =>
+          (1 to 20000).map(_ => MessageFormat2.formatted(message, Map("v" -> value), "en", Budget.fresh())).last
+      ): out =>
+        assertTrue(
+          out(0) == Right(""),
+          out(1) == Right("November 10, 2026"),
+          out(2) == Right("1.50"),
+          out(3) == Right(""),
+        )
+    },
     test("a list of whole Doubles costs what a list of Ints costs, on both platforms") {
       given Catalogues = Catalogues(Seq(Readings))
       def left(values: List[Double]): Boolean =

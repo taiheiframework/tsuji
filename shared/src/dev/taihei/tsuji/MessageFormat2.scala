@@ -682,16 +682,13 @@ object MessageFormat2:
       budget.charge(Digits.cost(value))
       new Read(Decimal.plain(value), budget)
 
-    // What a function makes of a value with these options, made once for one evaluation.
-    def once(
-      function: String,
-      options: Map[String, String],
-      value: Any,
-    )(
-      make: => Any
-    ): Any =
+    // What is made of a value in one way, made once for one evaluation. `way` is what decides
+    // the result, and small: the function and what its options come to, never the options
+    // themselves, which a template may make as long as it likes and which would be hashed here
+    // at every use.
+    def once(way: Any, value: Any)(make: => Any): Any =
       Digits.key(value).fold(make): key =>
-        val whole = (function, options, key)
+        val whole = (way, key)
         applied.get(whole).getOrElse:
           val made = make
           if applied.size < Digits.Kept then applied(whole) = made
@@ -824,7 +821,11 @@ object MessageFormat2:
       case _                                    => unformatted(value)
     function match
       case "number" | "integer" =>
-        context.numbers.once(function, options, operand)(applyTo(operand, function, options, context))
+        // An integer has no style and no decimals to choose: only the grouping decides.
+        val way =
+          if function == "integer" then (function, grouped(options))
+          else (function, style(options), decimals(options), grouped(options))
+        context.numbers.once(way, operand)(applyTo(operand, function, options, context))
       case _                    => applyTo(operand, function, options, context)
 
   end applyFunction
@@ -839,10 +840,18 @@ object MessageFormat2:
     numbers: Digits,
   ): String =
     numbers
-      .once("datetime", options, value):
+      .once(
+        ("datetime", styleAsked(options, "dateStyle"), styleAsked(options, "timeStyle")),
+        value,
+      ):
         numbers.budget.charge(FormatCost)
         PlatformDateTimeFormatter.formatDateTime(value, options, locale)
       .toString
+
+  // The style a date or time option asks for, as far as it can be one: the four styles have at
+  // most six letters, and anything longer is read as medium by both platforms.
+  private def styleAsked(options: Map[String, String], name: String): Option[String] =
+    options.get(name).filter(_.length <= 6).map(Language.lower)
 
   /**
    * A number that `:number` or `:integer` wrote: the value it was given, the number as it is
@@ -1082,7 +1091,7 @@ object MessageFormat2:
     case _: LocalDate | _: LocalDateTime | _: LocalTime =>
       temporal(value, Map.empty, locale, numbers)
     case number if Decimal.isNumber(number)             =>
-      numbers.once("", Map.empty, number):
+      numbers.once("shown", number):
         format(
           number,
           numbers.of(number).digits,
@@ -1104,7 +1113,7 @@ object MessageFormat2:
     numbers: Digits,
   ): String =
     numbers
-      .once("name", Map.empty, language):
+      .once("name", language):
         numbers.budget.charge(FormatCost)
         Language.nameIn(language, locale)
       .toString

@@ -1,16 +1,33 @@
 package dev.taihei.tsuji
 
 import java.time.{LocalDate, LocalDateTime, LocalTime}
+import java.util.concurrent.atomic.AtomicInteger
+
+import scala.util.Try
 
 import zio.test.*
 
-// What one evaluation reads: a date or time style, an option's value.
+// What one evaluation reads and when: a date or time style, an option's value, a spent budget,
+// and the memo that lets one evaluation write a value with the same options once.
 object EvaluationCostSpec extends ZIOSpecDefault:
 
   private val day      = LocalDate.of(2026, 11, 10)
   private val dayTime  = LocalDateTime.of(2026, 11, 10, 14, 5)
   private val time     = LocalTime.of(14, 5)
   private val longText = "l" * 60000
+
+  // A value that counts how often it is written as text: :string writes it with toString.
+  final private class Counted(count: AtomicInteger):
+
+    override def toString: String =
+      count.incrementAndGet()
+      "x"
+
+  // A budget with exactly `left` units left, or already spent when `left` is negative.
+  private def budgetWith(left: Int): Budget =
+    val budget = Budget.fresh()
+    Try(budget.charge(Budget.PerMessage.toInt - left))
+    budget
 
   def spec = suite("What an evaluation reads")(
     test("the platform formatters read a date or time style of at most six letters") {
@@ -41,6 +58,27 @@ object EvaluationCostSpec extends ZIOSpecDefault:
           )
         )
     },
+    // An evaluation pays for itself first, and each selector before it is evaluated: on a spent
+    // budget nothing of the template is evaluated, and on a budget that pays for two selectors
+    // the third is never evaluated.
+    test("an evaluation pays for each step before it does it") {
+      val message                                         = MessageFormat2
+        .parse(".match {$v :string} {$v :string} {$v :string}\nwhen * * * {x}")
+        .message
+      def written(budget: Budget, times: Int): (Int, Int) =
+        val count = new AtomicInteger
+        val value = new Counted(count)
+        val left  = (1 to times).count(_ =>
+          MessageFormat2.formatted(message, Map("v" -> value), "en", budget).isLeft
+        )
+        (count.get, left)
+      assertTrue(
+        written(budgetWith(-1), 5000) == (0, 5000),
+        // One step for the evaluation, one for each of two selectors, and nothing for a third.
+        written(budgetWith(3), 1) == (2, 1),
+        written(Budget.fresh(), 1) == (3, 0),
+      )
+    },
     // Looked up by every option, 20000 uses cost 4.4 s on Scala.js and 0.66 s on the JVM; looked
     // up by what the options come to, about 30 ms on both. The budget leaves room for a loaded
     // machine, so Scala.js is where this test catches the old key.
@@ -51,6 +89,65 @@ object EvaluationCostSpec extends ZIOSpecDefault:
         (1 to 20000).map(_ => MessageFormat2.formatted(message, Map("v" -> day), "en", Budget.fresh())).last
       ): out =>
         assertTrue(out == Right(""))
+    },
+    // One evaluation writes a value with the same options once, and looks it up by what the
+    // options come to: every option set a formatter reads must give, inside one message among
+    // all the others, the text it gives alone.
+    test("a value written among others reads as it does alone") {
+      val number      = 12345.678
+      val numbers     = List(
+        "{$v}",
+        "{$v :string}",
+        "{$v :number}",
+        "{$v :number useGrouping=never}",
+        "{$v :number useGrouping=always}",
+        "{$v :number useGrouping=NEVER}",
+        "{$v :number style=currency currency=eur}",
+        "{$v :number style=currency currency=EUR}",
+        "{$v :number style=currency currency=usd}",
+        "{$v :number style=percent}",
+        "{$v :number minimumFractionDigits=2}",
+        "{$v :number maximumFractionDigits=0}",
+        "{$v :number minimumFractionDigits=5 maximumFractionDigits=1}",
+        "{$v :integer}",
+        "{$v :integer useGrouping=never}",
+      )
+      val dates       = List(
+        "{$v}",
+        "{$v :date}",
+        "{$v :date dateStyle=LONG}",
+        "{$v :date dateStyle=long}",
+        "{$v :date dateStyle=Short}",
+        "{$v :date dateStyle=longest}",
+        "{$v :date timeStyle=short}",
+        "{$v :time}",
+        "{$v :time timeStyle=SHORT}",
+        "{$v :time dateStyle=full}",
+        "{$v :datetime}",
+        "{$v :datetime dateStyle=full timeStyle=short}",
+        "{$v :datetime dateStyle=SHORT timeStyle=Short}",
+      )
+      def differences(
+        templates: List[String],
+        value: Any,
+        tag: String,
+      ): List[String] =
+        def alone(t: String)           = MessageFormat2.formatIn(t, Map("v" -> value), tag)
+        def together(ts: List[String]) =
+          MessageFormat2.formatIn(ts.mkString("\u0001"), Map("v" -> value), tag).split('\u0001').toList
+        val expected                   = templates.map(alone)
+        val forward                    = together(templates)
+        val backward                   = together(templates.reverse).reverse
+        templates.indices.toList.collect:
+          case i if forward(i) != expected(i) || backward(i) != expected(i) =>
+            s"$tag ${templates(i)}: alone ${expected(i)}, together ${forward(i)} / ${backward(i)}"
+      val tags        = List("en", "nl", "fr", "de", "ja")
+      val wrong       =
+        tags.flatMap(tag => differences(numbers, number, tag) ++ differences(dates, dayTime, tag))
+      assertTrue(
+        MessageFormat2.formatIn("{$v :number useGrouping=never}", Map("v" -> number), "en") != "12,345.678",
+        wrong.isEmpty,
+      )
     },
   )
 

@@ -70,11 +70,12 @@ private[tsuji] object PlatformDateTimeFormatter:
     )
 
   // Intl throws a RangeError on a style it does not know. Like the JVM side, take the style in
-  // any case and fall back to medium for anything else.
+  // any case and fall back to medium for anything else; a value longer than "medium" is none of
+  // the four and is not lower-cased at all.
   private val styles = Set("short", "medium", "long", "full")
 
   private def styleOf(options: Map[String, String], key: String): String =
-    options.get(key).map(_.toLowerCase).filter(styles).getOrElse("medium")
+    options.get(key).filter(_.length <= 6).map(_.toLowerCase).filter(styles).getOrElse("medium")
 
   // A LocalTime has no date; Intl needs one, so it gets a fixed one rather than today's.
   private val ReferenceYear = 1970

@@ -77,6 +77,30 @@ object MessageFormat2ValidateSpec extends ZIOSpecDefault:
           ),
         )
       },
+      test("a date or time style that is none of the four") {
+        def message(template: String) = MessageFormat2.validate(template).map(_.message)
+        assertTrue(
+          message("{$d :date dateStyle=bogus}") == List("dateStyle= takes short, medium, long or full"),
+          message("{$d :time timeStyle=shorter}") == List("timeStyle= takes short, medium, long or full"),
+          message("{$d :datetime dateStyle=full timeStyle=x}") ==
+          List("timeStyle= takes short, medium, long or full"),
+          message("{$d :datetime dateStyle=" + "f" * 200 + "}").size == 1,
+          // The four, in any case, as formatting reads them.
+          List("short", "MEDIUM", "Long", "full").forall(s =>
+            message(s"{$$d :datetime dateStyle=$s timeStyle=$s}").isEmpty
+          ),
+        )
+      },
+      test("an option value longer than the limit") {
+        val longest = "a" * MessageFormat2.MaxOptionValueLength
+        val errors  = MessageFormat2.validate(s"{$$n :string o=\"${longest}a\"}")
+        assertTrue(
+          MessageFormat2.validate(s"{$$n :string o=\"$longest\"}").isEmpty,
+          errors.map(_.message) ==
+          List(s"the value of the option 'o' is longer than ${MessageFormat2.MaxOptionValueLength} characters"),
+          errors.map(_.position) == List(14),
+        )
+      },
       test("an unclosed placeholder") {
         val e = MessageFormat2.validate("Hello {$name")
         assertTrue(e.size == 1, e.head.position == 6, e.head.message.contains("not closed"))

@@ -48,13 +48,13 @@ private[tsuji] object PlatformDateTimeFormatter:
     case FormatStyle.LONG | FormatStyle.FULL => FormatStyle.MEDIUM
     case other                               => other
 
-  // Locale.ROOT: under a Turkish default locale "MEDIUM" would lower-case to "medıum".
+  // Locale.ROOT: under a Turkish default locale "MEDIUM" would lower-case to "medıum". A value
+  // longer than "medium" is none of the four and is not lower-cased at all.
   private def parseFormatStyle(style: String): Option[FormatStyle] =
-    style.toLowerCase(java.util.Locale.ROOT) match
-      case "short"  => Some(FormatStyle.SHORT)
-      case "medium" => Some(FormatStyle.MEDIUM)
-      case "long"   => Some(FormatStyle.LONG)
-      case "full"   => Some(FormatStyle.FULL)
-      case _        => None
+    Option(style).filter(_.length <= 6).map(_.toLowerCase(java.util.Locale.ROOT)).collect:
+      case "short"  => FormatStyle.SHORT
+      case "medium" => FormatStyle.MEDIUM
+      case "long"   => FormatStyle.LONG
+      case "full"   => FormatStyle.FULL
 
 end PlatformDateTimeFormatter

@@ -73,8 +73,11 @@ object MessageFormat2:
 
   // Errors past this many tell nothing new and only cost memory. An error echoes parts of the
   // template, escaped and cut short, so that it can be logged as it is.
-  private val MaxErrors      = 100
-  private val MaxErrorLength = 200
+  private val MaxErrors = 100
+
+  // The longest value an option may have.
+  private[tsuji] val MaxOptionValueLength = 256
+  private val MaxErrorLength              = 200
 
   // ---------------------------------------------------------------------------------------------
   // AST
@@ -238,7 +241,14 @@ object MessageFormat2:
               v
             else parseIdentifier()
           if value.isEmpty then error(valueAt, s"the option '$key' needs a value")
-          if key.nonEmpty then options(key) = value
+          // No option any function reads comes near this length: a longer value is an error,
+          // and formatting goes on without the option, so nothing reads it again.
+          if value.length > MaxOptionValueLength then
+            error(
+              valueAt,
+              s"the value of the option '$key' is longer than $MaxOptionValueLength characters",
+            )
+          else if key.nonEmpty then options(key) = value
         else if key.nonEmpty then error(pos, s"the option '$key' needs = and a value")
         end if
         skipWhitespace()
@@ -513,16 +523,18 @@ object MessageFormat2:
 
   private def structureErrors(message: Message): List[TemplateError] =
     val functions = expressions(message).flatMap:
-      case FunctionAnnotation(_, f, _, at) if f.nonEmpty && !Functions(f) =>
+      case FunctionAnnotation(_, f, _, at) if f.nonEmpty && !Functions(f)   =>
         List(TemplateError(at, s"unknown function :$f"))
-      case FunctionAnnotation(_, "number", options, at)                   =>
+      case FunctionAnnotation(_, "number", options, at)                     =>
         numberOptionErrors(options).map(TemplateError(at, _))
-      case FunctionAnnotation(_, "integer", options, at)                  =>
+      case FunctionAnnotation(_, "integer", options, at)                    =>
         // A whole number has no style, no currency and no decimals to choose.
         val notInteger = NumberOnly.filter(options.contains).map: name =>
           s"$name= is an option of :number, not of :integer"
         (notInteger ++ numberOptionErrors(options -- NumberOnly)).map(TemplateError(at, _))
-      case _                                                              => Nil
+      case FunctionAnnotation(_, "datetime" | "date" | "time", options, at) =>
+        styleOptionErrors(options).map(TemplateError(at, _))
+      case _                                                                => Nil
     val matches   = message.body.toOption.toList.flatMap: m =>
       val arity    = m.selectors.size
       val counts   = m.cases.collect:
@@ -845,13 +857,25 @@ object MessageFormat2:
         value,
       ):
         numbers.budget.charge(FormatCost)
-        PlatformDateTimeFormatter.formatDateTime(value, options, locale)
+        PlatformDateTimeFormatter.formatDateTime(value, stylesAsked(options), locale)
       .toString
 
-  // The style a date or time option asks for, as far as it can be one: the four styles have at
-  // most six letters, and anything longer is read as medium by both platforms.
+  // The style a date or time option asks for, in lower case, when it is one of the four; anything
+  // else is no style, which both platforms write as medium. A value longer than the longest
+  // style is not read at all.
   private def styleAsked(options: Map[String, String], name: String): Option[String] =
-    options.get(name).filter(_.length <= 6).map(Language.lower)
+    options.get(name).filter(_.length <= LongestStyle).map(Language.lower).filter(DateStyles)
+
+  // All the platform formatters are given: the styles asked for, each one of the four, and
+  // nothing else of the options.
+  private def stylesAsked(options: Map[String, String]): Map[String, String] =
+    StyleOptions.flatMap(name => styleAsked(options, name).map(name -> _)).toMap
+
+  private val StyleOptions = List("dateStyle", "timeStyle")
+
+  private val DateStyles = Set("short", "medium", "long", "full")
+
+  private val LongestStyle = DateStyles.map(_.length).max
 
   /**
    * A number that `:number` or `:integer` wrote: the value it was given, the number as it is
@@ -1074,6 +1098,13 @@ object MessageFormat2:
       _ =>
         "useGrouping= takes auto, always or never"
     currency ++ digits ++ grouping
+
+  // What is wrong with the options of :datetime, :date and :time, for validate: a style is one
+  // of the four, in any case.
+  private def styleOptionErrors(options: Map[String, String]): List[String] =
+    StyleOptions
+      .filter(name => options.contains(name) && styleAsked(options, name).isEmpty)
+      .map(name => s"$name= takes short, medium, long or full")
 
   final private[tsuji] case class PluralSelector(value: Any, locale: String)
 

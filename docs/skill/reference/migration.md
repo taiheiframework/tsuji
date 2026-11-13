@@ -11,6 +11,7 @@ format is unchanged.
 | `{$n :integer}` of -2.5: `-2` | `-3`, grouped |
 | `style=currency` (US dollars) | `style=currency currency=EUR`, required; the reader's language decides how the amount is written |
 | number options were not checked | `validate` and the macro refuse a `currency=` that is not three letters, decimals outside 0 to 20, a `useGrouping` other than `auto`, `always`, `never`, and `style=`, `currency=` or decimals on `:integer` |
+| date and time styles and option lengths were not checked | `validate` and the macro refuse a `dateStyle` or `timeStyle` other than `short`, `medium`, `long`, `full` and an option value over 256 characters; a catalogue template with one is skipped and reported in `problems`; `MessageFormat2.format` writes an unknown style as `medium` and leaves an over-long option out |
 | `{$n}`, `{$d}` as `toString` | as `:number` and `:datetime`; `{$n :string}` for the raw digits (an order number, a year) |
 | `.match {$x} when 3` on a `Double` 3.0: JavaScript only | both platforms |
 | `:plural`: `one` and `other`, by the reader's language | CLDR's categories, by the template's language; `=1` for the number 1 alone |

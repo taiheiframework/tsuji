@@ -101,6 +101,21 @@ object MessageFormat2ValidateSpec extends ZIOSpecDefault:
           errors.map(_.position) == List(14),
         )
       },
+      test("a message with such a style or option does not compile") {
+        for
+          style  <-
+            typeCheck("""object F extends MessageFamily("f") { val x = message[(d: java.time.LocalDate)]("{$d :date dateStyle=bogus}") }""")
+          // typeCheck needs a literal: the option value is 257 letters.
+          option <-
+            typeCheck("""object F extends MessageFamily("f") { val x = message[(s: String)]("{$s :string o=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}") }""")
+          ok     <-
+            typeCheck("""object F extends MessageFamily("f") { val x = message[(d: java.time.LocalDate)]("{$d :date dateStyle=Long}") }""")
+        yield assertTrue(
+          style.left.exists(_.contains("dateStyle= takes short, medium, long or full")),
+          option.left.exists(_.contains("longer than 256 characters")),
+          ok.isRight,
+        )
+      },
       test("an unclosed placeholder") {
         val e = MessageFormat2.validate("Hello {$name")
         assertTrue(e.size == 1, e.head.position == 6, e.head.message.contains("not closed"))

@@ -710,8 +710,9 @@ MessageFormat2.format("Order {$id :string}, {$year :number useGrouping=never}", 
   `useGrouping` other than `auto`, `always` or `never` (MessageFormat 2.0's `min2` is not
   supported), and `style=`, `currency=` or a number of decimals on `:integer`.
 - `validate` and the macro refuse a `dateStyle` or `timeStyle` other than `short`, `medium`,
-  `long` or `full` (any case); formatting still writes any other value as `medium`. An option
-  value longer than 256 characters is refused too, and formatting leaves such an option out.
+  `long` or `full` (any case), and an option value longer than 256 characters; a catalogue
+  template with one is skipped and reported. `MessageFormat2.format` still writes any other style
+  as `medium` and leaves an over-long option out.
 - The one place the platforms differ: a currency code neither knows (`ZZZ`) is written where the
   symbol would be, by the JDK against the number (`ZZZ1,234.50`), by `Intl` with a space.
 
@@ -810,7 +811,7 @@ unchanged: 6.x and 7.x read each other's JSON, with the two exceptions below.
 | `{$n :number style=currency}` is US dollars | `style=currency currency=EUR`; without `currency=` it does not compile, and `validate` refuses it |
 | a message falls back to its template past four million characters of text | also past that much work: see [Bounds](#bounds); a `BigInt` or `BigDecimal` of more than ten thousand digits falls back; a number of more than 300 whole digits is shown unformatted |
 | options of `:number` and `:integer` were not checked | a `currency=` that is not three letters, decimals outside 0 to 20, an unknown `useGrouping`, and `style=`, `currency=` or decimals on `:integer` do not compile |
-| `dateStyle` and `timeStyle` were not checked, and an option value had no length limit | a style other than `short`, `medium`, `long` or `full` and an option value longer than 256 characters do not compile; formatting writes an unknown style as `medium` and leaves an over-long option out |
+| `dateStyle` and `timeStyle` were not checked, and an option value had no length limit | a style other than `short`, `medium`, `long` or `full` and an option value longer than 256 characters do not compile, and a catalogue template with one is skipped and reported in `problems`; `MessageFormat2.format` writes an unknown style as `medium` and leaves an over-long option out |
 | `{$n}` and `{$d}` show `toString` (`1234567`, `1.0`, `2026-10-20`) | as `:number` and `:datetime` write them (`1,234,567`, `1`, `Oct 20, 2026`); `{$n :string}` for the digits as they are |
 | `.match {$x} when 3` matches the `Double` 3.0 in JavaScript only | on both platforms |
 | `:plural` knows `one` (1, and 0 in French) and `other`, by the reader's language | CLDR's categories for every language, by the language the template is written in: see [Plurals](#plurals) |

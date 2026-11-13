@@ -259,7 +259,8 @@ object NumberArgumentSpec extends ZIOSpecDefault:
     // What a function made of a value was once looked up by its options, all of them, at
     // every use: an option that means nothing was read through each time. An option value is
     // at most MaxOptionValueLength characters (a longer one is dropped when the template is
-    // read); EvaluationCostSpec holds the case of two thousand options.
+    // read), so the time budget here is a bound on the work, not a check of the memo's key;
+    // EvaluationCostSpec holds that, with two thousand options.
     test("options that mean nothing cost nothing: 20000 evaluations with the longest option value") {
       import java.time.LocalDate
       val day    = LocalDate.of(2026, 11, 10)

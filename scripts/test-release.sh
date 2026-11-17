@@ -574,8 +574,8 @@ printf '{"currentVersion":"0.0.0","newVersion":"%s","releaseType":"patch","branc
 expect "release-github refuses a branch that is neither main nor a maintenance branch" 1 "that names its branch" "${M[@]}" release-github
 printf '{"currentVersion":"0.0.0","newVersion":"%s","releaseType":"patch","branch":"9.9.x","head":"x","embargo":false}\n' "$V" > "$G/.release-state.json"
 expect "release-github refuses while the recorded branch is not on GitHub" 1 "9.9.x is not on taiheiframework/" "${M[@]}" release-github
-OTHER=$(git -C "$G" -c user.name=Test -c user.email=test@example.invalid -c commit.gpgsign=false commit-tree "$(git -C "$G" hash-object -w -t tree /dev/null)" -m other)
-git -C "$G" push -q origin "$OTHER:refs/heads/9.9.x" 2>/dev/null
+UNRELATED=$(git -C "$G" -c user.name=Test -c user.email=test@example.invalid -c commit.gpgsign=false commit-tree "$(git -C "$G" hash-object -w -t tree /dev/null)" -m other)
+git -C "$G" push -q origin "$UNRELATED:refs/heads/9.9.x" 2>/dev/null
 expect "release-github refuses a release commit that is on no branch on GitHub" 1 "does not hold the release commit: push 9.9.x first" "${M[@]}" release-github
 ! gh_called "release create" && pass "and creates nothing" || fail "it created a release without the branch on origin"
 git -C "$G" push -q origin +HEAD:refs/heads/9.9.x 2>/dev/null

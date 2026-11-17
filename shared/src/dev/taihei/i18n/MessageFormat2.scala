@@ -1,7 +1,6 @@
 package dev.taihei.i18n
 
 import scala.collection.mutable
-import scala.util.Try
 
 object MessageFormat2:
 
@@ -491,10 +490,17 @@ object MessageFormat2:
     options: Map[String, String],
     locale: String,
   ): String =
-    Try(value.toString.toDouble) match
-      case scala.util.Success(num) =>
-        PlatformNumberFormatter.formatNumber(num, options.get("style"), locale)
-      case _                       => value.toString
+    numberOf(value) match
+      case Some(num) => PlatformNumberFormatter.formatNumber(num, options.get("style"), locale)
+      case None      => value.toString
+
+  // The longest text read as a number: 1100 characters, enough for any Double written out in full.
+  private val MaxNumberText = 1100
+
+  // A value as a number, or None. The text is bounded and read with `toDoubleOption`, which checks
+  // the syntax before it parses, so the read takes time linear in the text on both platforms.
+  private[i18n] def numberOf(value: Any): Option[Double] =
+    Option(value).map(_.toString).filter(_.length <= MaxNumberText).flatMap(_.toDoubleOption)
 
   private def formatDateTime(
     value: Any,
@@ -523,17 +529,20 @@ object MessageFormat2:
         out.result()
 
   private def evaluateMatch(matchStmt: MatchStatement, context: Context): String =
-    // Evaluate selectors
-    val selectorValues = matchStmt.selectors.map(s => evaluateExpression(s, context))
+    // Evaluate selectors; a plural selector's argument is read as a number once, not once per
+    // variant
+    val selectorValues = matchStmt.selectors.map(s => evaluateExpression(s, context)).map:
+      case PluralSelector(value, locale) => PluralCount(numberOf(value).map(_.toInt), locale)
+      case other                         => other
 
     // Find matching case
     val matchedCase = matchStmt.cases.find { mcase =>
       // Check if all keys match their corresponding selector values
       if mcase.keys.size == selectorValues.size then
         mcase.keys.zip(selectorValues).forall {
-          case (key, PluralSelector(value, locale)) =>
-            matchesPluralKey(value, key, locale)
-          case (key, value)                         =>
+          case (key, PluralCount(count, locale)) =>
+            matchesPluralKey(count, key, locale)
+          case (key, value)                      =>
             key == value.toString || key == "*"
         }
       else
@@ -546,13 +555,16 @@ object MessageFormat2:
 
   end evaluateMatch
 
+  // A plural selector's value read as a number, None when it is no number.
+  final private case class PluralCount(count: Option[Int], locale: String)
+
   private def matchesPluralKey(
-    value: Any,
+    count: Option[Int],
     key: String,
     locale: String,
   ): Boolean =
-    Try(value.toString.toDouble.toInt) match
-      case scala.util.Success(count) =>
+    count match
+      case Some(count) =>
         key match
           // Exact numeric matches (work for all locales)
           case "=0"                   => count == 0
@@ -573,6 +585,6 @@ object MessageFormat2:
           case "other" => true // "other" matches everything
           case "*"     => true // wildcard matches everything
           case _       => false
-      case _                         => key == "other" || key == "*"
+      case None        => key == "other" || key == "*"
 
 end MessageFormat2

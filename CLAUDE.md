@@ -25,7 +25,7 @@ make publish-repo      # the family repository's deploy, then verify-repo reads 
 ```
 
 Releases follow ADR 0004: one signed bundle, built locally by release-finalize (nothing is
-uploaded), then main and the tag are pushed, release-github keeps it on an immutable GitHub
+uploaded), then the branch and the tag are pushed, release-github keeps it on an immutable GitHub
 Release, the family's Maven repository (`REPO_URL`, the same string as `release.repoUrl` in
 build.mill) serves it from there, and the next release train in nakama takes it to Maven Central.
 A security fix (`EMBARGO=1`) goes to Central first with `make publish`, and gets its GitHub

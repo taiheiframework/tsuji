@@ -444,7 +444,7 @@ echo "stand-in gh: unexpected \$*" >&2; exit 1
 EOF
 chmod +x "$W/bin/gh"
 
-git -C "$G" init -q; git -C "$G" add -A
+git -C "$G" init -q; git -C "$G" symbolic-ref HEAD refs/heads/main; git -C "$G" add -A
 git -C "$G" -c user.name=Test -c user.email=test@example.invalid -c commit.gpgsign=false commit -qm test
 git -C "$G" -c user.name=Test -c user.email=test@example.invalid -c tag.gpgsign=false tag -a "v$V" -m test
 git init -q --bare "$W/origin.git"; git -C "$G" remote add origin "$W/origin.git"
@@ -551,7 +551,7 @@ git -C "$G" reset -q --hard "v$V"
 echo "# edited" >> "$G/Makefile"
 expect "release-github refuses tracked changes at the tag" 1 "tracked changes" "${M[@]}" release-github
 git -C "$G" checkout -q Makefile
-expect "release-github refuses before the tag is pushed" 1 "push main and the tag first" "${M[@]}" release-github
+expect "release-github refuses before the tag is pushed" 1 "push the branch and the tag first" "${M[@]}" release-github
 ! gh_called "release create" && pass "no refusal created a release" || fail "a refusal created a release"
 
 # release-abort: until the tag is pushed it undoes the preparation; from the push on, nothing.
@@ -562,10 +562,25 @@ git -C "$G" -c user.name=Test -c user.email=test@example.invalid -c tag.gpgsign=
 use_bundle "$SRC"
 git -C "$G" push -q origin "refs/tags/v$V" 2>/dev/null
 gh_reset
-expect "release-github refuses while main is not on GitHub" 1 "main is not on taiheiframework/" "${M[@]}" release-github
-! gh_called "release create" && pass "and creates nothing" || fail "it created a release without main on origin"
-git -C "$G" push -q origin HEAD:refs/heads/main 2>/dev/null
-printf '{"currentVersion":"0.0.0","newVersion":"%s","releaseType":"patch","branch":"main","head":"x","embargo":false}\n' "$V" > "$G/.release-state.json"
+# Without a release state (a security fix: release-finalize removes it at the upload to Central),
+# release-github asks the branch HEAD is on, main or a maintenance branch.
+expect "release-github without a release state asks the checked-out branch" 1 "main is not on taiheiframework/" "${M[@]}" release-github
+git -C "$G" checkout -q --detach
+expect "release-github without a release state refuses a HEAD on no branch" 1 "no release state, and HEAD is on ''" "${M[@]}" release-github
+git -C "$G" checkout -q main
+# With one, the release commit must be on the branch release-prepare recorded, here a maintenance
+# branch 9.9.x, which main never holds (main takes no merge commits). Main is not on origin at all.
+printf '{"currentVersion":"0.0.0","newVersion":"9.9.8","releaseType":"patch","branch":"9.9.x","head":"x","embargo":false}\n' > "$G/.release-state.json"
+expect "release-github refuses a release state of another version" 1 "no release state for v$V" "${M[@]}" release-github
+printf '{"currentVersion":"0.0.0","newVersion":"%s","releaseType":"patch","branch":"feature","head":"x","embargo":false}\n' "$V" > "$G/.release-state.json"
+expect "release-github refuses a branch that is neither main nor a maintenance branch" 1 "that names its branch" "${M[@]}" release-github
+printf '{"currentVersion":"0.0.0","newVersion":"%s","releaseType":"patch","branch":"9.9.x","head":"x","embargo":false}\n' "$V" > "$G/.release-state.json"
+expect "release-github refuses while the recorded branch is not on GitHub" 1 "9.9.x is not on taiheiframework/" "${M[@]}" release-github
+UNRELATED=$(git -C "$G" -c user.name=Test -c user.email=test@example.invalid -c commit.gpgsign=false commit-tree "$(git -C "$G" hash-object -w -t tree /dev/null)" -m other)
+git -C "$G" push -q origin "$UNRELATED:refs/heads/9.9.x" 2>/dev/null
+expect "release-github refuses a release commit that is on no branch on GitHub" 1 "does not hold the release commit: push 9.9.x first" "${M[@]}" release-github
+! gh_called "release create" && pass "and creates nothing" || fail "it created a release without the branch on origin"
+git -C "$G" push -q origin +HEAD:refs/heads/9.9.x 2>/dev/null
 expect "release-abort undoes nothing once the tag is on origin" 1 "the version is final" "${M[@]}" release-abort
 git -C "$G" rev-parse -q --verify "refs/tags/v$V" >/dev/null && [ -d "$B" ] && [ -e "$G/.release-state.json" ] && pass "the tag, the bundle and the state stay" || fail "release-abort removed something"
 expect "preflight refuses a version whose tag is on GitHub" 1 "already: the version is final" "${M[@]}" release-preflight
@@ -625,6 +640,11 @@ echo "$V" > "$G/.release-embargo"
 expect "publish refuses a version the site serves" 1 "not 404" "${M[@]}" publish
 rm "$G/.release-embargo"
 expect "release-prepare wants the embargo decided" 1 "never a default" "${M[@]}" release-prepare TYPE=patch
+git -C "$G" checkout -q --detach
+expect "release-prepare refuses a HEAD on no branch, which it could not record" 1 "HEAD is on '': a release is prepared on main or a maintenance branch" "${M[@]}" release-prepare TYPE=patch EMBARGO=0
+git -C "$G" checkout -q -b feature
+expect "release-prepare refuses a branch that is neither main nor a maintenance branch" 1 "HEAD is on 'feature'" "${M[@]}" release-prepare TYPE=patch EMBARGO=0
+git -C "$G" checkout -q main; git -C "$G" branch -q -D feature
 
 printf '%s\n1.2.3\n' "$V" > "$G/.release-embargo"
 expect "embargo-lift lifts one version" 0 "no longer under embargo" "${M[@]}" embargo-lift "VERSION=$V"
@@ -750,6 +770,11 @@ rm -f "$G/.release-state.json" "$B.CENTRAL_UPLOAD_STARTED"
 
 # release-finalize runs repo-guard first (C12), before it commits or tags anything.
 git -C "$G" tag -d "v$V" >/dev/null
+# The branch it tells the maintainer to push comes from the state, so a state without one stops it.
+printf '{"currentVersion":"9.9.8","newVersion":"9.9.10","releaseType":"patch","branch":"","head":"%s","embargo":false}\n' "$(git -C "$G" rev-parse HEAD)" > "$G/.release-state.json"
+HEAD_BEFORE=$(git -C "$G" rev-parse HEAD)
+expect "release-finalize refuses a release state that names no branch" 1 "that names its branch" "${M[@]}" release-finalize
+[ "$(git -C "$G" rev-parse HEAD)" = "$HEAD_BEFORE" ] && pass "and commits nothing" || fail "release-finalize committed without a branch"
 printf '{"currentVersion":"9.9.8","newVersion":"9.9.10","releaseType":"patch","branch":"main","head":"%s","embargo":false}\n' "$(git -C "$G" rev-parse HEAD)" > "$G/.release-state.json"
 HEAD_BEFORE=$(git -C "$G" rev-parse HEAD)
 expect "release-finalize runs repo-guard first" 1 "[repo-guard] COURSIER_REPOSITORIES" env COURSIER_REPOSITORIES=https://example.invalid "${M[@]}" release-finalize
@@ -757,7 +782,25 @@ expect "release-finalize runs repo-guard first" 1 "[repo-guard] COURSIER_REPOSIT
   && pass "and a refusal there commits and tags nothing" || fail "release-finalize committed or tagged before repo-guard"
 rm -f "$G/.release-state.json"
 
-# release-abort undoes no notes commit that main on origin holds, also before the tag is pushed.
+# release-abort undoes no notes commit that the recorded branch on origin holds, also before the
+# tag is pushed: first a maintenance branch, which main does not hold, then main.
+git -C "$G" -c user.name=Test -c user.email=test@example.invalid -c commit.gpgsign=false commit -q --allow-empty -m "Add release notes for version 9.9.10"
+git -C "$G" push -q origin +HEAD:refs/heads/9.9.x 2>/dev/null
+printf '{"currentVersion":"9.9.9","newVersion":"9.9.10","releaseType":"patch","branch":"9.9.x","head":"x","embargo":false}\n' > "$G/.release-state.json"
+NOTES_COMMIT=$(git -C "$G" rev-parse HEAD)
+expect "release-abort undoes no notes commit that is on origin's 9.9.x" 1 "holds the notes commit of v9.9.10" "${M[@]}" release-abort
+[ "$(git -C "$G" rev-parse HEAD)" = "$NOTES_COMMIT" ] && pass "and the notes commit stays on the maintenance branch" || fail "release-abort reset a commit pushed on 9.9.x"
+rm -f "$G/.release-state.json"
+# When GitHub cannot be asked about the branch, release-abort cannot tell, and undoes nothing. A git
+# whose ls-remote of a branch fails stands in; a pipe into cut must not hide that failure.
+mkdir -p "$W/failgit"; REALGIT=$(command -v git)
+printf '#!/usr/bin/env bash\ncase " $* " in *" ls-remote "*refs/heads/*) exit 128;; esac\nexec "%s" "$@"\n' "$REALGIT" > "$W/failgit/git"; chmod +x "$W/failgit/git"
+git -C "$G" -c user.name=Test -c user.email=test@example.invalid -c commit.gpgsign=false commit -q --allow-empty -m "Add release notes for version 9.9.10"
+printf '{"currentVersion":"9.9.9","newVersion":"9.9.10","releaseType":"patch","branch":"9.9.x","head":"x","embargo":false}\n' > "$G/.release-state.json"
+NOTES_COMMIT=$(git -C "$G" rev-parse HEAD)
+expect "release-abort undoes nothing when it cannot read the branch on origin" 1 "cannot read 9.9.x" env PATH="$W/failgit:$W/bin:$PATH" "${M[@]:2}" release-abort
+[ "$(git -C "$G" rev-parse HEAD)" = "$NOTES_COMMIT" ] && pass "and the notes commit stays" || fail "release-abort reset a commit it could not check"
+rm -f "$G/.release-state.json"
 git -C "$G" -c user.name=Test -c user.email=test@example.invalid -c commit.gpgsign=false commit -q --allow-empty -m "Add release notes for version 9.9.10"
 git -C "$G" push -q origin HEAD:refs/heads/main 2>/dev/null
 printf '{"currentVersion":"9.9.9","newVersion":"9.9.10","releaseType":"patch","branch":"main","head":"x","embargo":false}\n' > "$G/.release-state.json"

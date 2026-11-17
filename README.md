@@ -72,7 +72,7 @@ make release-finalize                          # commit the notes, tag locally, 
                                                # both registries, build and sign the
                                                # bundle once, upload it to GitHub
                                                # Packages and read every file back
-git push origin main && git push origin vX.Y.Z # only after the read-back succeeded
+git push origin <branch> && git push origin vX.Y.Z # main or 5.0.x; only after the read-back
 make release-github                            # the bundle on an immutable GitHub Release
 make publish-dry-run                           # the signed bundle, written to out/
 ```

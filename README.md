@@ -115,6 +115,9 @@ was tagged and will never be published is spent: the maintainer lists it in
 `release/spent-versions.txt`, its tag stays, the next version follows it, and `release-prepare`
 and the MiMa baseline look at the release before it instead.
 
+`release-finalize` and `release-github` check every signature against `keys/release-key.asc`
+alone, in a keyring of their own; the maintainer's own GnuPG keyring plays no part.
+
 A security fix (`EMBARGO=1`) is built and signed the same way. Its embargo is the tag that is
 not pushed yet: `main` and the tag stay on the maintainer's machine until the time set for the
 advisory, then go out in one sitting, followed by `make release-github`, `make publish-repo` and

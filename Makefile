@@ -199,14 +199,19 @@ FILES_OF = A=$${P\#\#*/}; FILES="$$A-$$VERSION.pom"; \
 
 # Needs DIR, a Maven tree. Every .asc in it verifies, made by the release key (gpg's VALIDSIG
 # names the primary key's fingerprint, whatever the locale), and there are exactly SIGNATURES.
+# gpgv checks against a keyring holding only RELEASE_KEY_FILE, in a temporary home: the
+# maintainer's own keyring may lack the key, or hold others, and must not decide a release.
 # A subshell, so the caller can say what follows a refusal. Called on the left of ||, where bash
 # ignores set -e: every step that can fail must exit 1 itself, as each one here does.
 SIGNATURE_CHECK = ( set -eo pipefail; N=0; \
+	H=$$(mktemp -d) || { echo "[signatures] cannot make a temporary keyring"; exit 1; }; trap 'rm -rf "$$H"' EXIT; \
+	gpg --homedir "$$H" --batch --no-tty --dearmor < "$(RELEASE_KEY_FILE)" > "$$H/release.gpg" 2>/dev/null || { \
+	  echo "[signatures] cannot read the release key from $(RELEASE_KEY_FILE)"; exit 1; }; \
 	ASCS=$$(find "$$DIR" -type f -name '*.asc' | LC_ALL=C sort); \
 	while IFS= read -r A; do \
 	  [ -n "$$A" ] || continue; \
-	  STATUS=$$(LC_ALL=C gpg --batch --no-tty --status-fd 1 --verify "$$A" "$${A%.asc}" 2>/dev/null) || { \
-	    echo "[signatures] $$A does not verify"; exit 1; }; \
+	  STATUS=$$(LC_ALL=C gpgv --homedir "$$H" --keyring "$$H/release.gpg" --status-fd 1 "$$A" "$${A%.asc}" 2>/dev/null) || { \
+	    echo "[signatures] $$A does not verify against the release key in $(RELEASE_KEY_FILE)"; exit 1; }; \
 	  if ! printf '%s\n' "$$STATUS" | grep -q '^\[GNUPG:\] GOODSIG ' || \
 	     printf '%s\n' "$$STATUS" | grep -qE '^\[GNUPG:\] (BADSIG|ERRSIG|EXPSIG|EXPKEYSIG|REVKEYSIG|KEYEXPIRED|KEYREVOKED)( |$$)'; then \
 	    echo "[signatures] $$A is not a good signature by a valid key (expired or revoked?)"; exit 1; fi; \

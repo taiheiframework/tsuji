@@ -38,11 +38,17 @@ private[tsuji] trait LanguagePlatform:
      * (`und`, which names no language, is refused). JVM only; on Scala.js read `language.tag`.
      * Java calls it as `Language.locale(language)`.
      *
+     * Each call makes a JDK Locale, and the JDK keeps the Locale objects it makes. Call it on the
+     * languages an application supports, not on every language a reader or a message may carry;
+     * this library's own formatting and naming never call it.
+     *
      * {{{
      * Language("nl-BE").locale                      // nl_BE
      * Language.fromLocale(Language("nl-BE").locale) // Right(nl-BE)
      * }}}
      */
     def locale: Locale = Locale.forLanguageTag(language.tag)
+
+  end extension
 
 end LanguagePlatform

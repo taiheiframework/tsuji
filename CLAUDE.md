@@ -12,7 +12,7 @@ come from the parent folder's `CLAUDE.md` when this repo is checked out under `~
 make validate          # repo-guard, release-test, scalafix, scalafmt, both checked as CI does, compile, test and MiMa
 make repo-guard        # Coursier's defaults (local Ivy, Central), then REPO_URL for dev.taihei alone;
                        # pins released; resolved dev.taihei files checked
-make mima              # against the newest 5.x tag, which must be on Central or REPO_URL
+make mima              # against the newest 6.x tag (release.majorLine), which must be on Central or REPO_URL
                        # (between a tag push and publish-repo it fails; MIMA_BASELINE=x.y.z)
 make test              # ./mill __.test.testForked (JS tests run under Node)
 make lint              # ./mill __.checkFormat, then __.fix --check: CI's lint steps

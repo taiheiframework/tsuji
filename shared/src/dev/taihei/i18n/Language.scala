@@ -30,6 +30,12 @@ final class Language private (val tag: String) extends Serializable:
     val primary = tag.takeWhile(_ != '-')
     if primary == tag then this else Language.fromCanonical(primary)
 
+  /**
+   * The language as a `java.util.Locale`. On the JVM each call makes a JDK Locale, and the JDK
+   * keeps the Locale objects it makes. Call it on the languages an application supports, not on
+   * every language a reader or a message may carry; this library's own formatting and naming never
+   * call it.
+   */
   def locale: Locale = Locale.forLanguageTag(tag)
 
   /**

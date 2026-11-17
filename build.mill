@@ -85,7 +85,15 @@ object release extends Module {
     if (r.exitCode != 0) sys.error(s"no MiMa baseline: ${r.err.text().trim()}")
   }
 
-  // The release MiMa compares with: the newest v-tag reachable from HEAD, none before
+  // Versions tagged and never published (release/spent-versions.txt, which the Makefile's
+  // release-prepare reads too): their tags stay, but nothing serves them, so none is a baseline.
+  private def spentVersions(root: os.Path): Set[String] = {
+    val file = root / "release" / "spent-versions.txt"
+    if (!os.exists(file)) Set.empty
+    else os.read.lines(file).map(_.takeWhile(_ != '#').filterNot(_.isWhitespace)).filter(_.nonEmpty).toSet
+  }
+
+  // The release MiMa compares with: the newest v-tag reachable from HEAD and not spent, none before
   // firstRelease or majorLine, whose version must be on Maven Central or on the family's
   // repository (repoUrl); MiMa resolves it through the same two. A tag on neither fails the build,
   // naming it: a pushed tag is final and is published by release-github and publish-repo within
@@ -117,11 +125,13 @@ object release extends Module {
         val listed = git("tag", "--merged", from, "--list", "v[0-9]*", "--sort=-v:refname")
         if (hasFrom && listed.exitCode != 0)
           sys.error(s"git tag --merged $from failed: ${listed.err.text().trim()}")
+        val spent      = spentVersions(root)
         val candidates = listed.out
           .lines()
           .map(_.trim.stripPrefix("v"))
           .filter(_.matches("[0-9]+\\.[0-9]+\\.[0-9]+"))
           .filter(v => atLeast(v, firstRelease) && atLeast(v, majorLine))
+          .filterNot(spent)
         candidates.headOption.map { v =>
           released(root, v)
           v

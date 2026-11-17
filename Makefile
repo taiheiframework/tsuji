@@ -63,6 +63,10 @@ SIGNATURES = 20
 # file instead, and sent them to Maven Central first; a file of that name may still name a version
 # under embargo, so every release step refuses while it exists (EMBARGO_GUARD).
 EMBARGO_FILE = $(CURDIR)/.release-embargo
+# Versions that were tagged and never published, and never will be (committed, one per line, #
+# starts a comment). The tag is final, so the next release follows it; release-prepare wants the
+# release before it published instead, and the MiMa baseline (build.mill) skips it the same way.
+override SPENT_FILE = $(CURDIR)/release/spent-versions.txt
 # Where publish-dry-run writes the bundle (Mill empties it before each run). A named bundle is in
 # its own subdirectory, <bundle name>/, in Maven layout: that tree is the release.
 DRY_RUN_DIR = $(CURDIR)/out/mill.javalib.SonatypeCentralPublishModule/publishAll.dest/repository
@@ -655,11 +659,16 @@ release-prepare:
 	CURRENT=$$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || echo "v0.0.0"); \
 	CURRENT=$${CURRENT#v}; \
 	echo "[OK] Current version: $$CURRENT"; \
-	if [ "$$CURRENT" != "0.0.0" ]; then \
-		if [ "$$(printf '%s\n' "$$CURRENT" "$(FIRST_RELEASE)" | sort -V | head -n1)" != "$(FIRST_RELEASE)" ]; then P="$(LEGACY_CENTRAL_PATH)"; \
+	PREVIOUS=$$CURRENT; \
+	while [ "$$PREVIOUS" != "0.0.0" ] && [ -f "$(SPENT_FILE)" ] && sed -e 's/#.*//' -e 's/[[:space:]]//g' "$(SPENT_FILE)" | grep -qxF "$$PREVIOUS"; do \
+		echo "[OK] v$$PREVIOUS is spent (release/spent-versions.txt): tagged, never published"; \
+		PREVIOUS=$$(git describe --tags --abbrev=0 --match 'v[0-9]*' "v$$PREVIOUS^" 2>/dev/null || echo "v0.0.0"); PREVIOUS=$${PREVIOUS#v}; \
+	done; \
+	if [ "$$PREVIOUS" != "0.0.0" ]; then \
+		if [ "$$(printf '%s\n' "$$PREVIOUS" "$(FIRST_RELEASE)" | sort -V | head -n1)" != "$(FIRST_RELEASE)" ]; then P="$(LEGACY_CENTRAL_PATH)"; \
 		else P="$(firstword $(CENTRAL_PATHS))"; fi; \
-		ON=$$(python3 -I -B scripts/release.py released --central "$(CENTRAL)" --url "$(REPO_URL)" --artifact "$${P##*/}" "$$CURRENT") || { \
-			echo "[ERROR] the release of v$$CURRENT has not finished: a release is prepared once the previous one is"; \
+		ON=$$(python3 -I -B scripts/release.py released --central "$(CENTRAL)" --url "$(REPO_URL)" --artifact "$${P##*/}" "$$PREVIOUS") || { \
+			echo "[ERROR] the release of v$$PREVIOUS has not finished: a release is prepared once the previous one is"; \
 			echo "        served by Maven Central (a version from before ADR 0009) or by $(REPO_URL)"; exit 1; }; \
 		echo "[OK] v$$ON"; \
 	fi; \
@@ -681,8 +690,8 @@ release-prepare:
 	echo "[INFO] Running validation..."; \
 	if [ "$(TYPE)" = "major" ]; then export MIMA_BASELINE=none; else \
 		BASELINE=$$(./mill show release.mimaBaseline | tr -d '\n "'); \
-		if [ "$$BASELINE" != "$$CURRENT" ]; then \
-			echo "[ERROR] MiMa baseline is '$$BASELINE', not v$$CURRENT: a $(TYPE) release must be checked against it"; exit 1; \
+		if [ "$$BASELINE" != "$$PREVIOUS" ]; then \
+			echo "[ERROR] MiMa baseline is '$$BASELINE', not v$$PREVIOUS: a $(TYPE) release must be checked against it"; exit 1; \
 		fi; \
 		echo "[OK] MiMa baseline: $$BASELINE"; \
 	fi; \

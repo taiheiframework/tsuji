@@ -13,7 +13,8 @@ make validate          # repo-guard, release-test, scalafix, scalafmt, both chec
 make repo-guard        # Coursier's defaults (local Ivy, Central), then REPO_URL for dev.taihei alone;
                        # pins released; resolved dev.taihei files checked
 make mima              # against the newest 6.x tag (release.majorLine), which must be on Central or REPO_URL
-                       # (between a tag push and publish-repo it fails; MIMA_BASELINE=x.y.z)
+                       # (between a tag push and publish-repo it fails; MIMA_BASELINE=x.y.z);
+                       # a version in release/spent-versions.txt (tagged, never published) is skipped
 make test              # ./mill __.test.testForked (JS tests run under Node)
 make lint              # ./mill __.checkFormat, then __.fix --check: CI's lint steps
 TAIHEI_TEST_JAVA_HOME=<a JDK 17> ./mill tsuji.jvm.test.testForked   # the JVM tests on Java 17

@@ -658,6 +658,24 @@ rm -rf "$S/central/dev/taihei/$FIRST"; mv "$W/site-pom" "$SITEPOM"
 OUT=$("${M[@]}" release-prepare TYPE=patch EMBARGO=0 TICKET=TAIHEI-1 "REPO_URL=$BASE/moved/" 2>&1)
 grep -qF "HTTP 301" <<< "$OUT" && grep -qF "has not finished" <<< "$OUT" \
   && pass "release-prepare follows no redirect" || fail "release-prepare and a redirect: $(tail -n 3 <<< "$OUT" | tr '\n' ';')"
+# A spent version: tagged, never published. Until release/spent-versions.txt names it, it is a
+# previous release that has not finished; then release-prepare checks the release before it, and
+# the next version follows the spent tag.
+SPENT_BASE=$(git -C "$G" rev-parse HEAD)
+git -C "$G" -c user.name=Test -c user.email=test@example.invalid -c commit.gpgsign=false commit -q --allow-empty -m spent
+git -C "$G" -c user.name=Test -c user.email=test@example.invalid -c tag.gpgsign=false tag -a v9.9.10 -m spent
+OUT=$(prepare)
+grep -qF "the release of v9.9.10 has not finished" <<< "$OUT" && ! grep -qF "Cleaning build cache" <<< "$OUT" \
+  && pass "release-prepare refuses a previous version that nothing serves" || fail "release-prepare and an unpublished tag: $(tail -n 3 <<< "$OUT" | tr '\n' ';')"
+mkdir -p "$G/release"; printf '# spent\n 9.9.10  # never published\n' > "$G/release/spent-versions.txt"
+git -C "$G" add release/spent-versions.txt
+git -C "$G" -c user.name=Test -c user.email=test@example.invalid -c commit.gpgsign=false commit -q -m "spent list"
+OUT=$(prepare)
+grep -qF "v9.9.10 is spent" <<< "$OUT" && grep -qF "[OK] v$V is on $SITE" <<< "$OUT" && grep -qF "[OK] New version: 9.9.11" <<< "$OUT" \
+  && grep -qF "Cleaning build cache" <<< "$OUT" \
+  && pass "release-prepare skips a spent version to the release before it, and follows its tag" \
+  || fail "release-prepare and a spent version: $(tail -n 3 <<< "$OUT" | tr '\n' ';')"
+git -C "$G" tag -d v9.9.10 >/dev/null; git -C "$G" reset -q --hard "$SPENT_BASE"
 git -C "$G" checkout -q --detach
 expect "release-prepare refuses a HEAD on no branch, which it could not record" 1 "HEAD is on '': a release is prepared on main or a maintenance branch" "${M[@]}" release-prepare TYPE=patch EMBARGO=0 TICKET=TAIHEI-1
 git -C "$G" checkout -q -b feature

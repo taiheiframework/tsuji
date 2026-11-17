@@ -110,7 +110,10 @@ make publish-dry-run                           # the signed bundle, written to o
 ```
 
 `release-prepare` refuses while the previous release has not finished: the family's Maven
-repository must serve it, or, for a version from before ADR 0009, Maven Central.
+repository must serve it, or, for a version from before ADR 0009, Maven Central. A version that
+was tagged and will never be published is spent: the maintainer lists it in
+`release/spent-versions.txt`, its tag stays, the next version follows it, and `release-prepare`
+and the MiMa baseline look at the release before it instead.
 
 A security fix (`EMBARGO=1`) is built and signed the same way. Its embargo is the tag that is
 not pushed yet: `main` and the tag stay on the maintainer's machine until the time set for the

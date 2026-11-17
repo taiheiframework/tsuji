@@ -131,7 +131,10 @@ make release-finalize                          # repo-guard, commit the notes un
                                                # release's issue key, tag locally, check
                                                # Central, REPO_URL and GitHub, build and
                                                # sign the bundle once; uploads nothing
-git push origin main && git push origin vX.Y.Z # from here on the version is final
+git push origin <branch> && git push origin vX.Y.Z
+                                               # the branch release-prepare ran on, main
+                                               # or a maintenance branch such as 6.0.x;
+                                               # from here on the version is final
 make release-github                            # publishes it: the bundle on an immutable
                                                # GitHub Release, read back and compared
 make publish-repo                              # the repository's deploy, then every file

@@ -17,7 +17,7 @@ LEGACY_CENTRAL_PATH = dev/taihei/taihei-i18n_3
 
 # One signed bundle (ADR 0004). release-finalize builds and signs the bundle once and keeps it in
 # BUNDLES (gitignored, outside out/ so a mill clean cannot remove it) with its ledger SHA256SUMS
-# and a deterministic zip; it uploads nothing. Once main and the tag are pushed, release-github
+# and a deterministic zip; it uploads nothing. Once the branch and the tag are pushed, release-github
 # keeps the zip and SHA256SUMS on an immutable GitHub Release of the tag, which publishes the
 # version. The family's Maven repository (REPO_URL) is built from those releases alone, and
 # publish-repo starts its deploy and reads every file back. This is the interim route of ADR 0009,
@@ -58,7 +58,7 @@ RELEASE_KEY = 5026B2996DDB697EC4630BCF14A733E2A507702F
 RELEASE_KEY_FILE = $(CURDIR)/keys/release-key.asc
 SIGNATURES = 20
 # A security fix under embargo is built and signed like any release, and its embargo is the tag
-# that is not pushed yet (ADR 0009, section 10): main and the tag stay on the maintainer's machine
+# that is not pushed yet (ADR 0009, section 10): the branch and the tag stay on the maintainer's machine
 # until the time set for the advisory. The earlier machinery listed embargoed versions in this
 # file instead, and sent them to Maven Central first; a file of that name may still name a version
 # under embargo, so every release step refuses while it exists (EMBARGO_GUARD).
@@ -152,6 +152,12 @@ RELEASE_STATE = $(CURDIR)/.release-state.json
 # and renamed into place, so a planted symlink is replaced instead of followed.
 STATE_GUARD = if [ -L "$(RELEASE_STATE)" ] || git ls-files --error-unmatch "$(RELEASE_STATE)" >/dev/null 2>&1; then \
 	echo "[ERROR] $(RELEASE_STATE) is tracked or a symlink: refusing to use it"; exit 1; fi
+
+# The branch release-prepare recorded: main, or the maintenance branch (such as 6.0.x) a patch is
+# released from. Its push carries the release commit to GitHub, so release-github and release-abort
+# look for that commit there, never on main alone. Sets BRANCH.
+STATE_BRANCH = BRANCH=$$(python3 -I -B -c 'import json, re, sys; b = json.load(open(sys.argv[1])).get("branch"); print(b) if isinstance(b, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", b) else sys.exit(1)' "$(RELEASE_STATE)" 2>/dev/null) || { \
+	echo "[ERROR] no release state in $(RELEASE_STATE) that names the release's branch: release-prepare writes it"; exit 1; }
 
 # The release at HEAD: an exact v-tag on a tree without tracked changes, read from git alone, so
 # the publishing steps never start Mill. Sets VERSION and B, the bundle's directory.
@@ -438,7 +444,7 @@ release-preflight:
 # ---------------------------------------------------------------------------
 # The release (ADR 0004, the interim route of ADR 0009 section 11): one signed bundle, kept on an
 # immutable GitHub Release, from which the family's repository serves it. release-finalize runs
-# release-bundle; release-github runs once main and the tag are pushed, then publish-repo, which
+# release-bundle; release-github runs once the branch and the tag are pushed, then publish-repo, which
 # runs verify-repo.
 # ---------------------------------------------------------------------------
 
@@ -488,9 +494,10 @@ release-github:
 	  echo "[release-github] $$NOTES is not a committed file"; exit 1; fi; \
 	REMOTE_TAG=$$(git ls-remote "$(GITHUB_GIT)" "refs/tags/v$$VERSION^{}" | cut -f1) || { echo "[release-github] cannot read the tags of $(GITHUB_REPO)"; exit 1; }; \
 	if [ "$$REMOTE_TAG" != "$$(git rev-parse "v$$VERSION^{commit}")" ]; then \
-	  echo "[release-github] v$$VERSION on $(GITHUB_REPO) is not the local tag: push main and the tag first"; exit 1; fi; \
-	git fetch -q "$(GITHUB_GIT)" main 2>/dev/null || { echo "[release-github] main is not on $(GITHUB_REPO): push main first"; exit 1; }; \
-	if ! git merge-base --is-ancestor HEAD FETCH_HEAD; then echo "[release-github] main on $(GITHUB_REPO) does not hold the release commit: push main first"; exit 1; fi; \
+	  echo "[release-github] v$$VERSION on $(GITHUB_REPO) is not the local tag: push the branch and the tag first"; exit 1; fi; \
+	$(STATE_GUARD); $(STATE_BRANCH); \
+	git fetch -q "$(GITHUB_GIT)" "refs/heads/$$BRANCH" 2>/dev/null || { echo "[release-github] $$BRANCH is not on $(GITHUB_REPO): push $$BRANCH first"; exit 1; }; \
+	if ! git merge-base --is-ancestor HEAD FETCH_HEAD; then echo "[release-github] $$BRANCH on $(GITHUB_REPO) does not hold the release commit: push $$BRANCH first"; exit 1; fi; \
 	$(RELEASE_ABSENT); \
 	T=$$(mktemp -d "$$B/.release.XXXXXX"); trap 'rm -rf "$$T"' EXIT; \
 	{ cat "$$NOTES"; printf '\n## The signed bundle\n\n'; \
@@ -598,18 +605,18 @@ verify-repo:
 #        (review RELEASE_x_y_z.md)
 #        make release-finalize   (repo-guard, notes commit, local tag, preflight, the signed bundle
 #                                 and its checks; nothing is uploaded)
-#        git push origin main && git push origin vX.Y.Z   (or both in one push)
+#        git push origin <branch> && git push origin vX.Y.Z   (the branch release-prepare ran on)
 #        make release-github     (the bundle on an immutable GitHub Release: the version is public)
 #        make publish-repo       (the site's deploy, then verify-repo reads every file back)
 #
 # Only the maintainer runs these, at his terminal: this is the interim route of ADR 0009,
 # section 11, until the family's release workflow takes it over.
 # Credentials never go on make's command line: they come from $(RELEASE_ENV) or the environment.
-# Until main and the tag are pushed nothing has left the machine: make release-abort, fix the
+# Until the branch and the tag are pushed nothing has left the machine: make release-abort, fix the
 # cause, then release-prepare the same version again. From the push of its tag the version is
 # final, and from its GitHub Release it is public. It does not go to Maven Central (ADR 0009).
 # A security fix (EMBARGO=1) is built and signed the same way; its embargo is the tag that is not
-# pushed yet (ADR 0009, section 10). Main and the tag stay on this machine until the time set for
+# pushed yet (ADR 0009, section 10). The branch and the tag stay on this machine until the time set for
 # the advisory, and its release notes say no more than that it is a security fix.
 # ---------------------------------------------------------------------------
 
@@ -638,6 +645,7 @@ release-prepare:
 		echo "[ERROR] Uncommitted changes:"; git status --short | grep -v '^??'; exit 1; \
 	fi; \
 	BRANCH=$$(git branch --show-current); \
+	if [ -z "$$BRANCH" ]; then echo "[ERROR] HEAD is on no branch: a release is prepared on main or a maintenance branch"; exit 1; fi; \
 	if [ "$$BRANCH" != "main" ]; then echo "[WARN] Not on main branch ($$BRANCH)"; fi; \
 	git fetch --tags; \
 	CURRENT=$$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || echo "v0.0.0"); \
@@ -689,7 +697,7 @@ release-prepare:
 	SECRECY=""; \
 	if [ "$(EMBARGO)" = 1 ]; then \
 		SECRECY="- This release fixes a vulnerability whose advisory is not published yet: say only that it is a security fix and that its advisory gives the details. Name no file, type, function, input or behaviour of the vulnerability or of its fix, in any section"; \
-		echo "[OK] $$NEW is under embargo: main and its tag stay on this machine until the time set for the advisory"; \
+		echo "[OK] $$NEW is under embargo: $$BRANCH and its tag stay on this machine until the time set for the advisory"; \
 	fi; \
 	NT=$$(mktemp "$(CURDIR)/.release-notes.XXXXXX"); trap 'rm -f "$$NT"' EXIT; \
 	if command -v claude >/dev/null 2>&1; then \
@@ -796,6 +804,7 @@ release-finalize:
 		echo "[ERROR] the release state does not say embargo true or false (prepared before this machinery?): make release-abort, then release-prepare again"; exit 1; }; \
 	TICKET=$$(python3 -I -B -c 'import json, re, sys; t = json.load(open(sys.argv[1])).get("ticket"); print(t) if isinstance(t, str) and re.fullmatch(r"[A-Z][A-Z0-9]*-[0-9]+", t) else sys.exit(1)' "$(RELEASE_STATE)") || { \
 		echo "[ERROR] the release state names no ticket (prepared before this machinery?): make release-abort, then release-prepare again"; exit 1; }; \
+	$(STATE_BRANCH); \
 	$(EMBARGO_GUARD); \
 	if [ "$$PREPARED" != "$$(git rev-parse HEAD)" ]; then \
 		echo "[ERROR] HEAD is not the commit release-prepare validated ($${PREPARED:-none recorded}): make release-abort, then release-prepare again"; exit 1; \
@@ -841,14 +850,14 @@ release-finalize:
 	if [ "$$EMBARGOED" = yes ]; then \
 		echo "RELEASE v$$NEW BUILT AND SIGNED, UNDER EMBARGO, NOTHING UPLOADED (tag local)"; \
 		echo "=============================================="; \
-		echo "The embargo is the tag that is not pushed: keep main and v$$NEW on this machine until the time set for"; \
+		echo "The embargo is the tag that is not pushed: keep $$BRANCH and v$$NEW on this machine until the time set for"; \
 		echo "the advisory. Until the tag is pushed, make release-abort undoes it. Then, in one sitting:"; \
 	else \
 		echo "RELEASE v$$NEW BUILT AND SIGNED, NOTHING UPLOADED (tag local)"; \
 		echo "=============================================="; \
 		echo "Until the tag is pushed, make release-abort undoes it. From the push on the version is final:"; \
 	fi; \
-	echo "  git push origin main && git push origin v$$NEW"; \
+	echo "  git push origin $$BRANCH && git push origin v$$NEW"; \
 	echo "  make release-github   (publishes it: the immutable GitHub Release)"; \
 	echo "  make publish-repo     (the site's deploy, and the read-back of every file)"; \
 	if [ "$$EMBARGOED" = yes ]; then echo "  and publish the advisory once publish-repo has read every file back"; fi
@@ -870,17 +879,18 @@ release-abort:
 			echo "        otherwise the CTO and the CISO decide what follows, normally the next patch version."; exit 1; \
 		fi; \
 		if [ "$$(git log -1 --pretty=%s)" = "$$SUBJECT" ]; then \
-			MAIN=$$(git ls-remote "$(GITHUB_GIT)" refs/heads/main | cut -f1) || { \
-				echo "[ERROR] cannot read main on $(GITHUB_REPO), so cannot tell whether the notes commit is pushed: nothing was undone"; exit 1; }; \
-			if [ -n "$$MAIN" ]; then \
-				git cat-file -e "$$MAIN^{commit}" 2>/dev/null || git fetch -q "$(GITHUB_GIT)" main || { \
-					echo "[ERROR] cannot fetch main from $(GITHUB_REPO), so cannot tell whether the notes commit is pushed: nothing was undone"; exit 1; }; \
-				RC=0; git merge-base --is-ancestor HEAD "$$MAIN" || RC=$$?; \
+			$(STATE_BRANCH); \
+			PUSHED=$$(git ls-remote "$(GITHUB_GIT)" "refs/heads/$$BRANCH" | cut -f1) || { \
+				echo "[ERROR] cannot read $$BRANCH on $(GITHUB_REPO), so cannot tell whether the notes commit is pushed: nothing was undone"; exit 1; }; \
+			if [ -n "$$PUSHED" ]; then \
+				git cat-file -e "$$PUSHED^{commit}" 2>/dev/null || git fetch -q "$(GITHUB_GIT)" "refs/heads/$$BRANCH" || { \
+					echo "[ERROR] cannot fetch $$BRANCH from $(GITHUB_REPO), so cannot tell whether the notes commit is pushed: nothing was undone"; exit 1; }; \
+				RC=0; git merge-base --is-ancestor HEAD "$$PUSHED" || RC=$$?; \
 				if [ "$$RC" = 0 ]; then \
-					echo "[ERROR] main on $(GITHUB_REPO) holds the notes commit of v$$NEW: undoing it would need a force push. Nothing was undone."; \
+					echo "[ERROR] $$BRANCH on $(GITHUB_REPO) holds the notes commit of v$$NEW: undoing it would need a force push. Nothing was undone."; \
 					echo "        Push the tag (git push origin v$$NEW), then make release-github, or bring it to the CTO."; exit 1; \
 				elif [ "$$RC" != 1 ]; then \
-					echo "[ERROR] cannot tell whether main on $(GITHUB_REPO) holds the notes commit of v$$NEW: nothing was undone"; exit 1; \
+					echo "[ERROR] cannot tell whether $$BRANCH on $(GITHUB_REPO) holds the notes commit of v$$NEW: nothing was undone"; exit 1; \
 				fi; \
 			fi; \
 		fi; \

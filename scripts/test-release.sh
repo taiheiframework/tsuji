@@ -443,7 +443,7 @@ echo "stand-in gh: unexpected \$*" >&2; exit 1
 EOF
 chmod +x "$W/bin/gh"
 
-git -C "$G" init -q; git -C "$G" add -A
+git -C "$G" init -q; git -C "$G" symbolic-ref HEAD refs/heads/main; git -C "$G" add -A
 git -C "$G" -c user.name=Test -c user.email=test@example.invalid -c commit.gpgsign=false commit -qm test
 git -C "$G" -c user.name=Test -c user.email=test@example.invalid -c tag.gpgsign=false tag -a "v$V" -m test
 git init -q --bare "$W/origin.git"; git -C "$G" remote add origin "$W/origin.git"
@@ -567,7 +567,11 @@ git -C "$G" push -q origin "refs/tags/v$V" 2>/dev/null
 gh_reset
 # The release commit must be on the branch release-prepare recorded, here a maintenance branch
 # 9.9.x, which main never holds (main takes no merge commits). Main is not on origin at all.
-expect "release-github refuses without a release state that names the branch" 1 "names the release's branch" "${M[@]}" release-github
+expect "release-github refuses without a release state that names the branch" 1 "that names its branch" "${M[@]}" release-github
+printf '{"currentVersion":"0.0.0","newVersion":"9.9.8","releaseType":"patch","branch":"9.9.x","head":"x","embargo":false}\n' > "$G/.release-state.json"
+expect "release-github refuses a release state of another version" 1 "no release state for v$V" "${M[@]}" release-github
+printf '{"currentVersion":"0.0.0","newVersion":"%s","releaseType":"patch","branch":"feature","head":"x","embargo":false}\n' "$V" > "$G/.release-state.json"
+expect "release-github refuses a branch that is neither main nor a maintenance branch" 1 "that names its branch" "${M[@]}" release-github
 printf '{"currentVersion":"0.0.0","newVersion":"%s","releaseType":"patch","branch":"9.9.x","head":"x","embargo":false}\n' "$V" > "$G/.release-state.json"
 expect "release-github refuses while the recorded branch is not on GitHub" 1 "9.9.x is not on taiheiframework/" "${M[@]}" release-github
 OTHER=$(git -C "$G" -c user.name=Test -c user.email=test@example.invalid -c commit.gpgsign=false commit-tree "$(git -C "$G" hash-object -w -t tree /dev/null)" -m other)
@@ -655,8 +659,10 @@ OUT=$("${M[@]}" release-prepare TYPE=patch EMBARGO=0 TICKET=TAIHEI-1 "REPO_URL=$
 grep -qF "HTTP 301" <<< "$OUT" && grep -qF "has not finished" <<< "$OUT" \
   && pass "release-prepare follows no redirect" || fail "release-prepare and a redirect: $(tail -n 3 <<< "$OUT" | tr '\n' ';')"
 git -C "$G" checkout -q --detach
-expect "release-prepare refuses a HEAD on no branch, which it could not record" 1 "HEAD is on no branch" "${M[@]}" release-prepare TYPE=patch EMBARGO=0 TICKET=TAIHEI-1
-git -C "$G" checkout -q -
+expect "release-prepare refuses a HEAD on no branch, which it could not record" 1 "HEAD is on '': a release is prepared on main or a maintenance branch" "${M[@]}" release-prepare TYPE=patch EMBARGO=0 TICKET=TAIHEI-1
+git -C "$G" checkout -q -b feature
+expect "release-prepare refuses a branch that is neither main nor a maintenance branch" 1 "HEAD is on 'feature'" "${M[@]}" release-prepare TYPE=patch EMBARGO=0 TICKET=TAIHEI-1
+git -C "$G" checkout -q main; git -C "$G" branch -q -D feature
 [ ! -e "$G/.release-state.json" ] && [ -z "$(git -C "$G" status --porcelain --untracked-files=no)" ] \
   && pass "and a refused release-prepare leaves no release state and no change" || fail "release-prepare left a state or a change"
 
@@ -736,7 +742,7 @@ printf '{"currentVersion":"%s","newVersion":"9.9.10","releaseType":"patch","bran
 expect "release-finalize refuses a release state that names no ticket" 1 "names no ticket" "${M[@]}" release-finalize
 # The branch it tells the maintainer to push comes from the state, so a state without one stops it.
 printf '{"currentVersion":"%s","newVersion":"9.9.10","releaseType":"patch","branch":"","head":"%s","embargo":false,"ticket":"TAIHEI-7"}\n' "$V" "$HEAD_BEFORE" > "$G/.release-state.json"
-expect "release-finalize refuses a release state that names no branch" 1 "names the release's branch" "${M[@]}" release-finalize
+expect "release-finalize refuses a release state that names no branch" 1 "that names its branch" "${M[@]}" release-finalize
 [ "$(git -C "$G" rev-parse HEAD)" = "$HEAD_BEFORE" ] && pass "and commits nothing" || fail "release-finalize committed without a branch"
 printf '{"currentVersion":"%s","newVersion":"9.9.10","releaseType":"patch","branch":"main","head":"%s","embargo":false}\n' "$V" "$HEAD_BEFORE" > "$G/.release-state.json"
 # release-abort still recognises a notes commit the earlier machinery wrote, under a state without
@@ -768,6 +774,16 @@ printf '{"currentVersion":"9.9.9","newVersion":"9.9.10","releaseType":"patch","b
 NOTES_COMMIT=$(git -C "$G" rev-parse HEAD)
 expect "release-abort undoes no notes commit that is on origin's 9.9.x" 1 "holds the notes commit of v9.9.10" "${M[@]}" release-abort
 [ "$(git -C "$G" rev-parse HEAD)" = "$NOTES_COMMIT" ] && pass "and the notes commit stays on the maintenance branch" || fail "release-abort reset a commit pushed on 9.9.x"
+rm -f "$G/.release-state.json"
+# When GitHub cannot be asked about the branch, release-abort cannot tell, and undoes nothing. A git
+# whose ls-remote of a branch fails stands in; a pipe into cut must not hide that failure.
+mkdir -p "$W/failgit"; REALGIT=$(command -v git)
+printf '#!/usr/bin/env bash\ncase " $* " in *" ls-remote "*refs/heads/*) exit 128;; esac\nexec "%s" "$@"\n' "$REALGIT" > "$W/failgit/git"; chmod +x "$W/failgit/git"
+git -C "$G" commit -q --allow-empty -m "TAIHEI-7: add the release notes of 9.9.10"
+printf '{"currentVersion":"9.9.9","newVersion":"9.9.10","releaseType":"patch","branch":"9.9.x","head":"x","embargo":false,"ticket":"TAIHEI-7"}\n' > "$G/.release-state.json"
+NOTES_COMMIT=$(git -C "$G" rev-parse HEAD)
+expect "release-abort undoes nothing when it cannot read the branch on origin" 1 "cannot read 9.9.x" env PATH="$W/failgit:$W/bin:$PATH" "${M[@]:2}" release-abort
+[ "$(git -C "$G" rev-parse HEAD)" = "$NOTES_COMMIT" ] && pass "and the notes commit stays" || fail "release-abort reset a commit it could not check"
 rm -f "$G/.release-state.json"
 git -C "$G" commit -q --allow-empty -m "TAIHEI-7: add the release notes of 9.9.10"
 git -C "$G" push -q origin HEAD:refs/heads/main 2>/dev/null

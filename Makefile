@@ -153,11 +153,14 @@ RELEASE_STATE = $(CURDIR)/.release-state.json
 STATE_GUARD = if [ -L "$(RELEASE_STATE)" ] || git ls-files --error-unmatch "$(RELEASE_STATE)" >/dev/null 2>&1; then \
 	echo "[ERROR] $(RELEASE_STATE) is tracked or a symlink: refusing to use it"; exit 1; fi
 
-# The branch release-prepare recorded: main, or the maintenance branch (such as 6.0.x) a patch is
-# released from. Its push carries the release commit to GitHub, so release-github and release-abort
-# look for that commit there, never on main alone. Sets BRANCH.
-STATE_BRANCH = BRANCH=$$(python3 -I -B -c 'import json, re, sys; b = json.load(open(sys.argv[1])).get("branch"); print(b) if isinstance(b, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", b) else sys.exit(1)' "$(RELEASE_STATE)" 2>/dev/null) || { \
-	echo "[ERROR] no release state in $(RELEASE_STATE) that names the release's branch: release-prepare writes it"; exit 1; }
+# A release is made from main or from a maintenance branch <major>.<minor>.x (such as 6.0.x).
+RELEASE_BRANCH = main|[0-9]+\.[0-9]+\.x
+
+# Needs NEW. The branch release-prepare recorded for v$$NEW. Its push carries the release commit to
+# GitHub, so release-github and release-abort look for that commit there, never on main alone, and
+# release-finalize tells the maintainer to push it. Sets BRANCH.
+STATE_BRANCH = BRANCH=$$(python3 -I -B -c 'import json, re, sys; s = json.load(open(sys.argv[1])); b = s.get("branch"); print(b) if s.get("newVersion") == sys.argv[2] and isinstance(b, str) and re.fullmatch(sys.argv[3], b) else sys.exit(1)' "$(RELEASE_STATE)" "$$NEW" '$(RELEASE_BRANCH)' 2>/dev/null) || { \
+	echo "[ERROR] no release state for v$$NEW in $(RELEASE_STATE) that names its branch, main or <major>.<minor>.x: release-prepare writes it"; exit 1; }
 
 # The release at HEAD: an exact v-tag on a tree without tracked changes, read from git alone, so
 # the publishing steps never start Mill. Sets VERSION and B, the bundle's directory.
@@ -495,7 +498,7 @@ release-github:
 	REMOTE_TAG=$$(git ls-remote "$(GITHUB_GIT)" "refs/tags/v$$VERSION^{}" | cut -f1) || { echo "[release-github] cannot read the tags of $(GITHUB_REPO)"; exit 1; }; \
 	if [ "$$REMOTE_TAG" != "$$(git rev-parse "v$$VERSION^{commit}")" ]; then \
 	  echo "[release-github] v$$VERSION on $(GITHUB_REPO) is not the local tag: push the branch and the tag first"; exit 1; fi; \
-	$(STATE_GUARD); $(STATE_BRANCH); \
+	$(STATE_GUARD); NEW=$$VERSION; $(STATE_BRANCH); \
 	git fetch -q "$(GITHUB_GIT)" "refs/heads/$$BRANCH" 2>/dev/null || { echo "[release-github] $$BRANCH is not on $(GITHUB_REPO): push $$BRANCH first"; exit 1; }; \
 	if ! git merge-base --is-ancestor HEAD FETCH_HEAD; then echo "[release-github] $$BRANCH on $(GITHUB_REPO) does not hold the release commit: push $$BRANCH first"; exit 1; fi; \
 	$(RELEASE_ABSENT); \
@@ -645,7 +648,8 @@ release-prepare:
 		echo "[ERROR] Uncommitted changes:"; git status --short | grep -v '^??'; exit 1; \
 	fi; \
 	BRANCH=$$(git branch --show-current); \
-	if [ -z "$$BRANCH" ]; then echo "[ERROR] HEAD is on no branch: a release is prepared on main or a maintenance branch"; exit 1; fi; \
+	if ! [[ "$$BRANCH" =~ ^($(RELEASE_BRANCH))$$ ]]; then \
+		echo "[ERROR] HEAD is on '$$BRANCH': a release is prepared on main or a maintenance branch <major>.<minor>.x"; exit 1; fi; \
 	if [ "$$BRANCH" != "main" ]; then echo "[WARN] Not on main branch ($$BRANCH)"; fi; \
 	git fetch --tags; \
 	CURRENT=$$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || echo "v0.0.0"); \
@@ -863,7 +867,7 @@ release-finalize:
 	if [ "$$EMBARGOED" = yes ]; then echo "  and publish the advisory once publish-repo has read every file back"; fi
 
 release-abort:
-	@set -e; \
+	@set -eo pipefail; \
 	if [ -f $(RELEASE_STATE) ]; then \
 		$(STATE_GUARD); \
 		NEW=$$(python3 -I -B -c 'import json, sys; print(json.load(open(sys.argv[1]))["newVersion"])' "$(RELEASE_STATE)"); \

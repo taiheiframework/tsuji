@@ -529,11 +529,21 @@ use_bundle() { rm -rf "$B"; R bundle --source "$1" --dest "$B" --group $GROUP --
 cp -r "$SRC" "$W/u1"; J1=$(first_jar "$W/u1"); printf -- '-----BEGIN PGP SIGNATURE-----\nnot one\n-----END PGP SIGNATURE-----\n' > "$J1.asc"
 use_bundle "$W/u1"; expect "release-github refuses a signature that does not verify" 1 "does not verify" "${M[@]}" release-github
 cp -r "$SRC" "$W/u2"; J2=$(first_jar "$W/u2"); sign "$OTHER" "$J2"
-use_bundle "$W/u2"; expect "release-github refuses a file signed by another key" 1 "not signed by the release key" "${M[@]}" release-github
+use_bundle "$W/u2"; expect "release-github refuses a file signed by another key" 1 "does not verify against the release key" "${M[@]}" release-github
 cp -r "$SRC" "$W/u3"; J3=$(first_jar "$W/u3"); printf x >> "$J3"; rehash "$J3"
 use_bundle "$W/u3"; expect "release-github refuses a file changed after it was signed" 1 "does not verify" "${M[@]}" release-github
 use_bundle "$SRC"
 expect "release-github refuses another number of signatures" 1 "not 9" "${M[@]}" release-github SIGNATURES=9
+# The check reads the release key from RELEASE_KEY_FILE alone, never the maintainer's keyring: an
+# empty default keyring still counts every signature, and another key file verifies none.
+mkdir -m 700 "$W/no-keys"
+expect "the signatures verify without the release key in the default keyring" 1 "signatures by the release key, not 9" \
+  env GNUPGHOME="$W/no-keys" "${M[@]}" release-github SIGNATURES=9
+gpg --batch --quiet --armor --export "$OTHER" > "$W/other-key.asc" 2>/dev/null
+M_OTHER=("${M[@]/#RELEASE_KEY_FILE=*/RELEASE_KEY_FILE=$W/other-key.asc}")
+expect "and they verify against the key file only, not against the default keyring" 1 "does not verify against the release key" "${M_OTHER[@]}" release-github
+M_NONE=("${M[@]/#RELEASE_KEY_FILE=*/RELEASE_KEY_FILE=$W/no-such-key.asc}")
+expect "a missing key file is refused" 1 "cannot read the release key" "${M_NONE[@]}" release-github
 
 echo "$V" > "$G/.release-embargo"
 expect "release-github refuses a version under embargo" 1 "under embargo" "${M[@]}" release-github
@@ -668,7 +678,7 @@ diff <(cd "$SRC" && find . -type f -name '*.asc' | sort | xargs sha256sum) <(cd 
   && pass "central-bundle keeps Central's signature bytes" || fail "central-bundle's signatures differ from Central's"
 expect "central-bundle builds a bundle once" 1 "built once" "${M[@]}" central-bundle
 rm -rf "$B"; CJ=$(first_jar "$S/central/dev"); cp "$CJ.asc" "$W/central.asc"; sign "$OTHER" "$CJ"
-expect "central-bundle refuses a file on Central signed by another key" 1 "not signed by the release key" "${M[@]}" central-bundle
+expect "central-bundle refuses a file on Central signed by another key" 1 "does not verify against the release key" "${M[@]}" central-bundle
 cp "$W/central.asc" "$CJ.asc"; rm -rf "$B.partial" "$B.download"
 "${M[@]}" central-bundle >/dev/null 2>&1
 rm -rf "$B"; DRY="$G/out/mill.javalib.SonatypeCentralPublishModule/publishAll.dest/repository/$PREFIX-$V"

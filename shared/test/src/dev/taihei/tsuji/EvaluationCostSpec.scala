@@ -168,6 +168,15 @@ object EvaluationCostSpec extends ZIOSpecDefault:
         evaluationsUntilSpent(parsed, 1000) == (Budget.PerMessage / (1 + 1 + 10 + 8000)).toInt,
       )
     },
+    // A key is read whole to see whether it names a number, so it costs its length: a key of
+    // 20000 digits leaves a budget for at most 200 evaluations, not the cap of 1000.
+    test("a key tried costs its length") {
+      val parsed = MessageFormat2.parse(".match {1 :plural}\nwhen =" + "9" * 20000 + " {x}\nwhen * {y}").message
+      assertTrue(
+        MessageFormat2.formatIn(".match {1 :plural}\nwhen =99 {x}\nwhen * {y}") == "y",
+        evaluationsUntilSpent(parsed, 1000) <= (Budget.PerMessage / 20000).toInt,
+      )
+    },
     test("a variant with fewer keys than selectors is passed over") {
       val template = ".match {$a} {$b}\nwhen x {one key}\nwhen x y {both}\nwhen * * {other}"
       assertTrue(
@@ -175,8 +184,8 @@ object EvaluationCostSpec extends ZIOSpecDefault:
         MessageFormat2.formatIn(template, Map("a" -> "x", "b" -> "z")) == "other",
       )
     },
-    // A plural selector's language is worked out once, not once per `one` variant, and from at
-    // most the first 64 characters of the locale.
+    // The shape of TAIHEI-208: a plural selector tried against 20000 `one` variants under a locale
+    // of a million letters stays within its bound.
     test("twenty thousand `one` variants with a locale of a million letters") {
       val parsed = MessageFormat2
         .parse(".match {$n :plural}\n" + "when one {one}\n" * 20000 + "when * {other}")

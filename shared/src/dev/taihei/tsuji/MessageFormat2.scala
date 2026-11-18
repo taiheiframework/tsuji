@@ -1025,7 +1025,8 @@ object MessageFormat2:
   private val FormatCost = 32
 
   // What a step of an evaluation costs that writes nothing: a declaration, a placeholder, a
-  // selector, a key tried. With them, how long one message can take depends on its budget and
+  // selector, a variant tried, a key tried (which also pays for its length). With them, how long
+  // one message can take depends on its budget and
   // not on how a template from a catalogue spends its 64K characters.
   private val Step = 1
 
@@ -1205,8 +1206,8 @@ object MessageFormat2:
     out.result()
 
   private def evaluateMatch(matchStmt: MatchStatement, context: Context): String =
-    // Selecting writes nothing: every selector, and every key a variant is tried with, is a
-    // step, paid before the work it stands for is done.
+    // Selecting writes nothing: every selector, every variant tried and every key it is tried
+    // with is a step, paid before the work it stands for is done.
     val values         = matchStmt.selectors.map: s =>
       context.budget.charge(Step)
       evaluateExpression(s, context)
@@ -1216,8 +1217,9 @@ object MessageFormat2:
     // The number of selectors, counted once: every variant is compared with it.
     val arity          = selectorValues.size
     val matchedCase    = matchStmt.cases.find: mcase =>
-      // A variant tried is a step, also one without keys, and each of its keys is one more.
-      context.budget.charge(Step * (mcase.keys.size + 1))
+      // A variant tried is a step, also one without keys, and each of its keys is one more plus
+      // its length, which comparing it with a value may read whole.
+      context.budget.charge(mcase.keys.foldLeft(Step)((cost, key) => cost + Step + key.length))
       mcase.keys.size == arity &&
       mcase.keys.zip(selectorValues).forall:
         case (key, p: PluralChoice) => matchesPluralKey(p, key)

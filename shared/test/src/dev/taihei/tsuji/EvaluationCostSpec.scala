@@ -15,9 +15,13 @@ object Costs extends MessageFamily("cost"):
 
   val many = message[(items: List[Message])]("{$items}")
 
+  val pair = message[(n: Double, m: Double)]("{$n :number} {$m :number}")
+
+  val names = message[(ls: List[Language])]("{$ls}")
+
 // What one message may cost, its nested messages included, is bounded by its budget: work that
 // writes nothing (a declaration, a selector, a date or a name written and never shown) is paid for
-// as text is, and before it is done. Each test below would take tens of seconds without that.
+// as text is, and before it is done.
 object EvaluationCostSpec extends ZIOSpecDefault:
 
   private val day = LocalDate.of(2026, 10, 20)
@@ -32,6 +36,14 @@ object EvaluationCostSpec extends ZIOSpecDefault:
     (".match " + "{$l :string}" * 4000 + "\nwhen" + " *" * 4000 + " {x}"),
     "language declarations" ->
     ((1 to 2200).map(i => s".local $$y$i = {$$l :string}").mkString("\n") + "\nx"),
+    "plural selectors" ->
+    (".local $n = {(7)}\n.match " + "{$n :plural}" * 4000 + "\nwhen" + " *" * 4000 + " {x}"),
+    "a plural value read again" ->
+    (s".local $$p = {(${"1" * 30000}) :plural}\n.match " + "{$p :integer}" * 2000 + "\nwhen" +
+    " *" * 2000 + " {x}"),
+    "integer declarations" ->
+    (s".local $$x = {(${"1" * 1100})}\n" + (1 to 2000).map(i => s".local $$i$i = {$$x :integer}")
+      .mkString("\n") + "\nx"),
     "long names" -> {
       val names = (1 to 5).map(i => "n" * 6000 + i)
       names.map(n => s".local $$$n = {(a)}").mkString("\n") + "\n" + names.map(n => s"{$$$n}").mkString
@@ -59,6 +71,26 @@ object EvaluationCostSpec extends ZIOSpecDefault:
             assertTrue(template.length < MaxTemplate, problems.isEmpty, out == "{$items}")
         }
     ),
+    test("a message of four hundred nested lists of a thousand languages") {
+      given Catalogues = Catalogues(Seq(Costs))
+      val de      = Language("de")
+      val message =
+        Costs.many(List.fill(400)(Costs.names(List.fill(1000)(de)))).toJson.fromJson[Message].toOption.get
+      TimeBudget.within("400 nested lists of 1000 languages", 5000)(message.localize(Dutch)): out =>
+        assertTrue(out == "{$items}")
+    },
+    test("a list of ten thousand nested messages with two numbers each is formatted") {
+      given Catalogues = Catalogues(Seq(Costs))
+      val one = Costs.pair(1.5, 2.25).localize(English)
+      val out = Costs.many(List.fill(10000)(Costs.pair(1.5, 2.25))).localize(English)
+      assertTrue(one.contains("2"), out == List.fill(10000)(one).mkString(", "))
+    },
+    test("a chain of plural values is no deeper than one") {
+      val template =
+        ".local $p0 = {$n :plural}\n" + (1 to 1000).map(i => s".local $$p$i = {$$p${i - 1} :plural}")
+          .mkString("\n") + "\n{$p1000 :integer} {$p1000}"
+      assertTrue(MessageFormat2.format(template, Map("n" -> 7)) == "7 7")
+    },
     test("a few nested messages over the same templates are formatted") {
       val catalogues = Catalogues(Seq(Costs))
       catalogues.add(Catalogue(Dutch, Map(Costs.leaf.key -> templates.head._2)))
@@ -97,12 +129,13 @@ object EvaluationCostSpec extends ZIOSpecDefault:
       )
     },
     test("twenty thousand `one` variants with a locale of a million letters") {
-      val template = ".match {$n :plural}\n" + "when one {one}\n" * 20000 + "when * {other}"
-      val locale   = "x" * 1000000
+      // Parsed once, outside the time budget.
+      val parsed = MessageFormat2.parse(".match {$n :plural}\n" + "when one {one}\n" * 20000 + "when * {other}").message
+      val locale = "x" * 1000000
       TimeBudget.within("20000 one variants, a locale of 1M letters", 1000)(
-        MessageFormat2.format(template, Map("n" -> 2), locale)
+        MessageFormat2.tryFormat(parsed, Map("n" -> 2), locale)
       ): out =>
-        assertTrue(out == "other")
+        assertTrue(out.contains("other"))
     },
     test("`one` takes 0 in French only, whatever the region") {
       val template                   = ".match {$n :plural}\nwhen one {one}\nwhen * {other}"

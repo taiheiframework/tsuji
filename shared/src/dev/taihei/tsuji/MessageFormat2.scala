@@ -654,14 +654,19 @@ object MessageFormat2:
         applyFunction(value, function, options, context)
 
   private def applyFunction(
-    value: Any,
+    selected: Any,
     function: String,
     options: Map[String, String],
     context: Context,
   ): Any =
+    // A function gets the value itself, also when :plural chose a variant with it before: a value
+    // is never wrapped twice, nor read through the text of its wrapper.
+    val value = selected match
+      case PluralSelector(v, _) => v
+      case other                => other
     function match
       case "number"   => formatNumber(value, options, context)
-      case "integer"  => formatInteger(value)
+      case "integer"  => formatInteger(value, context)
       case "datetime" => formatTemporal(value, styles(options), context)
       case "date"     =>
         val date = value match
@@ -680,6 +685,9 @@ object MessageFormat2:
       case "plural"   => PluralSelector(value, context.locale)
       case "string"   => shown(value, context.locale, context.budget)
       case _          => value
+    end match
+
+  end applyFunction
 
   // Writing a date or a time asks the platform for a formatter, whether or not the text is shown.
   private def formatTemporal(
@@ -724,11 +732,16 @@ object MessageFormat2:
 
   // A value as a number, or None. The text is bounded and read with `toDoubleOption`, which checks
   // the syntax before it parses, so the read takes time linear in the text on both platforms.
-  private[tsuji] def numberOf(value: Any): Option[Double] =
-    Option(value).map(_.toString).filter(_.length <= MaxNumberText).flatMap(_.toDoubleOption)
+  private[tsuji] def numberOf(value: Any): Option[Double] = value match
+    case PluralSelector(v, _) => numberOf(v)
+    case s: String            => Option.when(s.length <= MaxNumberText)(s).flatMap(_.toDoubleOption)
+    case other                =>
+      Option(other).map(_.toString).filter(_.length <= MaxNumberText).flatMap(_.toDoubleOption)
 
   // Rounded half away from zero, digits only; a value that is no number shows as it is.
-  private def formatInteger(value: Any): String =
+  private def formatInteger(value: Any, context: Context): String =
+    // Reading the value as a number costs what writing one does.
+    context.budget.charge(FormatCost)
     numberOf(value) match
       case Some(d) if !d.isNaN && !d.isInfinite => math.round(d).toString
       case _                                    => value.toString
@@ -759,7 +772,7 @@ object MessageFormat2:
   // What it costs to ask the platform to write a number, a date, a time or a language's name, or
   // to read a selector as a number, in the characters of the budget, whether or not the text is
   // shown. On Scala.js each builds an Intl formatter, which is most of the cost.
-  private val FormatCost = 256
+  private val FormatCost = 128
 
   private def evaluatePattern(pattern: Pattern, context: Context): String =
     val out                       = new StringBuilder

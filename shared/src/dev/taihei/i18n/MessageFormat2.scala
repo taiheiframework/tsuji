@@ -420,7 +420,8 @@ object MessageFormat2:
   /**
    * The template formatted with `args` in the locale given by the BCP 47 tag `locale`. A variable
    * without a value shows as `$name`. The text one template formats to is at most a million
-   * characters; a template whose text would be longer comes back as it was written.
+   * characters; a template whose text would be longer comes back as it was written. Only the first
+   * 255 characters of `locale` are read, more than any language tag in use needs.
    */
   def format(
     template: String,
@@ -429,12 +430,16 @@ object MessageFormat2:
   ): String =
     val parser  = new Parser(template)
     val message = parser.parse()
-    val context = Context(args, locale)
+    val context = Context(args, locale.take(MaxLocaleLength))
     // A sequence stops as soon as it would pass the limit; a lone placeholder is checked here.
     try
       val text = evaluate(message, context)
       if text.length > MaxOutputLength then template else text
     catch case _: TooLong => template
+
+  // The locale is read for every number, date and plural selector a template formats, and may come
+  // from a request: it is cut to the length Language.parse accepts, once, before any of them.
+  private[i18n] val MaxLocaleLength = 255
 
   // A template can repeat a placeholder, and its arguments may come with the message from
   // outside the program: the text of one template stops here rather than grow with the product
@@ -560,10 +565,9 @@ object MessageFormat2:
   // its locale, which decides what `one` takes.
   final private case class PluralCount(count: Option[Int], locale: String)
 
-  // The first subtag of a locale, in lower case. No language subtag is longer than eight letters,
-  // so no more of the locale than that is read.
+  // The first subtag of a locale, in lower case.
   private def languageOf(locale: String): String =
-    locale.take(9).takeWhile(_ != '-').toLowerCase(java.util.Locale.ROOT)
+    locale.takeWhile(_ != '-').toLowerCase(java.util.Locale.ROOT)
 
   private def matchesPluralKey(
     count: Option[Int],

@@ -619,14 +619,14 @@ in Tsuji's own codecs, whatever `ReaderConfig` you read with:
 - One message, with its nested messages, list elements and fallbacks, produces at most four
   million characters; past that it shows its own template. The work it does counts against the
   same limit, also when nothing is shown for it: one for every declaration, placeholder,
-  selector and key tried, about forty for a whole number, a date or the name of a language
-  that is written, about a hundred and thirty for a `Double` with decimals, a few hundred for a
-  number of hundreds of digits, and up to a thousand to read a `Double` whose exact value has
-  that many (the smallest ones). A message that shows a hundred thousand whole numbers, thirty
-  thousand `Double`s with decimals, or a list of ten thousand different such small `Double`s,
-  falls back as one that writes too much text does; no message a person reads comes near it:
-  a thousand nested field errors use a fifteenth of the limit, a list of ten thousand prices a
-  third.
+  selector, variant and key tried, about forty for a whole number, a date or the name of a
+  language that is written, about a hundred and thirty for a `Double` with decimals, a few
+  hundred for a number of hundreds of digits, and up to a thousand to read a `Double` whose
+  exact value has that many (the smallest ones). A message that shows a hundred thousand whole
+  numbers, thirty thousand `Double`s with decimals, or a list of ten thousand different such
+  small `Double`s, falls back as one that writes too much text does; no message a person reads
+  comes near it: a thousand nested field errors use a fifteenth of the limit, a list of ten
+  thousand prices a third.
 
 Versioning rules for keys, on the wire:
 

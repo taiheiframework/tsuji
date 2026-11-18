@@ -149,6 +149,42 @@ object EvaluationCostSpec extends ZIOSpecDefault:
         wrong.isEmpty,
       )
     },
+    // A 4.x message brings its own templates, which are formatted without the checks a catalogue
+    // template passes, so a variant may have fewer keys than the match has selectors.
+    test("variants without keys under thousands of selectors, evaluated until the budget is spent") {
+      val parsed = MessageFormat2.parse(".match " + "{1}" * 8000 + "\n" + "when {}\n" * 5000).message
+      TimeBudget.within("variants without keys under 8000 selectors, one budget", 3000)(
+        evaluationsUntilSpent(parsed, 10000)
+      ): evaluations =>
+        // Each evaluation pays for 8000 selectors and 5000 variants: about 300 fit in the budget.
+        assertTrue(evaluations >= 250, evaluations <= 320)
+    },
+    // One step for the evaluation, one for the selector, ten for "[no match]", and 8000 for the
+    // variants tried: without the step per variant, a budget would pay for 333333 evaluations.
+    test("each variant tried is a step, also one without keys") {
+      val parsed = MessageFormat2.parse(".match {1}\n" + "when {}\n" * 8000).message
+      assertTrue(
+        MessageFormat2.formatIn(".match {1}\nwhen {}\nwhen * {x}") == "x",
+        evaluationsUntilSpent(parsed, 1000) == (Budget.PerMessage / (1 + 1 + 10 + 8000)).toInt,
+      )
+    },
+    test("a variant with fewer keys than selectors is passed over") {
+      val template = ".match {$a} {$b}\nwhen x {one key}\nwhen x y {both}\nwhen * * {other}"
+      assertTrue(
+        MessageFormat2.formatIn(template, Map("a" -> "x", "b" -> "y")) == "both",
+        MessageFormat2.formatIn(template, Map("a" -> "x", "b" -> "z")) == "other",
+      )
+    },
   )
+
+  // How many times a message is evaluated over one budget before the budget is spent, as the
+  // nested messages of one message are, up to `cap`.
+  private def evaluationsUntilSpent(message: MessageFormat2.Message, cap: Int): Int =
+    val budget = Budget.fresh()
+    Iterator
+      .continually(MessageFormat2.tryFormat(message, Map.empty, "en", budget))
+      .take(cap)
+      .takeWhile(_.isDefined)
+      .size
 
 end EvaluationCostSpec

@@ -245,13 +245,13 @@ object NumberArgumentSpec extends ZIOSpecDefault:
         // whoever changes one changes its count with it.
         val expected = Map(
           "1300 dates declared" -> 2996,
-          "3700 dates selected" -> 538,
-          "4500 number keys" -> 186,
+          "3700 dates selected" -> 537,
+          "4500 number keys" -> 154,
           "2400 times shown" -> 207,
           "2950 language names declared" -> 1340,
           "4000 language names selected" -> 497,
           "9000 selectors on a number of ten thousand digits" -> 222,
-          "64 plural selectors on a costly Double" -> 2574,
+          "64 plural selectors on a costly Double" -> 2572,
         )
         val outside  = counts.filter((name, result) => result != (expected(name), 5000))
         assertTrue(outside.isEmpty)

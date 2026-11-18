@@ -1213,9 +1213,12 @@ object MessageFormat2:
     val pluralAt       = values.zipWithIndex.collect { case (_: PluralSelector, i) => i }
     val read           = pluralAt.take(MaxPluralSelectors).toSet
     val selectorValues = values.zipWithIndex.map((v, i) => selected(v, read(i), context))
+    // The number of selectors, counted once: every variant is compared with it.
+    val arity          = selectorValues.size
     val matchedCase    = matchStmt.cases.find: mcase =>
-      context.budget.charge(Step * mcase.keys.size)
-      mcase.keys.size == selectorValues.size &&
+      // A variant tried is a step, also one without keys, and each of its keys is one more.
+      context.budget.charge(Step * (mcase.keys.size + 1))
+      mcase.keys.size == arity &&
       mcase.keys.zip(selectorValues).forall:
         case (key, p: PluralChoice) => matchesPluralKey(p, key)
         case (key, l: Language)     => key == "*" || key == l.tag

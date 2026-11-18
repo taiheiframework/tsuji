@@ -21,7 +21,7 @@ object PluralLanguageSpec extends ZIOSpecDefault:
         "number placeholders" -> "{$n :number}" * 5000,
         "number declarations" -> ((1 to 3000).map(_ => s".input {$$n :number}").mkString("\n") + "\nx"),
         "date placeholders" -> "{$d :datetime}" * 4000,
-        "date declarations" -> ((1 to 2000).map(i => s".local $$d$i = {$$d :datetime}").mkString("\n") + "\nx"),
+        "date declarations" -> ((1 to 2000).map(i => s".let {$$d$i = $$d :datetime}").mkString("\n") + "\nx"),
       )
       val args      = Map[String, Any]("n" -> 7, "d" -> java.time.LocalDate.of(2026, 10, 20))
       TimeBudget.within("numbers and dates, a locale of 1M letters", 2000)(
@@ -35,6 +35,16 @@ object PluralLanguageSpec extends ZIOSpecDefault:
         MessageFormat2.format(template, Map("n" -> 0), "fr" + "-x" * 200) == "one",
         MessageFormat2.format("{$n :number}", Map("n" -> 1234), "en" + "-x" * 200) ==
         MessageFormat2.format("{$n :number}", Map("n" -> 1234), "en"),
+      )
+    },
+    test("a plural value is read as the value it holds, and never wrapped twice") {
+      val chain =
+        ".let {$p0 = $n :plural}\n" + (1 to 1000).map(i => s".let {$$p$i = $$p${i - 1} :plural}")
+          .mkString("\n") + "\n{$p1000 :number} {$p1000}"
+      assertTrue(
+        MessageFormat2.format(chain, Map("n" -> 7)) == "7 7",
+        MessageFormat2.format(".let {$p = $n :plural}\n{$p :number}", Map("n" -> 1234)) ==
+        MessageFormat2.format("{$n :number}", Map("n" -> 1234)),
       )
     },
     test("`one` takes 0 in French only, whatever the region") {

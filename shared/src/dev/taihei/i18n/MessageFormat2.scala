@@ -478,17 +478,24 @@ object MessageFormat2:
         applyFunction(value, function, options, context)
 
   private def applyFunction(
-    value: Any,
+    selected: Any,
     function: String,
     options: Map[String, String],
     context: Context,
   ): Any =
+    // A function gets the value itself, also when :plural chose a variant with it before: a value
+    // is never wrapped twice, nor read through the text of its wrapper.
+    val value = selected match
+      case PluralSelector(v, _) => v
+      case other                => other
     function match
       case "number"   => formatNumber(value, options, context.locale)
       case "datetime" => formatDateTime(value, options, context.locale)
       case "plural"   => PluralSelector(value, context.locale)
       case "select"   => value
       case _          => value
+
+  end applyFunction
 
   private def formatNumber(
     value: Any,
@@ -504,8 +511,11 @@ object MessageFormat2:
 
   // A value as a number, or None. The text is bounded and read with `toDoubleOption`, which checks
   // the syntax before it parses, so the read takes time linear in the text on both platforms.
-  private[i18n] def numberOf(value: Any): Option[Double] =
-    Option(value).map(_.toString).filter(_.length <= MaxNumberText).flatMap(_.toDoubleOption)
+  private[i18n] def numberOf(value: Any): Option[Double] = value match
+    case PluralSelector(v, _) => numberOf(v)
+    case s: String            => Option.when(s.length <= MaxNumberText)(s).flatMap(_.toDoubleOption)
+    case other                =>
+      Option(other).map(_.toString).filter(_.length <= MaxNumberText).flatMap(_.toDoubleOption)
 
   private def formatDateTime(
     value: Any,

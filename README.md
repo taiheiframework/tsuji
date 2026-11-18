@@ -523,7 +523,8 @@ in Tsuji's own codecs, whatever `ReaderConfig` you read with:
   million characters; past that it shows its own template. What it writes is charged to the
   budget, and so is what it does without writing: each evaluation, declaration, placeholder,
   selector and variant key costs one plus the length of the names and keys it reads, and each
-  number, date, time or language name formatted, or selector read as a number, costs 256.
+  number, date, time or language name formatted, or value read as a number, costs 128. A list
+  of 10000 nested messages with two numbers each fits in it.
 - A date or time function reads only the styles `short`, `medium`, `long` and `full`, in any
   case; any other value, of any length, is written as `medium`.
 

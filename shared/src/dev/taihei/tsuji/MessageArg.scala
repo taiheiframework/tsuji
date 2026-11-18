@@ -222,7 +222,11 @@ object MessageArg:
       ) =>
         MessageFormat2.joined(
           as.map(a =>
-            MessageFormat2.show(base.toFormat(a, language, catalogues, budget), language.tag)
+            MessageFormat2.shown(
+              base.toFormat(a, language, catalogues, budget),
+              language.tag,
+              budget,
+            )
           ),
           budget,
         ),

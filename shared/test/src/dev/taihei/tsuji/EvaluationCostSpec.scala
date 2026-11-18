@@ -91,6 +91,26 @@ object EvaluationCostSpec extends ZIOSpecDefault:
           .mkString("\n") + "\n{$p1000 :integer} {$p1000}"
       assertTrue(MessageFormat2.format(template, Map("n" -> 7)) == "7 7")
     },
+    test("variants without keys under thousands of selectors, evaluated until the budget is spent") {
+      // A 4.x message brings its own template, which is not checked before it is formatted.
+      val parsed            = MessageFormat2.parse(".match " + "{1}" * 8000 + "\n" + "when {}\n" * 5000).message
+      // As the nested messages of one message are: one budget for all the evaluations.
+      def untilSpent(): Int =
+        val budget      = Budget.fresh()
+        var evaluations = 0
+        while evaluations < 10000 && MessageFormat2.tryFormat(parsed, Map.empty, "en", budget).isDefined do
+          evaluations += 1
+        evaluations
+      TimeBudget.within("variants without keys under 8000 selectors, one budget", 3000)(untilSpent()): evaluations =>
+        assertTrue(evaluations < 10000)
+    },
+    test("a variant with fewer keys than selectors is passed over") {
+      val template = ".match {$a} {$b}\nwhen x {one key}\nwhen x y {both}\nwhen * * {other}"
+      assertTrue(
+        MessageFormat2.format(template, Map("a" -> "x", "b" -> "y")) == "both",
+        MessageFormat2.format(template, Map("a" -> "x", "b" -> "z")) == "other",
+      )
+    },
     test("a few nested messages over the same templates are formatted") {
       val catalogues = Catalogues(Seq(Costs))
       catalogues.add(Catalogue(Dutch, Map(Costs.leaf.key -> templates.head._2)))

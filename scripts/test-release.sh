@@ -544,6 +544,12 @@ M_OTHER=("${M[@]/#RELEASE_KEY_FILE=*/RELEASE_KEY_FILE=$W/other-key.asc}")
 expect "and they verify against the key file only, not against the default keyring" 1 "does not verify against the release key" "${M_OTHER[@]}" release-github
 M_NONE=("${M[@]/#RELEASE_KEY_FILE=*/RELEASE_KEY_FILE=$W/no-such-key.asc}")
 expect "a missing key file is refused" 1 "cannot read the release key" "${M_NONE[@]}" release-github
+# A key file that also holds another key verifies that key's signatures: the pinned fingerprint
+# still refuses them.
+gpg --batch --quiet --armor --export "$KEY" "$OTHER" > "$W/both-keys.asc" 2>/dev/null
+M_BOTH=("${M[@]/#RELEASE_KEY_FILE=*/RELEASE_KEY_FILE=$W/both-keys.asc}")
+use_bundle "$W/u2"; expect "a file signed by another key in the key file is refused by its fingerprint" 1 "not signed by the release key" "${M_BOTH[@]}" release-github
+use_bundle "$SRC"
 
 echo "$V" > "$G/.release-embargo"
 expect "release-github refuses a version under embargo" 1 "under embargo" "${M[@]}" release-github

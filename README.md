@@ -86,8 +86,9 @@ The build itself resolves from Maven Central only, and `make validate` checks it
 A release publishes only the commit `release-prepare` validated, and refuses when a file git does
 not track is in a source or resource folder, or a stray build file is in the tree.
 
-`release-finalize` and `release-github` check every signature against `keys/release-key.asc`
-alone, in a keyring of their own; the maintainer's own GnuPG keyring plays no part.
+`release-finalize`, `central-bundle` and `release-github` check every signature against
+`keys/release-key.asc` alone, in a keyring of their own; the maintainer's own GnuPG keyring plays
+no part.
 
 `make publish` is only for a security fix under embargo, which goes to Central first; it refuses
 any other version. It reads the Central Portal user token and the release key from

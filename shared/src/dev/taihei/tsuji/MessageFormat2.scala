@@ -27,7 +27,8 @@ object MessageFormat2:
   /**
    * The template formatted with `args` in the locale given by the BCP 47 tag `locale`. A variable
    * without a value shows as `$name`; it never throws: a template that cannot be formatted, or
-   * whose text would pass a million characters, comes back as it was written.
+   * whose text would pass a million characters, comes back as it was written. Only the first 255
+   * characters of `locale` are read, more than any language tag in use needs.
    */
   def format(
     template: String,
@@ -621,6 +622,10 @@ object MessageFormat2:
     locale: String = "en",
     budget: Budget = Budget.fresh())
 
+  // The locale is read for every number, date, name and plural selector a template formats, and
+  // may come from a request: it is cut once, to the length Language.parse accepts.
+  private[tsuji] val MaxLocaleLength = 255
+
   // None when evaluating threw, which no input should make it do; the caller decides what to show.
   private[tsuji] def tryFormat(
     message: Message,
@@ -628,7 +633,7 @@ object MessageFormat2:
     locale: String,
     budget: Budget = Budget.fresh(),
   ): Option[String] =
-    try Some(evaluate(message, Context(args, locale, budget)))
+    try Some(evaluate(message, Context(args, locale.take(MaxLocaleLength), budget)))
     catch case NonFatal(_) => None
 
   private def evaluate(message: Message, initialContext: Context): String =
@@ -839,10 +844,9 @@ object MessageFormat2:
   // its locale, which decides what `one` takes.
   final private case class PluralCount(count: Option[Int], locale: String)
 
-  // The first subtag of a locale, in lower case, worked out once per selector. No language subtag
-  // is longer than eight letters, so no more of the locale than that is read.
+  // The first subtag of a locale, in lower case, worked out once per selector.
   private def languageOf(locale: String): String =
-    locale.take(9).takeWhile(_ != '-').toLowerCase(java.util.Locale.ROOT)
+    locale.takeWhile(_ != '-').toLowerCase(java.util.Locale.ROOT)
 
   private def matchesPluralKey(
     count: Option[Int],

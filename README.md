@@ -316,6 +316,7 @@ language:
   of 10000 nested messages with two numbers each fits in it.
 - A date or time function reads only the styles `short`, `medium`, `long` and `full`, in any
   case; any other value, of any length, is written as `medium`.
+- `MessageFormat2.format` reads the first 255 characters of its locale.
 
 Versioning rules for keys, on the wire:
 

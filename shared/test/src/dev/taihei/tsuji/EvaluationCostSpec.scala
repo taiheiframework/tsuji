@@ -137,6 +137,24 @@ object EvaluationCostSpec extends ZIOSpecDefault:
       ): out =>
         assertTrue(out.contains("other"))
     },
+    test("numbers and dates with a locale of a million letters") {
+      val locale = "x" * 1000000
+      val parsed = List("{$n :number}" * 5000, "{$d :date}" * 5000).map(t => MessageFormat2.parse(t).message)
+      val args   = Map[String, Any]("n" -> 7, "d" -> day)
+      TimeBudget.within("numbers and dates, a locale of 1M letters", 3000)(
+        parsed.map(m => MessageFormat2.tryFormat(m, args, locale))
+      ): out =>
+        assertTrue(out.forall(_.exists(_.nonEmpty)))
+    },
+    test("a locale is read up to 255 characters") {
+      val template = ".match {$n :plural}\nwhen one {one}\nwhen * {other}"
+      assertTrue(
+        MessageFormat2.MaxLocaleLength == 255,
+        MessageFormat2.format(template, Map("n" -> 0), "fr" + "-x" * 200) == "one",
+        MessageFormat2.format("{$n :number}", Map("n" -> 1234), "en" + "-x" * 200) ==
+        MessageFormat2.format("{$n :number}", Map("n" -> 1234), "en"),
+      )
+    },
     test("`one` takes 0 in French only, whatever the region") {
       val template                   = ".match {$n :plural}\nwhen one {one}\nwhen * {other}"
       def at(n: Int, locale: String) = MessageFormat2.format(template, Map("n" -> n), locale)

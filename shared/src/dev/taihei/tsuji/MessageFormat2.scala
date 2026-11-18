@@ -632,7 +632,11 @@ object MessageFormat2:
     catch case NonFatal(_) => None
 
   private def evaluate(message: Message, initialContext: Context): String =
+    // An evaluation pays for itself before it does anything, and a declaration, which writes
+    // nothing, pays for its step and its name: on a spent budget a nested message stops at once.
+    initialContext.budget.charge(Step)
     val context = message.declarations.foldLeft(initialContext): (ctx, decl) =>
+      ctx.budget.charge(Step + decl.name.length)
       ctx.copy(variables = ctx.variables + (decl.name -> evaluateExpression(decl.expr, ctx)))
     message.body match
       case Left(pattern)    => evaluatePattern(pattern, context)
@@ -640,8 +644,11 @@ object MessageFormat2:
 
   private def evaluateExpression(expr: Expression, context: Context): Any =
     expr match
-      case Variable(name, _) => context.variables.getOrElse(name, s"$$${name}")
-      case Literal(value)    => value
+      case Variable(name, _)                                   =>
+        // A name is looked up by its text, which a template from a catalogue can make long.
+        context.budget.charge(name.length)
+        context.variables.getOrElse(name, s"$$${name}")
+      case Literal(value)                                      => value
       case FunctionAnnotation(innerExpr, function, options, _) =>
         val value = evaluateExpression(innerExpr, context)
         applyFunction(value, function, options, context)
@@ -653,36 +660,63 @@ object MessageFormat2:
     context: Context,
   ): Any =
     function match
-      case "number"   => formatNumber(value, options, context.locale)
+      case "number"   => formatNumber(value, options, context)
       case "integer"  => formatInteger(value)
-      case "datetime" => PlatformDateTimeFormatter.formatDateTime(value, options, context.locale)
+      case "datetime" => formatTemporal(value, styles(options), context)
       case "date"     =>
         val date = value match
           case ldt: LocalDateTime => ldt.toLocalDate
           case other              => other
         date match
-          case d: LocalDate =>
-            PlatformDateTimeFormatter.formatDateTime(d, options - "timeStyle", context.locale)
+          case d: LocalDate => formatTemporal(d, styles(options) - "timeStyle", context)
           case other        => other.toString
       case "time"     =>
         val time = value match
           case ldt: LocalDateTime => ldt.toLocalTime
           case other              => other
         time match
-          case t: LocalTime =>
-            PlatformDateTimeFormatter.formatDateTime(t, options - "dateStyle", context.locale)
+          case t: LocalTime => formatTemporal(t, styles(options) - "dateStyle", context)
           case other        => other.toString
       case "plural"   => PluralSelector(value, context.locale)
-      case "string"   => show(value, context.locale)
+      case "string"   => shown(value, context.locale, context.budget)
       case _          => value
+
+  // Writing a date or a time asks the platform for a formatter, whether or not the text is shown.
+  private def formatTemporal(
+    value: Any,
+    options: Map[String, String],
+    context: Context,
+  ): String =
+    context.budget.charge(FormatCost)
+    PlatformDateTimeFormatter.formatDateTime(value, options, context.locale)
+
+  // Of a date or time function's options, the platform formatters are given only the styles, each
+  // in lower case and only when it is one of the four. A longer value is not read at all.
+  private[tsuji] def styles(options: Map[String, String]): Map[String, String] =
+    StyleOptions.iterator
+      .flatMap(name =>
+        options
+          .get(name)
+          .filter(_.length <= LongestStyle)
+          .map(_.toLowerCase(java.util.Locale.ROOT))
+          .filter(Styles)
+          .map(name -> _)
+      )
+      .toMap
+
+  private val StyleOptions = List("dateStyle", "timeStyle")
+  private val Styles       = Set("short", "medium", "long", "full")
+  private val LongestStyle = Styles.map(_.length).max
 
   private def formatNumber(
     value: Any,
     options: Map[String, String],
-    locale: String,
+    context: Context,
   ): String =
+    context.budget.charge(FormatCost)
     numberOf(value) match
-      case Some(num) => PlatformNumberFormatter.formatNumber(num, options.get("style"), locale)
+      case Some(num) =>
+        PlatformNumberFormatter.formatNumber(num, options.get("style"), context.locale)
       case None      => value.toString
 
   // The longest text read as a number, the bound the JSON reader puts on a number.
@@ -695,7 +729,7 @@ object MessageFormat2:
 
   // Rounded half away from zero, digits only; a value that is no number shows as it is.
   private def formatInteger(value: Any): String =
-    value.toString.toDoubleOption match
+    numberOf(value) match
       case Some(d) if !d.isNaN && !d.isInfinite => math.round(d).toString
       case _                                    => value.toString
 
@@ -707,6 +741,26 @@ object MessageFormat2:
     case l: Language          => Language.nameIn(l, locale)
     case other                => other.toString
 
+  // As show, within a message's budget: a language's name is asked of the platform, as a number
+  // is formatted, and costs as much.
+  private[tsuji] def shown(
+    value: Any,
+    locale: String,
+    budget: Budget,
+  ): String =
+    if value.isInstanceOf[Language] then budget.charge(FormatCost)
+    show(value, locale)
+
+  // What a step of an evaluation costs that writes nothing: an evaluation, a declaration, a
+  // placeholder, a selector, a key tried. With it, the work one message does is bounded by its
+  // budget and not by how a template from a catalogue spends its 64K characters.
+  private val Step = 1
+
+  // What it costs to ask the platform to write a number, a date, a time or a language's name, or
+  // to read a selector as a number, in the characters of the budget, whether or not the text is
+  // shown. On Scala.js each builds an Intl formatter, which is most of the cost.
+  private val FormatCost = 256
+
   private def evaluatePattern(pattern: Pattern, context: Context): String =
     val out                       = new StringBuilder
     def append(s: String): Unit   =
@@ -715,12 +769,17 @@ object MessageFormat2:
       out ++= s
     def piece(p: Pattern): String = p match
       case Text(value)        => value
-      case Placeholder(expr)  => show(evaluateExpression(expr, context), context.locale)
+      case Placeholder(expr)  =>
+        // A placeholder that shows nothing is still a step.
+        context.budget.charge(Step)
+        shown(evaluateExpression(expr, context), context.locale, context.budget)
       case PatternSequence(_) => ""
     pattern match
       case PatternSequence(patterns) => patterns.foreach(p => append(piece(p)))
       case other                     => append(piece(other))
     out.result()
+
+  end evaluatePattern
 
   // A template repeats its placeholders, and an argument may come from the wire: the text one
   // template makes is cut off here, and formatting falls back, rather than run out of memory.
@@ -740,11 +799,18 @@ object MessageFormat2:
     out.result()
 
   private def evaluateMatch(matchStmt: MatchStatement, context: Context): String =
-    // A plural selector's argument is read as a number once, not once per variant.
-    val selectorValues = matchStmt.selectors.map(s => evaluateExpression(s, context)).map:
-      case PluralSelector(value, locale) => PluralCount(numberOf(value).map(_.toInt), locale)
-      case other                         => other
+    // Selecting writes nothing: each selector and each key a variant is tried with is paid for
+    // before it is looked at. A plural selector's argument is read as a number once, not once
+    // per variant.
+    val selectorValues = matchStmt.selectors.map: s =>
+      context.budget.charge(Step)
+      evaluateExpression(s, context) match
+        case PluralSelector(value, locale) =>
+          context.budget.charge(FormatCost)
+          PluralCount(numberOf(value).map(_.toInt), locale)
+        case other                         => other
     val matchedCase    = matchStmt.cases.find: mcase =>
+      context.budget.charge(mcase.keys.foldLeft(0)((cost, key) => cost + Step + key.length))
       mcase.keys.size == selectorValues.size &&
       mcase.keys.zip(selectorValues).forall:
         case (key, PluralCount(count, locale)) => matchesPluralKey(count, key, locale)
@@ -753,6 +819,8 @@ object MessageFormat2:
     matchedCase match
       case Some(mcase) => evaluatePattern(mcase.pattern, context)
       case None        => "[no match]"
+
+  end evaluateMatch
 
   // A plural selector's value read as a number, None when it is no number.
   final private case class PluralCount(count: Option[Int], locale: String)

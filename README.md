@@ -519,8 +519,13 @@ in Tsuji's own codecs, whatever `ReaderConfig` you read with:
   it; of the languages without a file it remembers the latest 4096. Narrow a language from a
   request header to the languages you support before you show messages in it, or each new tag
   costs a lookup per family.
-- One message, with its nested messages, list elements and fallbacks, produces at most four
-  million characters; past that it shows its own template.
+- One message, with its nested messages, list elements and fallbacks, has a budget of four
+  million characters; past that it shows its own template. What it writes is charged to the
+  budget, and so is what it does without writing: each evaluation, declaration, placeholder,
+  selector and variant key costs one plus the length of the names and keys it reads, and each
+  number, date, time or language name formatted, or selector read as a number, costs 256.
+- A date or time function reads only the styles `short`, `medium`, `long` and `full`, in any
+  case; any other value, of any length, is written as `medium`.
 
 Versioning rules for keys, on the wire:
 

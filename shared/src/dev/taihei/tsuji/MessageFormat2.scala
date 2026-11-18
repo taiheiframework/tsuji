@@ -800,35 +800,41 @@ object MessageFormat2:
 
   private def evaluateMatch(matchStmt: MatchStatement, context: Context): String =
     // Selecting writes nothing: each selector and each key a variant is tried with is paid for
-    // before it is looked at. A plural selector's argument is read as a number once, not once
-    // per variant.
+    // before it is looked at. A plural selector's argument is read as a number once, and its
+    // language's rule chosen once, not once per variant.
     val selectorValues = matchStmt.selectors.map: s =>
       context.budget.charge(Step)
       evaluateExpression(s, context) match
         case PluralSelector(value, locale) =>
           context.budget.charge(FormatCost)
-          PluralCount(numberOf(value).map(_.toInt), locale)
+          PluralCount(numberOf(value).map(_.toInt), languageOf(locale))
         case other                         => other
     val matchedCase    = matchStmt.cases.find: mcase =>
       context.budget.charge(mcase.keys.foldLeft(0)((cost, key) => cost + Step + key.length))
       mcase.keys.size == selectorValues.size &&
       mcase.keys.zip(selectorValues).forall:
-        case (key, PluralCount(count, locale)) => matchesPluralKey(count, key, locale)
-        case (key, l: Language)                => key == "*" || key == l.tag
-        case (key, value)                      => key == value.toString || key == "*"
+        case (key, PluralCount(count, language)) => matchesPluralKey(count, key, language)
+        case (key, l: Language)                  => key == "*" || key == l.tag
+        case (key, value)                        => key == value.toString || key == "*"
     matchedCase match
       case Some(mcase) => evaluatePattern(mcase.pattern, context)
       case None        => "[no match]"
 
   end evaluateMatch
 
-  // A plural selector's value read as a number, None when it is no number.
+  // A plural selector's value read as a number, None when it is no number, and the language of
+  // its locale, which decides what `one` takes.
   final private case class PluralCount(count: Option[Int], locale: String)
+
+  // The first subtag of a locale, in lower case, worked out once per selector. No language subtag
+  // is longer than eight letters, so no more of the locale than that is read.
+  private def languageOf(locale: String): String =
+    locale.take(9).takeWhile(_ != '-').toLowerCase(java.util.Locale.ROOT)
 
   private def matchesPluralKey(
     count: Option[Int],
     key: String,
-    locale: String,
+    language: String,
   ): Boolean =
     count match
       case Some(count) =>
@@ -842,7 +848,7 @@ object MessageFormat2:
           case s if s.startsWith("=") => s.drop(1).toIntOption.contains(count)
           case s if s.matches("\\d+") => s.toIntOption.contains(count)
           case "one"                  =>
-            locale.takeWhile(_ != '-').toLowerCase(java.util.Locale.ROOT) match
+            language match
               case "fr" => count == 0 || count == 1 // French (any region): one = 0 or 1
               case _    => count == 1               // English/Dutch: one = 1
           case "other"                => true

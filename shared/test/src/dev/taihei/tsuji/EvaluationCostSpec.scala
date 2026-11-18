@@ -175,6 +175,18 @@ object EvaluationCostSpec extends ZIOSpecDefault:
         MessageFormat2.formatIn(template, Map("a" -> "x", "b" -> "z")) == "other",
       )
     },
+    // A plural selector's language is worked out once, not once per `one` variant, and from at
+    // most the first 64 characters of the locale.
+    test("twenty thousand `one` variants with a locale of a million letters") {
+      val parsed = MessageFormat2
+        .parse(".match {$n :plural}\n" + "when one {one}\n" * 20000 + "when * {other}")
+        .message
+      val locale = "x" * 1000000
+      TimeBudget.within("20000 one variants, a locale of 1M letters", 1000)(
+        MessageFormat2.tryFormat(parsed, Map("n" -> 2), locale)
+      ): out =>
+        assertTrue(out.contains("other"))
+    },
   )
 
   // How many times a message is evaluated over one budget before the budget is spent, as the

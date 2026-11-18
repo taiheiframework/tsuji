@@ -827,9 +827,12 @@ object MessageFormat2:
           context.budget.charge(FormatCost)
           PluralCount(numberOf(value).map(_.toInt), languageOf(locale))
         case other                         => other
+    // The number of selectors, counted once: every variant is compared with it.
+    val arity          = selectorValues.size
     val matchedCase    = matchStmt.cases.find: mcase =>
-      context.budget.charge(mcase.keys.foldLeft(0)((cost, key) => cost + Step + key.length))
-      mcase.keys.size == selectorValues.size &&
+      // A variant tried is a step, also one without keys, and each of its keys is one more.
+      context.budget.charge(mcase.keys.foldLeft(Step)((cost, key) => cost + Step + key.length))
+      mcase.keys.size == arity &&
       mcase.keys.zip(selectorValues).forall:
         case (key, PluralCount(count, language)) => matchesPluralKey(count, key, language)
         case (key, l: Language)                  => key == "*" || key == l.tag

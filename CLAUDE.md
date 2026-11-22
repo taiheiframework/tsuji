@@ -12,8 +12,9 @@ come from the parent folder's `CLAUDE.md` when this repo is checked out under `~
 make validate          # repo-guard, release-test, scalafix, scalafmt, compile, test and MiMa
 make repo-guard        # Coursier's defaults (local Ivy, Central), then REPO_URL for dev.taihei alone;
                        # pins released; resolved dev.taihei files checked
-make mima              # against the newest 5.x tag on Central or REPO_URL; a spent tag (on neither) is
-                       # passed over; MIMA_BASELINE=x.y.z|none overrides
+make mima              # against the newest released tag of release.majorLine (on Central, or with an
+                       # immutable GitHub Release); a spent tag, with neither, is passed over;
+                       # MIMA_BASELINE=x.y.z|none overrides
 make test              # ./mill __.test.testForked (JS tests run under Node)
 TAIHEI_TEST_JAVA_HOME=<a JDK 17> make test-java-17   # the JVM tests on Java 17, as CI and the release workflow run them
 make publish-dry-run   # the bundle Maven Central would receive, written to out/ (a throwaway key in

@@ -69,8 +69,9 @@ test:
 	./mill __.test.testForked
 
 # Binary compatibility with the baseline release (release.mimaBaseline: the newest v-tag before
-# HEAD that is on Maven Central or on REPO_URL, passing over a spent one, or MIMA_BASELINE). An
-# answer that is neither 200 nor 404 fails. A break fails here; a major sets MIMA_BASELINE=none.
+# HEAD that is on Maven Central or has an immutable GitHub Release, passing over a spent one, a
+# tag with neither, or MIMA_BASELINE). Any other answer fails. A break fails here; a major sets
+# MIMA_BASELINE=none.
 mima:
 	@set -eo pipefail; BASELINE=$$(./mill show release.mimaBaseline | tr -d '\n "' | sed 's/^null$$/none/'); \
 	echo "[mima] baseline: $$BASELINE"
@@ -142,9 +143,9 @@ repo-guard:
 		--owner "$(OWNER)" --family "$(FAMILY)" --key "$(RELEASE_KEY_FILE)" --fingerprint "$(RELEASE_KEY)" "$$T/resolved.json" | sed 's/^/[repo-guard] /'; \
 	echo "[repo-guard] Maven Central, then $(REPO_URL), and nothing else"
 
-# The tests of scripts/release.py, repo-guard and publish-dry-run, against stand-ins for Maven
-# Central, the family's repository, the GitHub API and Mill on localhost. No real registry, no
-# token and no signing key is involved. Then the mill launcher's pinned SHA-256: a tampered or
+# The tests of scripts/release.py, repo-guard, publish-dry-run and test-java-17, against stand-ins
+# for Maven Central, the family's repository, the GitHub API, a JDK and Mill on localhost. No real
+# registry, no token and no signing key is involved. Then the mill launcher's pinned SHA-256: a tampered or
 # unpinned Mill, downloaded or already cached, is refused.
 release-test:
 	@bash scripts/test-release.sh

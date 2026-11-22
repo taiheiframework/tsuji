@@ -37,10 +37,10 @@ tools/src                            taihei-tsuji-tools: ExportCatalogues
 zio-json/src                         taihei-tsuji-zio-json: TsujiZioJson
 ```
 
-- `make validate`: repo-guard (the build's repositories), release-test (the release machinery's
-  own tests), scalafix, scalafmt, compile, tests on the JVM and Node, MiMa against the newest
+- `make validate`: repo-guard (the build's repositories), release-test (the tests of repo-guard
+  and the dry run), scalafix, scalafmt, compile, tests on the JVM and Node, MiMa against the newest
   release of the current major line, and `no-zio`: only `taihei-tsuji-zio-json`'s POM may name
   `dev.zio`.
-- Released from the Makefile (`make release-prepare TYPE=...`, `make release-finalize`), the
+- Released by the family's release workflow from the maintainer's signed tag, the
   version from the git tag; one release publishes `taihei-tsuji`, `taihei-tsuji-zio-json` and
   `taihei-tsuji-tools`.

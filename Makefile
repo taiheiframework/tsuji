@@ -40,8 +40,8 @@ test:
 	./mill __.test.testForked
 
 # Binary compatibility with the baseline release (release.mimaBaseline: the newest v-tag before HEAD
-# that is on Maven Central, passing over a spent one, or MIMA_BASELINE). A break fails here; a
-# major sets MIMA_BASELINE=none.
+# that is on Maven Central, passing over a spent one, a tag with no GitHub Release, or
+# MIMA_BASELINE). A break fails here; a major sets MIMA_BASELINE=none.
 mima:
 	@echo "[mima] baseline: $$(./mill show release.mimaBaseline | tr -d '\n "' | sed 's/^null$$/none/')"
 	./mill __.mimaReportBinaryIssues

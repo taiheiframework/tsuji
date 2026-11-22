@@ -9,7 +9,8 @@ the JVM and Scala.js. Part of the Taihei Framework; the family's rules come from
 
 ```bash
 make validate          # scalafix, scalafmt, compile, test and MiMa, JVM and Scala.js
-make mima              # against the newest 4.x release on Maven Central; a spent tag is passed over
+make mima              # against the newest 4.x release on Maven Central; a spent tag (no GitHub
+                       # Release) is passed over; a released one not on Central yet fails
 make test              # ./mill __.test.testForked (JS tests run under Node)
 TAIHEI_TEST_JAVA_HOME=<a JDK 17> make test-java-17   # the JVM tests on Java 17, as the release workflow runs them
 make publish-dry-run   # the bundle Maven Central would receive, written to out/ (a throwaway key in

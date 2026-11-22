@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - main
+      - '4.0.x'
   pull_request:
     branches:
       - main
+      - '4.0.x'
   workflow_dispatch:
 
 # Read-only: CI builds and tests, it publishes nothing.

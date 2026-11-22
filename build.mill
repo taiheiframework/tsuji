@@ -45,47 +45,65 @@ object release extends Module {
   // coordinates, so there is nothing on Central to compare them with.
   val firstRelease = "4.0.0"
 
-  // Whether taihei-i18n VERSION is on Maven Central, where 4.x users and MiMa resolve it, asked
-  // of its JVM module's POM without following a redirect. Central answers 404 for a spent version
-  // (tagged, never released, ADR 0014); any other answer than 200 or 404 fails the build: a
-  // baseline we cannot determine must not turn into an older one, or into none.
-  private def onCentral(v: String): Boolean = {
-    val url = s"https://repo1.maven.org/maven2/dev/taihei/taihei-i18n_3/$v/taihei-i18n_3-$v.pom"
-    val c   = java.net.URI.create(url).toURL.openConnection().asInstanceOf[java.net.HttpURLConnection]
+  // The HTTP status of a GET of url without a credential and without following a redirect; any
+  // answer but 200 or 404 fails the build.
+  private def status(url: String): Int = {
+    val c = java.net.URI.create(url).toURL.openConnection().asInstanceOf[java.net.HttpURLConnection]
     c.setInstanceFollowRedirects(false)
     c.setConnectTimeout(30000)
     c.setReadTimeout(30000)
+    c.setRequestProperty("Accept", "application/vnd.github+json")
     try
       c.getResponseCode match {
-        case 200  => true
-        case 404  => false
-        case code => sys.error(s"no MiMa baseline: $url answers HTTP $code")
+        case code @ (200 | 404) => code
+        case code               => sys.error(s"no MiMa baseline: $url answers HTTP $code")
       }
     finally c.disconnect()
   }
 
+  // Whether taihei-i18n VERSION is a release MiMa can compare with. 4.x users and MiMa resolve it
+  // from Maven Central, asked of its JVM module's POM. A tag that is not there and has no GitHub
+  // Release is spent (tagged, never released, ADR 0014) and passed over, which the build's output
+  // says. A tag with a GitHub Release that Central does not serve (yet) fails the build, as does any
+  // other answer: a baseline we cannot determine must not turn into an older one, or into none.
+  private def released(v: String): Boolean =
+    status(s"https://repo1.maven.org/maven2/dev/taihei/taihei-i18n_3/$v/taihei-i18n_3-$v.pom") == 200 || {
+      if (status(s"https://api.github.com/repos/taiheiframework/tsuji/releases/tags/v$v") == 200)
+        sys.error(s"no MiMa baseline: v$v has a GitHub Release but is not on Maven Central; set MIMA_BASELINE")
+      println(s"[mima] v$v has no GitHub Release and is not on Maven Central: spent, passed over")
+      false
+    }
+
   // The release MiMa compares with: the newest v-tag reachable from HEAD and not on HEAD itself,
-  // none before firstRelease, that is on Maven Central; a spent tag is passed over, so no list of
-  // spent versions is kept. On a tagged release commit that is the release before it: HEAD's own
-  // tag would compare the release with itself. MIMA_BASELINE overrides it: `none` for a major,
-  // which may break, or a version.
+  // none before firstRelease, that is released; a spent tag is passed over, so no list of spent
+  // versions is kept. On a tagged release commit that is the release before it: HEAD's own tag
+  // would compare the release with itself. MIMA_BASELINE overrides it: `none` for a major, which
+  // may break, or a version.
   def mimaBaseline = Task.Input {
     val root = os.Path(sys.env("MILL_WORKSPACE_ROOT"))
     def numbers(v: String) = v.split('.').toSeq.map(_.toIntOption.getOrElse(0))
-    def git(args: String*) = os.proc("git", args).call(cwd = root, check = false)
+    def git(args: String*) = os.proc("git", args).call(cwd = root, check = false, stderr = os.Pipe)
     Task.env.get("MIMA_BASELINE").map(_.trim).filter(_.nonEmpty) match {
       case Some("none") => None
       case Some(v)      => Some(v)
       case None         =>
+        // A shallow clone (or a git that fails) lacks tags: that must not pass as "no baseline".
+        if (git("rev-parse", "--is-shallow-repository").out.trim() != "false")
+          sys.error("a shallow clone (or git failed): fetch the full history and the tags, or set MIMA_BASELINE")
         val exactTag = git("describe", "--tags", "--exact-match", "--match", "v[0-9]*").exitCode == 0
-        // A root commit has no HEAD^: git lists no tag, and there is no baseline.
-        val listed = git("tag", "--merged", if (exactTag) "HEAD^" else "HEAD", "--list", "v[0-9]*", "--sort=-v:refname")
+        val from     = if (exactTag) "HEAD^" else "HEAD"
+        // Only a root commit has no HEAD^: then there is no tag before it and no baseline.
+        val hasFrom  = git("rev-parse", "-q", "--verify", s"$from^{commit}").exitCode == 0
+        if (!hasFrom && from == "HEAD") sys.error("git cannot read HEAD: no MiMa baseline")
+        val listed   = git("tag", "--merged", from, "--list", "v[0-9]*", "--sort=-v:refname")
+        if (hasFrom && listed.exitCode != 0)
+          sys.error(s"git tag --merged $from failed: ${listed.err.text().trim()}")
         listed.out
           .lines()
           .map(_.trim.stripPrefix("v"))
           .filter(_.matches("[0-9]+\\.[0-9]+\\.[0-9]+"))
           .filter(v => Ordering.Implicits.seqOrdering[Seq, Int].gteq(numbers(v), numbers(firstRelease)))
-          .find(onCentral)
+          .find(released)
     }
   }
 }

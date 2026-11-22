@@ -43,7 +43,7 @@ make fmt            # ./mill __.reformat
 make fix            # ./mill __.fix                 (scalafix)
 make validate       # fix + fmt + compile + test + mima
 make mima           # binary compatibility with the newest release on Maven Central; a spent
-                    # tag is passed over (MIMA_BASELINE=x.y.z|none)
+                    # tag, with no GitHub Release, is passed over (MIMA_BASELINE=x.y.z|none)
 make test-java-17   # the JVM tests on Java 17 (TAIHEI_TEST_JAVA_HOME=<a JDK 17>)
 make publishLocal   # to ~/.ivy2/local (a SNAPSHOT only)
 make publish-dry-run  # the bundle Maven Central would receive, written to out/; needs a

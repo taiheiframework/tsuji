@@ -26,11 +26,13 @@ problem on stderr, when anything is not exactly as expected.
            dev.taihei file (and the POM beside it) is in the SHA256SUMS of its version's immutable
            GitHub Release, or, without such a release, comes from Central with a good signature
            by the release key.
-  released --central URL --url URL --artifact A VERSION
-           Exit 0 when Maven Central or URL has VERSION of artifact A (its POM answers 200, asked
-           of Central first), and 3 when both answer 404: the version is spent, tagged and never
-           released (URL serves exactly the immutable GitHub Releases). Any other answer, a
-           redirect included, exits 1. The MiMa baseline passes over a spent tag only.
+  released --central URL --api URL --repo OWNER/NAME --artifact A VERSION
+           Exit 0 when Maven Central has VERSION of artifact A (its POM answers 200) or the tag
+           vVERSION has a published, immutable GitHub Release in the repository (asked without a
+           token), and 3 when Central answers 404 and the tag has no GitHub Release: the version
+           is spent, tagged and never released. Any other answer, a redirect from Central or a
+           release that is a draft or not immutable included, exits 1. The MiMa baseline passes
+           over a spent tag only.
 """
 
 import argparse
@@ -511,21 +513,33 @@ def resolved(args):
     print(f"{central} files from Maven Central; {by_sums} dev.taihei files match their release's SHA256SUMS and signature, {by_signature} verified by signature alone")
 
 
-# Exit status of released for a version neither repository has: a spent version, tagged and never
-# released, which the MiMa baseline passes over. Any other failure is 1 and stops the build.
+# Exit status of released for a spent version: tagged, and without a GitHub Release, so never
+# released (ADR 0014); the MiMa baseline passes over it. Any other failure is 1 and stops the build.
 SPENT = 3
 
 
 def released(args):
-    for name, base in (("Maven Central", args.central.rstrip("/")), (args.url, args.url.rstrip("/"))):
-        check_url(base + "/")
-        url = f"{base}/dev/taihei/{args.artifact}/{args.version}/{args.artifact}-{args.version}.pom"
-        code, _ = http_get(url, MAX_FILE, follow=False)
-        if code == 200:
-            print(f"{args.version} is on {name}")
-            return
-    print(f"[release] v{args.version} is neither on Maven Central nor on {args.url}: spent", file=sys.stderr)
-    sys.exit(SPENT)
+    central = args.central.rstrip("/")
+    check_url(central + "/")
+    pom = f"{central}/dev/taihei/{args.artifact}/{args.version}/{args.artifact}-{args.version}.pom"
+    code, _ = http_get(pom, MAX_FILE, follow=False)
+    if code == 200:
+        print(f"{args.version} is on Maven Central")
+        return
+    # Not on Central: the tag's GitHub Release decides, never whether a site serves it yet.
+    check_url(args.api.rstrip("/") + "/")
+    url = f"{args.api.rstrip('/')}/repos/{args.repo}/releases/tags/v{args.version}"
+    code, body = http_get(url, MAX_JSON, accept="application/vnd.github+json")
+    if code == 404:
+        print(f"[release] v{args.version} has no GitHub Release in {args.repo} and is not on Maven Central: spent, passed over", file=sys.stderr)
+        sys.exit(SPENT)
+    try:
+        release = json.loads(body)
+    except ValueError:
+        fail([f"{url}: not JSON"])
+    if not isinstance(release, dict) or release.get("immutable") is not True or release.get("draft") or release.get("prerelease"):
+        fail([f"v{args.version} has a GitHub Release in {args.repo} that is not published and immutable"])
+    print(f"{args.version} has an immutable GitHub Release")
 
 
 def main():
@@ -549,7 +563,7 @@ def main():
         rs.add_argument(opt, required=True)
     rs.add_argument("json", nargs="+")
     rl = sub.add_parser("released")
-    for opt in ("--central", "--url", "--artifact"):
+    for opt in ("--central", "--api", "--repo", "--artifact"):
         rl.add_argument(opt, required=True)
     rl.add_argument("version")
     args = parser.parse_args()

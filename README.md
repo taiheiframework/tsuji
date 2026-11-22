@@ -54,10 +54,15 @@ make test           # ./mill __.test.testForked    (JVM + JS; JS runs on Node)
 make fmt            # ./mill __.reformat
 make fix            # ./mill __.fix                 (scalafix)
 make validate       # repo-guard + release-test + fix + fmt + compile + test + mima
-make repo-guard     # Maven Central only: no other repository, every dev.taihei pin on Central
-make release-test   # the release machinery's own tests, against a fake registry on localhost
-make mima           # binary compatibility with the newest release of the current major on Central
+make repo-guard     # Coursier's defaults (local Ivy, Central), then REPO_URL for dev.taihei
+                    # alone, nothing else; every resolved dev.taihei file checked
+make release-test   # the tests of repo-guard and the dry run, against stand-ins on localhost
+make mima           # binary compatibility with the newest release of the current major on
+                    # Central or REPO_URL; a spent tag is passed over (MIMA_BASELINE=x.y.z|none)
+make test-java-17   # the JVM tests on Java 17 (TAIHEI_TEST_JAVA_HOME=<a JDK 17>)
 make publishLocal   # to ~/.ivy2/local (a SNAPSHOT only)
+make publish-dry-run  # the bundle Maven Central would receive, written to out/; needs a
+                      # throwaway signing key in MILL_PGP_SECRET_BASE64 and MILL_PGP_PASSPHRASE
 ```
 
 ## Releasing
@@ -65,39 +70,47 @@ make publishLocal   # to ~/.ivy2/local (a SNAPSHOT only)
 The version is the git tag: an exact `v`-tag on a clean tree is the release,
 anything else a SNAPSHOT of the last tag.
 
-```sh
-make release-prepare TYPE=patch|minor|major EMBARGO=0|1
-                                               # validate, write RELEASE_x_y_z.md
-make release-finalize                          # commit the notes, tag locally, check
-                                               # both registries, build and sign the
-                                               # bundle once, upload it to GitHub
-                                               # Packages and read every file back
-git push origin <branch> && git push origin vX.Y.Z # main or 5.0.x; only after the read-back
-make release-github                            # the bundle on an immutable GitHub Release
-make publish-dry-run                           # the signed bundle, written to out/
-```
+A version is released by the Taihei Framework's
+[release workflow](https://github.com/taiheiframework/release), in two acts of the maintainer:
 
-One release publishes `taihei-tsuji` (JVM and Scala.js) and `taihei-tsuji-tools` with the same
-version, as one signed bundle. Its files go unchanged to this repository's GitHub Packages
-registry first, and to Maven Central with the next release train, so a new version can take up to
-a month to reach Central; `SHA256SUMS` on the GitHub Release lists the SHA-256 of every file, and
-both registries serve exactly those bytes. A security fix goes to Central first (`EMBARGO=1`).
-The build itself resolves from Maven Central only, and `make validate` checks it (`repo-guard`).
-A release publishes only the commit `release-prepare` validated, and refuses when a file git does
-not track is in a source or resource folder, or a stray build file is in the tree.
+1. He signs an annotated tag `vX.Y.Z` on a commit of `main`, or of a maintenance branch such as
+   `6.0.x` for a patch of that line, that holds the version's notes `RELEASE_x_y_z.md`, and
+   pushes it.
+2. He approves the run's one `release` job.
 
-`release-finalize`, `central-bundle` and `release-github` check every signature against
-`keys/release-key.asc` alone, in a keyring of their own; the maintainer's own GnuPG keyring plays
-no part.
+The tag starts `.github/workflows/release.yml`, which calls the release workflow at a pinned
+commit. It checks the tag's signature, builds a fresh checkout of the tag with no secret
+(`make validate`, `make test-java-17`, `make publish-dry-run`), and only then, in a job that
+runs no code of this repository, signs every jar and POM, keeps the bundle on an immutable
+GitHub Release of the tag and publishes its files to the family's Maven repository. A tag
+whose run fails before the GitHub Release is published is spent: the next release takes the
+next number, and MiMa passes over the spent tag.
 
-`make publish` is only for a security fix under embargo, which goes to Central first; it refuses
-any other version. It reads the Central Portal user token and the release key from
-`~/.edo-release.env` (a name from the Edo Framework days, kept because the maintainers'
-workstations write it for every library; `RELEASE_ENV=…` points elsewhere) or the environment
-(`MILL_SONATYPE_USERNAME`, `MILL_SONATYPE_PASSWORD`, `MILL_PGP_SECRET_BASE64`,
-`MILL_PGP_PASSPHRASE`). The upload to GitHub Packages reads a `write:packages` token from
-`~/.taihei-packages-publish.env` alone, and the read-back a `read:packages` token from Coursier's
-credentials file (host `maven.pkg.github.com`); neither is ever in `~/.edo-release.env`.
+One release publishes `taihei-tsuji` (for the JVM and Scala.js) and `taihei-tsuji-tools` with
+the same version, as one signed bundle, built and signed once. Its
+zip and `SHA256SUMS`, the SHA-256 of every file, are kept on the immutable GitHub Release, and the
+family's Maven repository serves exactly those bytes. No new version of this line goes to Maven
+Central; a security fix for a line whose users are on Central goes there afterwards, from the
+same bytes.
+
+`make validate` checks the build's repositories (`repo-guard`): Coursier's defaults (the local
+Ivy repository, then Maven Central), then `REPO_URL` for `dev.taihei` alone, and nothing else,
+for every module that resolves dependencies, published or not; every `dev.taihei` pin on one of
+them; every file the build resolved from one of them; and every resolved `dev.taihei` file in
+the `SHA256SUMS` of its version's immutable GitHub Release and signed by the release key
+(`keys/release-key.asc`), or, for a version without a release, on Central with a good signature
+by that key.
+
+repo-guard asks the GitHub API without a token: when the API answers HTTP 403 or 429 (its limit
+for anonymous requests), wait an hour and run it again. When it names a file other than
+`dev.taihei` in the Coursier cache of `REPO_URL`, remove that repository's directory from the
+cache (under `~/.cache/coursier/v1/https/` on Linux, `~/Library/Caches/Coursier/v1/https/` on
+macOS, the directory named after `REPO_URL`'s host and path) and build again.
+
+The `mill` launcher downloads Mill over HTTPS only, and runs Mill only when its SHA-256 matches
+the one pinned in the launcher: it checks a download before keeping it, and the file it is about
+to run before every run, so a tampered copy in Mill's cache is refused, as is a version without a
+pin.
 Releases are signed by the Taihei Framework release key, fingerprint
 `5026 B299 6DDB 697E C463  0BCF 14A7 33E2 A507 702F`, with the user ids
 `Taihei Framework Releases <releases@taihei.dev>` and, from before the family was renamed,

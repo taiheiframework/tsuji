@@ -56,9 +56,9 @@ jobs:
 
       # A symlink or a submodule is a tracked, clean entry to git, but Mill follows a symlink into
       # the published jars, wherever it points, and a filter (Git LFS) checks out other bytes than
-      # the reviewed ones. The release refuses them (make's STRAY_GUARD); a pull request that adds
-      # one fails here, visibly. This repository needs no .gitattributes, .lfsconfig or .gitmodules,
-      # so any of them fails too. bash with pipefail, so a failing git cannot pass as "none found".
+      # the reviewed ones. A pull request that adds one fails here, visibly. This repository needs
+      # no .gitattributes, .lfsconfig or .gitmodules, so any of them fails too. bash with pipefail,
+      # so a failing git cannot pass as "none found".
       - name: Refuse symlinks, submodules, filters and git attribute files
         shell: bash
         run: |
@@ -69,9 +69,6 @@ jobs:
           if [ -n "$filtered" ]; then echo "::error::files with a git filter:"; echo "$filtered"; exit 1; fi
           attrs="$(git ls-files | awk '{ p = tolower($0) } p ~ /(^|\/)\.(gitattributes|lfsconfig|gitmodules)"?$/')"
           if [ -n "$attrs" ]; then echo "::error::tracked .gitattributes, .lfsconfig or .gitmodules:"; echo "$attrs"; exit 1; fi
-          # A release bundle is built on the maintainer's machine, never committed.
-          bundles="$(git ls-files -- .release-bundles .release-embargo .release-state.json)"
-          if [ -n "$bundles" ]; then echo "::error::tracked release bundles or release state:"; echo "$bundles"; exit 1; fi
 
       # The build resolves from Maven Central first, then the family's repository (REPO_URL), and
       # from nothing else; every dev.taihei pin is a released version on one of them, and every
@@ -80,13 +77,9 @@ jobs:
       - name: Maven Central and the family's repository only (repo-guard)
         run: make repo-guard
 
-      # The release machinery against stand-ins on localhost: no token, no key, no upload.
-      - name: Release machinery tests
+      # repo-guard's and the dry run's tests, against stand-ins on localhost: no token, no key, no upload.
+      - name: Build check tests (release-test)
         run: make release-test
-
-      # As release-prepare runs them: its variables must not reach the make calls inside the test.
-      - name: Release machinery tests, with the variables of a release-prepare
-        run: make release-test TYPE=patch EMBARGO=0 VERSION=1.2.3
 
       - name: Check formatting
         run: ./mill __.checkFormat
@@ -138,14 +131,9 @@ jobs:
           restore-keys: |
             mill-java17-${{ runner.os }}-
 
-      # Mill runs on its own JVM; TAIHEI_TEST_JAVA_HOME makes the test modules fork on Java 17.
+      # Mill runs on its own JVM; TAIHEI_TEST_JAVA_HOME makes the test modules fork on Java 17,
+      # as the release workflow runs them.
       - name: Run the JVM tests on Java 17
-        shell: bash
         env:
           TAIHEI_TEST_JAVA_HOME: ${{ steps.java17.outputs.path }}
-        run: |
-          set -euo pipefail
-          "$TAIHEI_TEST_JAVA_HOME/bin/java" -version 2>&1 | tee "$RUNNER_TEMP/java-version"
-          grep -q 'version "17\.' "$RUNNER_TEMP/java-version"
-          ./mill show tsuji.jvm.test.javaHome | grep -qF "$TAIHEI_TEST_JAVA_HOME"
-          ./mill tsuji.jvm.test.testForked + tsuji.tools.test.testForked
+        run: make test-java-17

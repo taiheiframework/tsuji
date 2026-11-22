@@ -32,5 +32,5 @@ tools/src                            taihei-tsuji-tools: ExportCatalogues
 
 - `make validate`: scalafix, scalafmt, compile, tests on the JVM and Node, MiMa against the newest
   release of the current major line.
-- Released from the Makefile (`make release-prepare TYPE=...`, `make release-finalize`), the
+- Released by the family's release workflow from the maintainer's signed tag, the
   version from the git tag; one release publishes `taihei-tsuji` and `taihei-tsuji-tools`.

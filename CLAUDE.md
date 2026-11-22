@@ -12,26 +12,25 @@ come from the parent folder's `CLAUDE.md` when this repo is checked out under `~
 make validate          # repo-guard, release-test, scalafix, scalafmt, compile, test and MiMa
 make repo-guard        # Coursier's defaults (local Ivy, Central), then REPO_URL for dev.taihei alone;
                        # pins released; resolved dev.taihei files checked
-make mima              # against the newest 5.x tag, which must be on Central or REPO_URL
-                       # (between a tag push and publish-repo it fails; MIMA_BASELINE=x.y.z)
+make mima              # against the newest 5.x tag on Central or REPO_URL; a spent tag (on neither) is
+                       # passed over; MIMA_BASELINE=x.y.z|none overrides
 make test              # ./mill __.test.testForked (JS tests run under Node)
-TAIHEI_TEST_JAVA_HOME=<a JDK 17> ./mill tsuji.jvm.test.testForked   # the JVM tests on Java 17
-make publish-dry-run   # the bundle Maven Central would receive, written to out/
-make release-prepare TYPE=patch|minor|major EMBARGO=0|1   # then review RELEASE_x_y_z.md;
-                       # EMBARGO=1 when the ticket has the label embargo (read it with fude first)
-make release-finalize  # the signed bundle and its checks, tag local: only with the maintainer's yes
-make release-github    # after the push: the immutable GitHub Release, which publishes the version
-make publish-repo      # the family repository's deploy, then verify-repo reads every file back
+TAIHEI_TEST_JAVA_HOME=<a JDK 17> make test-java-17   # the JVM tests on Java 17, as CI and the release workflow run them
+make publish-dry-run   # the bundle Maven Central would receive, written to out/ (a throwaway key in
+                       # MILL_PGP_SECRET_BASE64 and MILL_PGP_PASSPHRASE)
 ```
 
-Releases follow ADR 0004: one signed bundle, built locally by release-finalize (nothing is
-uploaded), then the branch and the tag are pushed, release-github keeps it on an immutable GitHub
-Release, the family's Maven repository (`REPO_URL`, the same string as `release.repoUrl` in
-build.mill) serves it from there, and the next release train in nakama takes it to Maven Central.
-A security fix (`EMBARGO=1`) goes to Central first with `make publish`, and gets its GitHub
-Release from Central's files (`make central-bundle`) after its advisory. The machinery is shared
-with mihon: keep everything but the per-library lines identical. Credentials never go on make's
-command line; never read or print `~/.edo-release.env`.
+Only the maintainer releases, through the family's release workflow (ADR 0014): his signed
+`v`-tag on `main` or a maintenance branch `M.m.x` starts `.github/workflows/release.yml`, the
+caller pinned to a commit of the release repository's `open.yml`, and he approves its one
+`release` job. The run builds the tag with `make validate`, `make test-java-17` and `make
+publish-dry-run`, so those targets keep their names on every line. A developer commits the
+release notes `RELEASE_x_y_z.md` through the merge gate; an agent never creates or pushes a
+release tag. The family's Maven repository (`REPO_URL`, the same string as `release.repoUrl` in
+build.mill) serves every release from its immutable GitHub Release. Maven Central is frozen; a
+security patch of a line whose users are on Central goes there from the same bytes, by nakama's
+`make central`. Moving the caller's pin is a reviewed change on `main` and on every maintenance
+branch. Credentials never go on make's command line; never read or print `~/.edo-release.env`.
 
 ## Layout
 

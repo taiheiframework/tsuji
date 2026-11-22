@@ -35,14 +35,7 @@ hs_err_pid*
 # Compiled bits
 *.class
 
-# Release state, written by make release-prepare and removed by release-finalize or release-abort
-.release-state.json
-.release-state.*
-.release-notes.*
-# The signed bundles of releases, kept until their immutable GitHub Release holds them, the
-# versions under embargo, and repo-guard's scratch directory
-.release-bundles/
-.release-embargo
+# repo-guard's scratch directory
 .repo-guard.*
 
 # Review reports, kept locally

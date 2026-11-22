@@ -9,30 +9,29 @@ come from the parent folder's `CLAUDE.md` when this repo is checked out under `~
 ## Commands
 
 ```bash
-make validate          # repo-guard, release-test, scalafix, scalafmt, both checked as CI does, compile, test and MiMa
+make validate          # repo-guard, release-test, scalafix, scalafmt, both checked as CI does, compile, test, MiMa and no-zio
 make repo-guard        # Coursier's defaults (local Ivy, Central), then REPO_URL for dev.taihei alone;
                        # pins released; resolved dev.taihei files checked
-make mima              # against the newest 6.x tag (release.majorLine), which must be on Central or REPO_URL
-                       # (between a tag push and publish-repo it fails; MIMA_BASELINE=x.y.z);
-                       # a version in release/spent-versions.txt (tagged, never published) is skipped
+make mima              # against the newest tag of release.majorLine on Central or REPO_URL; a spent tag
+                       # (on neither) is passed over; MIMA_BASELINE=x.y.z|none overrides
 make test              # ./mill __.test.testForked (JS tests run under Node)
 make lint              # ./mill __.checkFormat, then __.fix --check: CI's lint steps
-TAIHEI_TEST_JAVA_HOME=<a JDK 17> ./mill tsuji.jvm.test.testForked   # the JVM tests on Java 17
-make publish-dry-run   # the bundle Maven Central would receive, written to out/
+TAIHEI_TEST_JAVA_HOME=<a JDK 17> make test-java-17   # the JVM tests on Java 17, as CI and the release workflow run them
+make publish-dry-run   # the bundle Maven Central would receive, written to out/ (a throwaway key in
+                       # MILL_PGP_SECRET_BASE64 and MILL_PGP_PASSPHRASE)
 ```
 
-Only the maintainer releases. Until the family's release workflow takes over (ADR 0009), he
-does it on the interim route of ADR 0004 at his own terminal, as the README's Releasing section
-lists: `release-prepare TYPE=… EMBARGO=0|1 TICKET=<key>` (EMBARGO=1 when the ticket has the label
-embargo), `release-finalize` (the signed bundle, tag local), the push, `release-github` and
-`publish-repo`. An agent never runs these, nor creates or pushes a release tag; `publish-dry-run`
-and `release-test` upload nothing and stay open to it. The family's Maven repository
-(`REPO_URL`, the same string as `release.repoUrl` in build.mill) serves every release from its
-immutable GitHub Release. Maven Central is frozen: no version of this line goes there, and a
-security fix for a line whose users are on Central is released from its maintenance branch. The
-machinery is shared with mihon: keep everything but the per-library lines identical. Credentials
-never go on make's command line and are not exported in the shell you build in; never read or
-print `~/.edo-release.env`.
+Only the maintainer releases, through the family's release workflow (ADR 0014): his signed
+`v`-tag on `main` or a maintenance branch `M.m.x` starts `.github/workflows/release.yml`, the
+caller pinned to a commit of the release repository's `open.yml`, and he approves its one
+`release` job. The run builds the tag with `make validate`, `make test-java-17` and `make
+publish-dry-run`, so those targets keep their names on every line. A developer commits the
+release notes `RELEASE_x_y_z.md` through the merge gate; an agent never creates or pushes a
+release tag. The family's Maven repository (`REPO_URL`, the same string as `release.repoUrl` in
+build.mill) serves every release from its immutable GitHub Release. Maven Central is frozen; a
+security patch of a line whose users are on Central goes there from the same bytes, by nakama's
+`make central`. Moving the caller's pin is a reviewed change on `main` and on every maintenance
+branch. Credentials never go on make's command line; never read or print `~/.edo-release.env`.
 
 ## Layout
 

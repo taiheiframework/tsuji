@@ -1,27 +1,21 @@
 #!/usr/bin/env bash
-# Tests of the release machinery that never touch a real registry (make release-test, part of
-# make validate): scripts/release.py, and repo-guard, release-preflight, release-github,
-# publish-repo, verify-repo, publish-dry-run, release-prepare's checks, release-finalize's first
-# steps, release-abort and the embargo guard in the Makefile, run against scripts/fake_servers.py on localhost, which stands in for Maven Central,
-# the family's Maven repository and the GitHub API. A throwaway git repository, with a bare one as
-# its origin, holds a copy of the Makefile and scripts/, tagged v9.9.9, with a synthetic bundle
-# signed by throwaway keys (no Mill, never the release key): what is tested is what the targets do
-# with a bundle, its signatures and the answers they get. Where a target starts Mill or gh, a
-# stand-in answers and records what it was asked (and which credential variables reached Mill).
-# Nothing leaves localhost. The mill launcher has its own tests, scripts/test-mill-launcher. One
-# line per check; exits non-zero when any check fails.
+# Tests of the build's checks that never touch a real registry (make release-test, part of make
+# validate): scripts/release.py, and repo-guard and publish-dry-run in the Makefile, run against
+# scripts/fake_servers.py on localhost, which stands in for Maven Central, the family's Maven
+# repository and the GitHub API. Files are signed by throwaway keys, never the release key. A
+# throwaway git repository holds a copy of the Makefile and scripts/; where a target starts Mill, a
+# stand-in answers and records what it was asked. Nothing leaves localhost. The mill launcher has
+# its own tests, scripts/test-mill-launcher. One line per check; exits non-zero when any check
+# fails.
 set -uo pipefail
 # make hands its command-line variables to every make below it, through MAKEFLAGS and as
-# environment variables: release-prepare TYPE=... EMBARGO=... TICKET=... runs make validate, and so
-# this script, and the make calls here would inherit them (an EMBARGO=0 from outside answers the
-# very question one check asks). TYPE, EMBARGO, TICKET and VERSION are the ones the Makefile reads
-# from there; COURSIER_* it reads from the environment. The release credentials and the launcher's
-# version variables are cleared too, so that only what a check sets reaches the targets.
-unset MAKEFLAGS MFLAGS MAKEOVERRIDES MAKELEVEL TYPE EMBARGO TICKET VERSION RELEASE_ENV COURSIER_CONFIG_DIR \
+# environment variables, and the make calls here would inherit them. COURSIER_* the Makefile reads
+# from the environment. The publishing credentials and the launcher's version variables are
+# cleared too, so that only what a check sets reaches the targets.
+unset MAKEFLAGS MFLAGS MAKEOVERRIDES MAKELEVEL COURSIER_CONFIG_DIR \
   COURSIER_REPOSITORIES COURSIER_MIRRORS COURSIER_CREDENTIALS \
   MILL_SONATYPE_USERNAME MILL_SONATYPE_PASSWORD MILL_PGP_SECRET_BASE64 MILL_PGP_PASSPHRASE \
-  MILL_VERSION DEFAULT_MILL_VERSION MILL_TESTS_PUBLISH_DRY_RUN GH_TOKEN GITHUB_TOKEN
-
+  MILL_VERSION DEFAULT_MILL_VERSION MILL_TESTS_PUBLISH_DRY_RUN
 HERE=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$HERE/.." && pwd)
 W=$(mktemp -d "${TMPDIR:-/tmp}/taihei-release-test.XXXXXX")
@@ -46,7 +40,6 @@ expect() {
 }
 
 V=9.9.9
-GROUP=dev.taihei
 from_makefile() {
   make -s -C "$REPO" --no-print-directory -f - print <<EOF 2>/dev/null
 include Makefile
@@ -59,36 +52,10 @@ PREFIX=$(from_makefile BUNDLE_PREFIX)
 PUBLISHED=$(from_makefile PUBLISHED)
 FAMILY=$(from_makefile FAMILY)
 OWNER=$(from_makefile OWNER)
-LIBRARY=$(from_makefile GITHUB_REPO); LIBRARY=${LIBRARY#*/}
-[ -n "$ARTIFACTS" ] && [ -n "$PREFIX" ] && [ -n "$PUBLISHED" ] && [ -n "$FAMILY" ] && [ -n "$OWNER" ] && [ -n "$LIBRARY" ] \
-  || { echo "cannot read ARTIFACTS, BUNDLE_PREFIX, PUBLISHED, FAMILY, OWNER and GITHUB_REPO from the Makefile"; exit 1; }
+LIBRARY=${PREFIX##*-}
+[ -n "$ARTIFACTS" ] && [ -n "$PREFIX" ] && [ -n "$PUBLISHED" ] && [ -n "$FAMILY" ] && [ -n "$OWNER" ] \
+  || { echo "cannot read ARTIFACTS, BUNDLE_PREFIX, PUBLISHED, FAMILY and OWNER from the Makefile"; exit 1; }
 MODULES=${PUBLISHED//.publishArtifacts/}
-
-# --- a synthetic tree in the layout Mill writes -----------------------------------------------
-SRC="$W/src"
-python3 -I -B - "$SRC" "$GROUP" "$V" $ARTIFACTS <<'EOF'
-import hashlib, os, sys
-src, group, v, artifacts = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4:]
-pom = """<?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0">
-  <modelVersion>4.0.0</modelVersion>
-  <groupId>{g}</groupId><artifactId>{a}</artifactId><version>{v}</version>
-  <name>{a}</name><description>test</description><url>https://example.invalid</url>
-  <licenses><license><name>Apache-2.0</name><url>https://www.apache.org/licenses/LICENSE-2.0.txt</url></license></licenses>
-  <scm><url>https://example.invalid</url><connection>scm:git:https://example.invalid</connection></scm>
-  <developers><developer><id>t</id><name>Test</name></developer></developers>
-</project>
-"""
-for a in artifacts:
-    d = os.path.join(src, *group.split("."), a, v)
-    os.makedirs(d)
-    for suffix in (".jar", "-sources.jar", "-javadoc.jar", ".pom"):
-        f = os.path.join(d, f"{a}-{v}{suffix}")
-        data = pom.format(g=group, a=a, v=v).encode() if suffix == ".pom" else os.urandom(64)
-        open(f, "wb").write(data)
-        open(f + ".md5", "w").write(hashlib.md5(data).hexdigest())
-        open(f + ".sha1", "w").write(hashlib.sha1(data).hexdigest())
-EOF
 
 # Two throwaway signing keys, in a keyring of their own (a short path: gpg-agent's socket may
 # live there), standing in for the release key and for some other key.
@@ -102,7 +69,6 @@ KEY=$(gpg --list-keys --with-colons "release@example.invalid" 2>/dev/null | awk 
 OTHER=$(gpg --list-keys --with-colons "other@example.invalid" 2>/dev/null | awk -F: '$1 == "fpr" { print $10; exit }')
 gpg --batch --quiet --armor --export "$KEY" > "$W/release-key.asc" 2>/dev/null
 sign() { rm -f "$2.asc"; gpg --batch --quiet --pinentry-mode loopback --passphrase '' --local-user "$1" --armor --detach-sign -o "$2.asc" "$2" 2>/dev/null; }
-while IFS= read -r f; do sign "$KEY" "$f"; done < <(find "$SRC" -type f \( -name '*.jar' -o -name '*.pom' \) | sort)
 
 R() { python3 -I -B "$REPO/scripts/release.py" "$@"; }
 sha() { python3 -I -B -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$1"; }
@@ -122,39 +88,6 @@ CENTRAL="$BASE/central"
 API="$BASE/api"
 
 # --- scripts/release.py -----------------------------------------------------------------------
-expect "bundle: a complete tree becomes a bundle" 0 "files" R bundle --source "$SRC" --dest "$W/b1" --group $GROUP --version $V --artifacts "$ARTIFACTS" --name n
-R bundle --source "$SRC" --dest "$W/b2" --group $GROUP --version $V --artifacts "$ARTIFACTS" --name n >/dev/null 2>&1
-cmp -s "$W/b1/n.zip" "$W/b2/n.zip" && cmp -s "$W/b1/SHA256SUMS" "$W/b2/SHA256SUMS" && pass "bundle: the same tree gives the same zip and ledger" || fail "bundle: not deterministic"
-expect "bundle: an existing bundle is refused" 1 "built once" R bundle --source "$SRC" --dest "$W/b1" --group $GROUP --version $V --artifacts "$ARTIFACTS" --name n
-expect "verify: an untouched bundle passes" 0 "" R verify --dest "$W/b1"
-[ "$(R verify --dest "$W/b1" | tail -n 1)" = "$(R verify --dest "$W/b1" | grep '\.pom$' | tail -n 1)" ] && pass "verify: POMs come last in the upload order" || fail "verify: upload order"
-first_jar() { find "$1" -name "*-$V.jar" | sort | head -n 1; }
-first_pom() { find "$1" -name "*-$V.pom" | sort | head -n 1; }
-rehash() { python3 -I -B -c 'import hashlib,sys; d=open(sys.argv[1],"rb").read(); open(sys.argv[1]+".md5","w").write(hashlib.md5(d).hexdigest()); open(sys.argv[1]+".sha1","w").write(hashlib.sha1(d).hexdigest())' "$1"; }
-cp -r "$SRC" "$W/s3"; rm "$(first_jar "$W/s3").asc"
-expect "bundle: a missing signature is refused" 1 "missing from the bundle" R bundle --source "$W/s3" --dest "$W/b3" --group $GROUP --version $V --artifacts "$ARTIFACTS" --name n
-cp -r "$SRC" "$W/s4"; echo 00 > "$(first_jar "$W/s4").md5"
-expect "bundle: a wrong checksum is refused" 1 "does not match" R bundle --source "$W/s4" --dest "$W/b4" --group $GROUP --version $V --artifacts "$ARTIFACTS" --name n
-cp -r "$SRC" "$W/s5"; touch "$(dirname "$(first_jar "$W/s5")")/extra.txt"
-expect "bundle: an extra file is refused" 1 "not expected in the bundle" R bundle --source "$W/s5" --dest "$W/b5" --group $GROUP --version $V --artifacts "$ARTIFACTS" --name n
-cp -r "$SRC" "$W/s6"; P6=$(first_pom "$W/s6"); sed -i.bak 's#<description>test</description>##' "$P6"; rm "$P6.bak"; rehash "$P6"
-expect "bundle: a POM without what Central needs is refused" 1 "no description" R bundle --source "$W/s6" --dest "$W/b6" --group $GROUP --version $V --artifacts "$ARTIFACTS" --name n
-for tag in repositories pluginRepositories; do
-  rm -rf "$W/s6r" "$W/b6r"; cp -r "$SRC" "$W/s6r"; P6=$(first_pom "$W/s6r")
-  sed -i.bak "s#</developers>#</developers><$tag><repository><id>x</id><url>https://example.invalid/maven</url></repository></$tag>#" "$P6"; rm "$P6.bak"; rehash "$P6"
-  expect "bundle: a POM that names $tag is refused" 1 "names $tag" R bundle --source "$W/s6r" --dest "$W/b6r" --group $GROUP --version $V --artifacts "$ARTIFACTS" --name n
-done
-cp -r "$SRC" "$W/s7"; ln -s /etc/hostname "$(dirname "$(first_jar "$W/s7")")/link"
-expect "bundle: a symlink is refused" 1 "not a regular file" R bundle --source "$W/s7" --dest "$W/b7" --group $GROUP --version $V --artifacts "$ARTIFACTS" --name n
-for change in changed extra zip; do
-  rm -rf "$W/b8"; cp -r "$W/b1" "$W/b8"
-  case $change in
-    changed) printf x >> "$(first_jar "$W/b8/repository")";;
-    extra) touch "$W/b8/repository/extra";;
-    zip) printf x >> "$W/b8/n.zip";;
-  esac
-  expect "verify: a $change file in the kept bundle is refused" 1 "" R verify --dest "$W/b8"
-done
 printf '{"a.repositories": [], "b.repositories": []}' > "$W/none.json"
 printf '{"a.repositories": ["https://maven.pkg.github.com/x"]}' > "$W/some.json"
 expect "no-repos: modules without repositories pass" 0 "" R no-repos "$W/none.json"
@@ -341,51 +274,36 @@ expect "resolved: the same file from Central and from the site is checked in eac
 rm -rf "$CENTC/dev/taihei/$DA/$DV"
 expect "resolved: files from two Coursier caches are refused" 1 "more than one Coursier cache" resolved "$W/c9.json"
 
-# released: the MiMa baseline's check; a release tag on neither Central nor the site fails.
+# released: the MiMa baseline's check. A version on neither Central nor the site is spent (exit
+# 3), which the baseline passes over; any other answer stops it (exit 1).
 mkdir -p "$S/central/dev/taihei/$DA/6.6.6" "$S/site/dev/taihei/$DA/6.6.7"
 printf 'pom' > "$S/central/dev/taihei/$DA/6.6.6/$DA-6.6.6.pom"; printf 'pom' > "$S/site/dev/taihei/$DA/6.6.7/$DA-6.6.7.pom"
 expect "released: a version on Central" 0 "on Maven Central" R released --central "$CENTRAL" --url "$SITE" --artifact "$DA" 6.6.6
 expect "released: a version on the site" 0 "on $SITE" R released --central "$CENTRAL" --url "$SITE" --artifact "$DA" 6.6.7
-expect "released: a version on neither fails, naming it" 1 "v6.6.8 is neither on Maven Central nor on" R released --central "$CENTRAL" --url "$SITE" --artifact "$DA" 6.6.8
-expect "released: a redirect fails" 1 "HTTP 301" R released --central "$CENTRAL" --url "$BASE/moved/" --artifact "$DA" 6.6.7
+R released --central "$CENTRAL" --url "$SITE" --artifact "$DA" 6.6.8 >/dev/null 2>&1
+[ $? = 3 ] && pass "released: a version on neither is spent, exit 3" || fail "released: a version on neither does not exit 3"
+expect "released: and says so, naming it" 1 "v6.6.8 is neither on Maven Central nor on" R released --central "$CENTRAL" --url "$SITE" --artifact "$DA" 6.6.8
+R released --central "$CENTRAL" --url "$BASE/moved/" --artifact "$DA" 6.6.8 >/dev/null 2>&1
+[ $? = 1 ] && pass "released: a redirect is no answer, exit 1, never spent" || fail "released: a redirect did not exit 1"
+expect "released: and names it" 1 "HTTP 301" R released --central "$CENTRAL" --url "$BASE/moved/" --artifact "$DA" 6.6.7
 
-# --- the Makefile targets, with stand-ins for Mill and gh --------------------------------------
+# --- the Makefile targets, with a stand-in for Mill ---------------------------------------------
 G="$W/repo"; mkdir -p "$G/scripts" "$G/keys"
 cp "$REPO/Makefile" "$G/"; cp "$REPO/scripts/release.py" "$G/scripts/"; cp "$W/release-key.asc" "$G/keys/"
 override "$SITE" > "$G/build.mill"
-printf '# Release %s\n' "$V" > "$G/RELEASE_${V//./_}.md"
-B="$G/.release-bundles/$PREFIX-$V"
-MLOG="$W/mill-env"; GLOG="$W/gh-log"; GHS="$W/gh"; mkdir -p "$GHS" "$W/bin"
+MLOG="$W/mill-env"
 
-# The stand-in Mill answers the guards and repo-guard's questions, and records which Central token
-# variables reached each Mill call before the publishing one (in $MLOG.pre), and for the
-# publishing command which credential variables reached it (their names, never their values) and
-# its arguments. Every call is also logged
-# in $MLOG.calls: its arguments, the names of the credential variables it saw, and whether any
-# environment variable held the marker value cmdline-secret, which a check puts on make's command
-# line (make hands it on in MAKEFLAGS). STANDIN_VERSION, when set, is the version it reports.
-# Mill 1.3.1 signs in its own JVM; only an added --useGpgCli would hand the passphrase to a gpg
-# command line, so the arguments must be exactly these.
+# The stand-in Mill answers repo-guard's questions and the dry run's. Every call is logged in
+# $MLOG.calls with its arguments; for the publishing command it records which credential variables
+# reached it (their names, never their values) and its arguments. STANDIN_VERSION, when set, is
+# the version it reports. Mill 1.3.1 signs in its own JVM; only an added --useGpgCli would hand
+# the passphrase to a gpg command line, so the arguments must be exactly these.
 POMS_JSON="$W/poms.json"; RESOLVERS_JSON="$W/resolvers.json"; RESOLVED_JSON="$W/rg.json"; RESOLVING="$W/resolving"
 cat > "$G/mill" <<EOF
 #!/usr/bin/env bash
-SEEN=""; for v in MILL_SONATYPE_USERNAME MILL_SONATYPE_PASSWORD MILL_PGP_SECRET_BASE64 MILL_PGP_PASSPHRASE SONATYPE_USERNAME SONATYPE_PASSWORD GH_TOKEN GITHUB_TOKEN; do
-  [ -n "\${!v+x}" ] && SEEN="\$SEEN \$v"
-done
-LEAK=no; env | grep -qF cmdline-secret && LEAK=yes
-echo "\$* |\${SEEN:- none} | leak \$LEAK" >> "$MLOG.calls"
+echo "\$*" >> "$MLOG.calls"
 case "\$*" in
-  shutdown|"resolve __.publishArtifacts"|"--no-daemon resolve __.publishArtifacts")
-    N=shutdown; [ "\$1" = shutdown ] || N=resolve
-    for v in MILL_SONATYPE_USERNAME MILL_SONATYPE_PASSWORD; do
-      if [ -n "\${!v+x}" ]; then echo "\$N \$v set"; else echo "\$N \$v unset"; fi
-    done >> "$MLOG.pre"
-    [ "\$N" = shutdown ] || printf '%s\n' $PUBLISHED;;
-  "--no-daemon show release.gitVersion")
-    for v in MILL_SONATYPE_USERNAME MILL_SONATYPE_PASSWORD; do
-      if [ -n "\${!v+x}" ]; then echo "show \$v set"; else echo "show \$v unset"; fi
-    done > "$MLOG.show"
-    echo "\"\${STANDIN_VERSION:-$V}\"";;
+  "--no-daemon show release.gitVersion") echo "\"\${STANDIN_VERSION:-$V}\"";;
   "show "*".repositories") echo '{"m.repositories": []}';;
   "show __.resolverOrder") cat "$RESOLVERS_JSON";;
   "resolve __.resolvedMvnDeps") cat "$RESOLVING";;
@@ -402,60 +320,11 @@ esac
 EOF
 chmod +x "$G/mill"
 
-# The stand-in gh logs every call. Its GitHub Releases live in $GHS: "releases" lists the tags
-# and names that exist, "draft/" a draft's assets, "published" marks it published, "immutable"
-# what the API reports (true by default). A dispatched deploy copies the bundle onto the stand-in
-# site, unless "deploy-skip" exists, and shows as run 4242 beside an older run 4100 ("no-run": it
-# never shows, "two-runs": another new one shows too); "run-fails" makes the run fail. "corrupt"
-# changes a draft's zip, "corrupt-published" the zip downloaded once it is published.
-cat > "$W/bin/gh" <<EOF
-#!/usr/bin/env bash
-printf '%s\n' "\$*" >> "$GLOG"
-case "\$1 \$2" in
-  "api --paginate") [ -e "$GHS/list-fails" ] && exit 1; cat "$GHS/releases" 2>/dev/null; exit 0;;
-  "release create")
-    mkdir -p "$GHS/draft"; shift 2
-    while [ \$# -gt 0 ]; do case "\$1" in --repo|--title|--notes-file) [ "\$1" = --notes-file ] && cp "\$2" "$GHS/body.md"; shift 2;; --*) shift;; *) [ -f "\$1" ] && cp "\$1" "$GHS/draft/"; shift;; esac; done
-    [ -e "$GHS/corrupt" ] && for z in "$GHS"/draft/*.zip; do printf x >> "\$z"; done
-    printf 'v$V\n$V\n' >> "$GHS/releases"; exit 0;;
-  "release download")
-    dir=""; while [ \$# -gt 0 ]; do [ "\$1" = --dir ] && dir="\$2"; shift; done
-    mkdir -p "\$dir"; cp "$GHS"/draft/* "\$dir/"
-    [ -e "$GHS/published" ] && [ -e "$GHS/corrupt-published" ] && for z in "\$dir"/*.zip; do printf x >> "\$z"; done
-    exit 0;;
-  "release edit") touch "$GHS/published"; exit 0;;
-  "api repos/"*)
-    [ -e "$GHS/published" ] || exit 1
-    IM=\$(cat "$GHS/immutable" 2>/dev/null || echo true)
-    case "\$*" in *"--jq .immutable") echo "\$IM";; *) echo "\$IM false false";; esac; exit 0;;
-  "workflow run")
-    if [ ! -e "$GHS/deploy-skip" ]; then
-      ( cd "$B/repository" && find . -type f | while read -r f; do mkdir -p "$S/site/\$(dirname "\$f")"; cp "\$f" "$S/site/\$f"; done )
-      cat "$B/SHA256SUMS" >> "$S/site/SHA256SUMS"
-    fi
-    touch "$GHS/dispatched"; exit 0;;
-  "run list")
-    echo 4100; [ -e "$GHS/no-run" ] && exit 0
-    [ -e "$GHS/dispatched" ] && echo 4242; [ -e "$GHS/dispatched" ] && [ -e "$GHS/two-runs" ] && echo 4243; exit 0;;
-  "run watch") [ -e "$GHS/run-fails" ] && exit 1; exit 0;;
-esac
-echo "stand-in gh: unexpected \$*" >&2; exit 1
-EOF
-chmod +x "$W/bin/gh"
-
 git -C "$G" init -q; git -C "$G" symbolic-ref HEAD refs/heads/main; git -C "$G" add -A
 git -C "$G" -c user.name=Test -c user.email=test@example.invalid -c commit.gpgsign=false commit -qm test
-git -C "$G" -c user.name=Test -c user.email=test@example.invalid -c tag.gpgsign=false tag -a "v$V" -m test
-git init -q --bare "$W/origin.git"; git -C "$G" remote add origin "$W/origin.git"
-mkdir -p "$G/.release-bundles"; R bundle --source "$SRC" --dest "$B" --group $GROUP --version $V --artifacts "$ARTIFACTS" --name "$PREFIX-$V" >/dev/null
-COUNT=$(wc -l < "$B/SHA256SUMS" | tr -d ' ')
-ZIPSUM=$(cut -c1-64 "$B/$PREFIX-$V.zip.sha256")
 
-M=(env PATH="$W/bin:$PATH" make -C "$G" --no-print-directory "REPO_URL=$SITE" "CENTRAL=$CENTRAL" "GITHUB_API=$API"
-   "RELEASE_KEY=$KEY" "RELEASE_KEY_FILE=$G/keys/release-key.asc" "RELEASE_ENV=$W/no-release-env"
-   "GITHUB_GIT=$W/origin.git" VERIFY_TRIES=2 VERIFY_WAIT=0 DISPATCH_WAIT=0)
-gh_reset() { rm -rf "$GHS"; mkdir -p "$GHS"; : > "$GLOG"; }
-gh_called() { grep -q -- "$1" "$GLOG"; }
+M=(make -C "$G" --no-print-directory "REPO_URL=$SITE" "CENTRAL=$CENTRAL" "GITHUB_API=$API"
+   "RELEASE_KEY=$KEY" "RELEASE_KEY_FILE=$G/keys/release-key.asc")
 
 # repo-guard, end to end with the stand-in Mill: the pin check and the check of every file that
 # was resolved. One published POM pins the stand-in library's version on the site.
@@ -467,19 +336,6 @@ mkdir -p "$S/site/dev/taihei/$DA/$DV"; cp "$SITEC/dev/taihei/$DA/$DV/$DA-$DV.pom
 printf '{"m.resolvedRunMvnDeps": [%s, %s]}\n' "$(ref "$SITEC/dev/taihei/$DA/$DV/$DA-$DV.jar")" "$(ref "$CENTC/org/x/x/1.0/x-1.0.jar")" > "$RESOLVED_JSON"
 release_api "$LIB" "$DV" true
 expect "repo-guard passes a pin on the site and files that match their release" 0 "and nothing else" "${M[@]}" repo-guard
-# Every Mill call of a step that needs no credential, with a Central token and the release key
-# exported in the shell and a value on make's command line: none of them may see either.
-TOKENS=(MILL_SONATYPE_USERNAME=env-user MILL_SONATYPE_PASSWORD=env-token MILL_PGP_SECRET_BASE64=env-key MILL_PGP_PASSPHRASE=env-pass
-        SONATYPE_USERNAME=legacy-user SONATYPE_PASSWORD=legacy-token GH_TOKEN=gh-token GITHUB_TOKEN=gh-token)
-# A ./mill shutdown starts a daemon when none runs, so it must see no credential at all.
-clean_shutdowns() { grep -q '^shutdown ' "$MLOG.calls" && ! grep '^shutdown ' "$MLOG.calls" | grep -v '| none | leak no$' >/dev/null; }
-no_credential_reached_mill() {
-  [ -s "$MLOG.calls" ] && ! grep -v '| none | leak no$' "$MLOG.calls" >/dev/null
-}
-rm -f "$MLOG.calls"
-expect "repo-guard passes with credentials in the shell and on make's command line" 0 "and nothing else" env "${TOKENS[@]}" "${M[@]}" repo-guard MILL_PGP_PASSPHRASE=cmdline-secret
-no_credential_reached_mill && pass "repo-guard: no Mill call sees a credential, neither from the shell nor from make's command line" \
-  || fail "repo-guard: a Mill call saw a credential: $(grep -v '| none | leak no$' "$MLOG.calls" 2>/dev/null | tr '\n' ';')"
 resolving $MODULES lib.fixture > "$RESOLVING"
 expect "repo-guard refuses a module that resolves without reporting its repositories" 1 "lib.fixture resolves dependencies but does not report" "${M[@]}" repo-guard
 resolving $MODULES > "$RESOLVING"
@@ -498,328 +354,24 @@ resolvers_json "$MODULES" "$IVY" https://repo1.maven.org/maven2 "$ONLY" > "$RESO
 expect "repo-guard refuses a REPO_URL that build.mill does not name" 1 "the Makefile's REPO_URL" "${M[@]}" repo-guard "REPO_URL=$BASE/other/"
 expect "repo-guard refuses Coursier repositories from the environment" 1 "COURSIER_REPOSITORIES" env COURSIER_REPOSITORIES=https://example.invalid "${M[@]}" repo-guard
 
-# release-preflight: every file 404 on Central and on the site, no tag on origin, no release.
-gh_reset
-expect "preflight passes a version that is nowhere yet" 0 "has no GitHub Release for it" "${M[@]}" release-preflight
-gh_called "api --paginate repos/" && pass "preflight lists the GitHub Releases, drafts included" || fail "preflight did not ask for the releases"
-FIRST=$(echo $ARTIFACTS | cut -d' ' -f1)
-for where in central site; do
-  mkdir -p "$S/$where/dev/taihei/$FIRST/$V"; printf x > "$S/$where/dev/taihei/$FIRST/$V/$FIRST-$V-sources.jar"
-  expect "preflight refuses a version whose file is on $where" 1 "released already" "${M[@]}" release-preflight
-  rm -rf "$S/$where/dev/taihei/$FIRST"
-done
-expect "preflight stops on a redirect from the site" 1 "HTTP 301" "${M[@]}" release-preflight "REPO_URL=$BASE/moved/"
-printf 'v%s\n%s\n' "$V" "$V" > "$GHS/releases"
-expect "preflight refuses a version that has a GitHub Release, or a draft" 1 "exists already" "${M[@]}" release-preflight
-gh_reset; touch "$GHS/list-fails"
-expect "preflight stops when it cannot list the releases" 1 "cannot list" "${M[@]}" release-preflight
-gh_reset
-rm -f "$MLOG.calls"
-expect "preflight passes with credentials in the shell and on make's command line" 0 "has no GitHub Release for it" \
-  env "${TOKENS[@]}" "${M[@]}" release-preflight MILL_PGP_PASSPHRASE=cmdline-secret
-no_credential_reached_mill && pass "preflight: no Mill call sees a credential, neither from the shell nor from make's command line" \
-  || fail "preflight: a Mill call saw a credential: $(grep -v '| none | leak no$' "$MLOG.calls" 2>/dev/null | tr '\n' ';')"
-! grep -v '^--no-daemon ' "$MLOG.calls" >/dev/null && pass "preflight: every Mill call runs without a daemon" \
-  || fail "preflight: a Mill call may start a daemon: $(grep -v '^--no-daemon ' "$MLOG.calls" | tr '\n' ';')"
-gh_reset
-
-# The signatures, checked by release-github before anything is created (as by release-bundle).
-use_bundle() { rm -rf "$B"; R bundle --source "$1" --dest "$B" --group $GROUP --version $V --artifacts "$ARTIFACTS" --name "$PREFIX-$V" >/dev/null; }
-cp -r "$SRC" "$W/u1"; J1=$(first_jar "$W/u1"); printf -- '-----BEGIN PGP SIGNATURE-----\nnot one\n-----END PGP SIGNATURE-----\n' > "$J1.asc"
-use_bundle "$W/u1"; expect "release-github refuses a signature that does not verify" 1 "does not verify" "${M[@]}" release-github
-cp -r "$SRC" "$W/u2"; J2=$(first_jar "$W/u2"); sign "$OTHER" "$J2"
-use_bundle "$W/u2"; expect "release-github refuses a file signed by another key" 1 "does not verify against the release key" "${M[@]}" release-github
-cp -r "$SRC" "$W/u3"; J3=$(first_jar "$W/u3"); printf x >> "$J3"; rehash "$J3"
-use_bundle "$W/u3"; expect "release-github refuses a file changed after it was signed" 1 "does not verify" "${M[@]}" release-github
-use_bundle "$SRC"
-expect "release-github refuses another number of signatures" 1 "not 9" "${M[@]}" release-github SIGNATURES=9
-# The check reads the release key from RELEASE_KEY_FILE alone, never the maintainer's keyring: an
-# empty default keyring still counts every signature, and another key file verifies none.
-mkdir -m 700 "$W/no-keys"
-expect "the signatures verify without the release key in the default keyring" 1 "signatures by the release key, not 9" \
-  env GNUPGHOME="$W/no-keys" "${M[@]}" release-github SIGNATURES=9
-gpg --batch --quiet --armor --export "$OTHER" > "$W/other-key.asc" 2>/dev/null
-M_OTHER=("${M[@]/#RELEASE_KEY_FILE=*/RELEASE_KEY_FILE=$W/other-key.asc}")
-expect "and they verify against the key file only, not against the default keyring" 1 "does not verify against the release key" "${M_OTHER[@]}" release-github
-M_NONE=("${M[@]/#RELEASE_KEY_FILE=*/RELEASE_KEY_FILE=$W/no-such-key.asc}")
-expect "a missing key file is refused" 1 "cannot read the release key" "${M_NONE[@]}" release-github
-
-# The earlier machinery's embargo list may still name a version under embargo: while it exists,
-# in any form, nothing is released.
-echo "1.2.3" > "$G/.release-embargo"
-expect "release-github refuses while the earlier embargo list exists" 1 "the earlier machinery's list" "${M[@]}" release-github
-expect "publish-repo refuses while the earlier embargo list exists" 1 "the earlier machinery's list" "${M[@]}" publish-repo
-expect "release-prepare refuses while the earlier embargo list exists" 1 "the earlier machinery's list" "${M[@]}" release-prepare TYPE=patch EMBARGO=0 TICKET=TAIHEI-1
-mv "$G/.release-embargo" "$W/embargo-list"; ln -s "$W/embargo-list" "$G/.release-embargo"
-expect "and so does a link of that name" 1 "the earlier machinery's list" "${M[@]}" release-github
-rm "$G/.release-embargo"
-# An embargoed release in progress does not stop release-github: its embargo is the tag that is not
-# pushed, and release-github wants the pushed tag (below).
-printf '{"newVersion":"%s","head":"x","embargo":true}\n' "$V" > "$G/.release-state.json"
-expect "release-github does not stop at an embargoed release state, but at the unpushed tag" 1 "push the branch and the tag first" "${M[@]}" release-github
-rm "$G/.release-state.json"
-git -C "$G" -c user.name=Test -c user.email=test@example.invalid -c commit.gpgsign=false commit -q --allow-empty -m after
-expect "release-github refuses a HEAD that is not the release tag" 1 "not at a release tag" "${M[@]}" release-github
-git -C "$G" reset -q --hard "v$V"
-echo "# edited" >> "$G/Makefile"
-expect "release-github refuses tracked changes at the tag" 1 "tracked changes" "${M[@]}" release-github
-git -C "$G" checkout -q Makefile
-expect "release-github refuses before the tag is pushed" 1 "push the branch and the tag first" "${M[@]}" release-github
-! gh_called "release create" && pass "no refusal created a release" || fail "a refusal created a release"
-
-# release-abort: until the tag is pushed it undoes the preparation; from the push on, nothing.
-printf '{"currentVersion":"0.0.0","newVersion":"%s","releaseType":"patch","branch":"main","head":"x","embargo":false}\n' "$V" > "$G/.release-state.json"
-expect "release-abort removes a bundle whose tag was never pushed" 0 "never left this machine" "${M[@]}" release-abort
-[ ! -e "$B" ] && ! git -C "$G" rev-parse -q --verify "refs/tags/v$V" >/dev/null && pass "the bundle and the local tag are gone" || fail "the bundle or the tag stayed"
-git -C "$G" -c user.name=Test -c user.email=test@example.invalid -c tag.gpgsign=false tag -a "v$V" -m test
-use_bundle "$SRC"
-git -C "$G" push -q origin "refs/tags/v$V" 2>/dev/null
-gh_reset
-# The release commit must be on the branch release-prepare recorded, here a maintenance branch
-# 9.9.x, which main never holds (main takes no merge commits). Main is not on origin at all.
-expect "release-github refuses without a release state that names the branch" 1 "that names its branch" "${M[@]}" release-github
-printf '{"currentVersion":"0.0.0","newVersion":"9.9.8","releaseType":"patch","branch":"9.9.x","head":"x","embargo":false}\n' > "$G/.release-state.json"
-expect "release-github refuses a release state of another version" 1 "no release state for v$V" "${M[@]}" release-github
-printf '{"currentVersion":"0.0.0","newVersion":"%s","releaseType":"patch","branch":"feature","head":"x","embargo":false}\n' "$V" > "$G/.release-state.json"
-expect "release-github refuses a branch that is neither main nor a maintenance branch" 1 "that names its branch" "${M[@]}" release-github
-printf '{"currentVersion":"0.0.0","newVersion":"%s","releaseType":"patch","branch":"9.9.x","head":"x","embargo":false}\n' "$V" > "$G/.release-state.json"
-expect "release-github refuses while the recorded branch is not on GitHub" 1 "9.9.x is not on taiheiframework/" "${M[@]}" release-github
-UNRELATED=$(git -C "$G" -c user.name=Test -c user.email=test@example.invalid -c commit.gpgsign=false commit-tree "$(git -C "$G" hash-object -w -t tree /dev/null)" -m other)
-git -C "$G" push -q origin "$UNRELATED:refs/heads/9.9.x" 2>/dev/null
-expect "release-github refuses a release commit that is on no branch on GitHub" 1 "does not hold the release commit: push 9.9.x first" "${M[@]}" release-github
-! gh_called "release create" && pass "and creates nothing" || fail "it created a release without the branch on origin"
-git -C "$G" push -q origin +HEAD:refs/heads/9.9.x 2>/dev/null
-expect "release-abort undoes nothing once the tag is on origin" 1 "the version is final" "${M[@]}" release-abort
-git -C "$G" rev-parse -q --verify "refs/tags/v$V" >/dev/null && [ -d "$B" ] && [ -e "$G/.release-state.json" ] && pass "the tag, the bundle and the state stay" || fail "release-abort removed something"
-expect "preflight refuses a version whose tag is on GitHub" 1 "already: the version is final" "${M[@]}" release-preflight
-
-# release-github: a draft, read back and compared, then published and checked immutable.
-gh_reset; printf 'v%s\n%s\n' "$V" "$V" > "$GHS/releases"
-expect "release-github refuses when a release for the version exists" 1 "exists already" "${M[@]}" release-github
-! gh_called "release create" && pass "and creates nothing" || fail "it created a release"
-gh_reset; touch "$GHS/corrupt"
-expect "release-github leaves a draft whose assets differ unpublished" 1 "the draft stays unpublished" "${M[@]}" release-github
-! gh_called "release edit" && pass "and never publishes it" || fail "it published a draft whose assets differ"
-gh_reset; echo false > "$GHS/immutable"
-expect "release-github stops when GitHub does not report the release immutable" 1 "not report the release v$V as immutable" "${M[@]}" release-github
-gh_reset; touch "$GHS/corrupt-published"
-expect "release-github reads the published release back" 1 "the release's assets differ" "${M[@]}" release-github
-gh_reset
-expect "release-github publishes the bundle" 0 "record on the release ticket: $PREFIX-$V.zip SHA-256 $ZIPSUM" "${M[@]}" release-github
-grep -q -- "release create v$V --repo .* --verify-tag --draft" "$GLOG" && [ "$(grep -n 'release create' "$GLOG" | cut -d: -f1)" -lt "$(grep -n 'release edit' "$GLOG" | cut -d: -f1)" ] \
-  && pass "release-github creates a draft first and publishes it after the read-back" || fail "release-github's order: $(tr '\n' ';' < "$GLOG")"
-BUNDLE_TEXT=$(sed -n '/^## The signed bundle$/,$p' "$GHS/body.md")
-grep -qF "$ZIPSUM" <<< "$BUNDLE_TEXT" && ! grep -qF "$SITE" <<< "$BUNDLE_TEXT" && ! grep -qi 'central' <<< "$BUNDLE_TEXT" \
-  && pass "the release body names the zip's SHA-256, and neither the repository's address nor Maven Central" || fail "the release body"
-[ ! -e "$G/.release-state.json" ] && pass "release-github ends the release in progress" || fail "the release state stayed"
-
-# publish-repo and verify-repo, against the stand-in site, without credentials.
-: > "$W/log"
-expect "publish-repo deploys the site and reads every file back" 0 "all $COUNT files of $V are served unchanged" "${M[@]}" publish-repo
-gh_called "workflow run deploy.yml --repo taiheiframework/repo --ref main" && gh_called "run watch 4242" \
-  && pass "publish-repo dispatches the deploy on main and waits for its run" || fail "publish-repo's gh calls: $(tr '\n' ';' < "$GLOG")"
-[ "$(grep -c '^GET /site/' "$W/log")" -ge "$COUNT" ] && ! grep -q 'auth=present' "$W/log" \
-  && pass "verify-repo read every file without credentials" || fail "verify-repo's reads"
-J=$(first_jar "$S/site"); cp "$J" "$W/served.jar"; printf x >> "$J"
-expect "verify-repo reports a changed file as an incident" 1 "SECURITY INCIDENT" "${M[@]}" verify-repo
-cp "$W/served.jar" "$J"; rm "$J"
-expect "verify-repo reports a file still missing after its tries" 1 "after 2 tries" "${M[@]}" verify-repo
-cp "$W/served.jar" "$J"
-cp "$S/site/SHA256SUMS" "$W/site-sums"; sed -i.bak '1d' "$S/site/SHA256SUMS"; rm -f "$S/site/SHA256SUMS.bak"
-expect "verify-repo wants every ledger line in the site's SHA256SUMS" 1 "lines of the ledger" "${M[@]}" verify-repo
-cp "$W/site-sums" "$S/site/SHA256SUMS"
-expect "verify-repo follows no redirect" 1 "HTTP 301" "${M[@]}" verify-repo "REPO_URL=$BASE/moved/"
-gh_called "run watch 4242" && ! gh_called "run watch 4100" && pass "publish-repo watches the run its dispatch started, not an older one" || fail "publish-repo watched another run"
-echo false > "$GHS/immutable"
-expect "publish-repo refuses a release GitHub does not report immutable" 1 "not published and immutable" "${M[@]}" publish-repo
-rm "$GHS/immutable"; rm -f "$GHS/dispatched"; touch "$GHS/no-run"
-expect "publish-repo stops when no run of the deploy appears" 1 "no run of" "${M[@]}" publish-repo
-rm "$GHS/no-run" "$GHS/dispatched"; touch "$GHS/two-runs"
-expect "publish-repo stops when more than one new run appears" 1 "more than one new run" "${M[@]}" publish-repo
-rm "$GHS/two-runs" "$GHS/dispatched"
-touch "$GHS/run-fails"
-expect "publish-repo stops on a failed deploy run" 1 "failed" "${M[@]}" publish-repo
-rm "$GHS"/published
-expect "publish-repo refuses a version without a published release" 1 "make release-github first" "${M[@]}" publish-repo
-gh_reset
-
-# release-prepare: the questions it wants answered, and the previous release finished, on Maven
-# Central (a version from before ADR 0009) or on the family's repository. v9.9.9 is on the
-# stand-in site now (publish-repo above). Past these checks release-prepare cleans the build,
-# which the stand-in Mill refuses: that refusal shows it got that far.
-expect "release-prepare wants the embargo decided" 1 "never a default" "${M[@]}" release-prepare TYPE=patch
-expect "release-prepare wants the release ticket" 1 "TICKET=<key>" "${M[@]}" release-prepare TYPE=patch EMBARGO=0
-expect "release-prepare refuses a ticket that is not a key" 1 "not 'see the board'" "${M[@]}" release-prepare TYPE=patch EMBARGO=0 "TICKET=see the board"
-prepare() { "${M[@]}" release-prepare TYPE=patch EMBARGO=0 TICKET=TAIHEI-1 2>&1; }
-OUT=$(prepare)
-grep -qF "[OK] v$V is on $SITE" <<< "$OUT" && grep -qF "Cleaning build cache" <<< "$OUT" \
-  && pass "release-prepare accepts a previous version that only the family's repository serves" \
-  || fail "release-prepare refused a previous version on the site: $(tail -n 3 <<< "$OUT" | tr '\n' ';')"
-SITEPOM="$S/site/dev/taihei/$FIRST/$V/$FIRST-$V.pom"
-mv "$SITEPOM" "$W/site-pom"
-OUT=$(prepare)
-grep -qF "the release of v$V has not finished" <<< "$OUT" && ! grep -qF "Cleaning build cache" <<< "$OUT" \
-  && pass "release-prepare refuses while the previous version is on neither" || fail "release-prepare without the previous version: $(tail -n 3 <<< "$OUT" | tr '\n' ';')"
-mkdir -p "$S/central/dev/taihei/$FIRST/$V"; cp "$W/site-pom" "$S/central/dev/taihei/$FIRST/$V/$FIRST-$V.pom"
-OUT=$(prepare)
-grep -qF "[OK] v$V is on Maven Central" <<< "$OUT" && grep -qF "Cleaning build cache" <<< "$OUT" \
-  && pass "release-prepare accepts a previous version on Maven Central" || fail "release-prepare and Central: $(tail -n 3 <<< "$OUT" | tr '\n' ';')"
-rm -rf "$S/central/dev/taihei/$FIRST"; mv "$W/site-pom" "$SITEPOM"
-OUT=$("${M[@]}" release-prepare TYPE=patch EMBARGO=0 TICKET=TAIHEI-1 "REPO_URL=$BASE/moved/" 2>&1)
-grep -qF "HTTP 301" <<< "$OUT" && grep -qF "has not finished" <<< "$OUT" \
-  && pass "release-prepare follows no redirect" || fail "release-prepare and a redirect: $(tail -n 3 <<< "$OUT" | tr '\n' ';')"
-# A spent version: tagged, never published. Until release/spent-versions.txt names it, it is a
-# previous release that has not finished; then release-prepare checks the release before it, and
-# the next version follows the spent tag.
-SPENT_BASE=$(git -C "$G" rev-parse HEAD)
-git -C "$G" -c user.name=Test -c user.email=test@example.invalid -c commit.gpgsign=false commit -q --allow-empty -m spent
-git -C "$G" -c user.name=Test -c user.email=test@example.invalid -c tag.gpgsign=false tag -a v9.9.10 -m spent
-OUT=$(prepare)
-grep -qF "the release of v9.9.10 has not finished" <<< "$OUT" && ! grep -qF "Cleaning build cache" <<< "$OUT" \
-  && pass "release-prepare refuses a previous version that nothing serves" || fail "release-prepare and an unpublished tag: $(tail -n 3 <<< "$OUT" | tr '\n' ';')"
-mkdir -p "$G/release"; printf '# spent\n 9.9.10  # never published\n' > "$G/release/spent-versions.txt"
-git -C "$G" add release/spent-versions.txt
-git -C "$G" -c user.name=Test -c user.email=test@example.invalid -c commit.gpgsign=false commit -q -m "spent list"
-OUT=$(prepare)
-grep -qF "v9.9.10 is spent" <<< "$OUT" && grep -qF "[OK] v$V is on $SITE" <<< "$OUT" && grep -qF "[OK] New version: 9.9.11" <<< "$OUT" \
-  && grep -qF "Cleaning build cache" <<< "$OUT" \
-  && pass "release-prepare skips a spent version to the release before it, and follows its tag" \
-  || fail "release-prepare and a spent version: $(tail -n 3 <<< "$OUT" | tr '\n' ';')"
-git -C "$G" tag -d v9.9.10 >/dev/null; git -C "$G" reset -q --hard "$SPENT_BASE"
-git -C "$G" checkout -q --detach
-expect "release-prepare refuses a HEAD on no branch, which it could not record" 1 "HEAD is on '': a release is prepared on main or a maintenance branch" "${M[@]}" release-prepare TYPE=patch EMBARGO=0 TICKET=TAIHEI-1
-git -C "$G" checkout -q -b feature
-expect "release-prepare refuses a branch that is neither main nor a maintenance branch" 1 "HEAD is on 'feature'" "${M[@]}" release-prepare TYPE=patch EMBARGO=0 TICKET=TAIHEI-1
-git -C "$G" checkout -q main; git -C "$G" branch -q -D feature
-[ ! -e "$G/.release-state.json" ] && [ -z "$(git -C "$G" status --porcelain --untracked-files=no)" ] \
-  && pass "and a refused release-prepare leaves no release state and no change" || fail "release-prepare left a state or a change"
-
-# --- the targets that start Mill to publish, against the stand-in --------------------------
-( umask 077
-  printf "export MILL_SONATYPE_USERNAME='test-central-user'\nexport MILL_SONATYPE_PASSWORD='test-central-token'\n" > "$W/release.env"
-  printf "export MILL_PGP_SECRET_BASE64='dGVzdA=='\nexport MILL_PGP_PASSPHRASE='test'\n" >> "$W/release.env" )
+# publish-dry-run: Mill gets the key the caller gives, the dry-run switch, a placeholder for the
+# Central token whatever the environment holds, and the bundle's name for a release version.
 saw() { grep -qxF "$1" "$MLOG" 2>/dev/null; }
 ARGS="args --no-daemon mill.javalib.SonatypeCentralPublishModule/ --bundleName $PREFIX-$V"
-
-rm -f "$MLOG"
-expect "publish-dry-run runs with the release env" 0 "bundle in" "${M[@]}" publish-dry-run "RELEASE_ENV=$W/release.env"
-saw "MILL_SONATYPE_USERNAME placeholder" && saw "MILL_SONATYPE_PASSWORD placeholder" \
-  && grep -qxF "show MILL_SONATYPE_USERNAME unset" "$MLOG.show" && grep -qxF "show MILL_SONATYPE_PASSWORD unset" "$MLOG.show" \
-  && pass "publish-dry-run: Mill gets a placeholder, never the Central token from the release env" || fail "publish-dry-run: a Mill saw the Central token, or no placeholder"
-saw "MILL_PGP_SECRET_BASE64 set" && saw "MILL_PGP_PASSPHRASE set" && saw "MILL_TESTS_PUBLISH_DRY_RUN set" \
-  && pass "publish-dry-run: Mill gets the release key and the dry-run switch" || fail "publish-dry-run: Mill lacks the key or the switch"
-saw "$ARGS" && pass "publish-dry-run: Mill gets the bundle name and no other argument" || fail "publish-dry-run: Mill's arguments: $(grep '^args' "$MLOG")"
-rm -f "$MLOG" "$MLOG.pre"
-MILL_SONATYPE_USERNAME=env-user MILL_SONATYPE_PASSWORD=env-token "${M[@]}" publish-dry-run >/dev/null 2>&1
-saw "MILL_SONATYPE_USERNAME placeholder" && saw "MILL_SONATYPE_PASSWORD placeholder" \
-  && pass "publish-dry-run: nor a Central token from the environment" || fail "publish-dry-run: Mill saw the Central token from the environment"
-grep -q "^shutdown " "$MLOG.pre" 2>/dev/null && grep -q "^resolve " "$MLOG.pre" && ! grep -q " set$" "$MLOG.pre" \
-  && pass "publish-dry-run: no Mill call, shutdown and the module guard included, sees a Central token from the environment" \
-  || fail "publish-dry-run: a Mill call before the dry run saw the Central token from the environment: $(grep ' set$' "$MLOG.pre" 2>/dev/null | tr '\n' ' ')"
-rm -f "$MLOG.calls"
-env "${TOKENS[@]}" "${M[@]}" publish-dry-run "RELEASE_ENV=$W/release.env" >/dev/null 2>&1
-clean_shutdowns && ! grep '^--no-daemon resolve ' "$MLOG.calls" | grep -v '| none | leak no$' >/dev/null \
-  && pass "publish-dry-run: shutdown and the module guard see no credential, from the shell or the release env" \
-  || fail "publish-dry-run: shutdown or the module guard saw a credential: $(grep -e '^shutdown ' -e 'resolve ' "$MLOG.calls" | tr '\n' ';')"
-grep '^--no-daemon mill.javalib' "$MLOG.calls" | grep -q -e ' SONATYPE_USERNAME' -e ' SONATYPE_PASSWORD' -e ' GH_TOKEN' -e ' GITHUB_TOKEN' \
-  && fail "publish-dry-run: the publishing call saw a legacy Central name or a gh token" \
-  || pass "publish-dry-run: the publishing call sees no legacy Central name and no gh token"
 rm -f "$MLOG" "$MLOG.calls"
-"${M[@]}" publish-dry-run "RELEASE_ENV=$W/release.env" MILL_SONATYPE_PASSWORD=cmdline-secret >/dev/null 2>&1
-saw "MILL_SONATYPE_PASSWORD placeholder" && ! grep -q 'leak yes$' "$MLOG.calls" \
-  && pass "publish-dry-run: a value on make's command line reaches no Mill call" \
-  || fail "publish-dry-run: a Mill call saw a value from make's command line: $(grep 'leak yes$' "$MLOG.calls" 2>/dev/null | tr '\n' ';')"
-! grep -v -e '^--no-daemon ' -e '^shutdown ' "$MLOG.calls" >/dev/null && pass "publish-dry-run: no Mill call but shutdown runs on a daemon" \
-  || fail "publish-dry-run: a Mill call may start a daemon: $(grep -v -e '^--no-daemon ' -e '^shutdown ' "$MLOG.calls" | tr '\n' ';')"
-rm -f "$MLOG"; chmod 640 "$W/release.env"
-expect "publish-dry-run refuses a release env others can read" 1 "mode 600" "${M[@]}" publish-dry-run "RELEASE_ENV=$W/release.env"
-chmod 600 "$W/release.env"; ln -s "$W/release.env" "$W/link.env"
-expect "publish-dry-run refuses a release env that is a link" 1 "not a link" "${M[@]}" publish-dry-run "RELEASE_ENV=$W/link.env"
-ln -s "$W/missing.env" "$W/dangling.env"
-expect "publish-dry-run refuses a release env that is a dangling link" 1 "not a link" "${M[@]}" publish-dry-run "RELEASE_ENV=$W/dangling.env"
-[ ! -e "$MLOG" ] && pass "and Mill never ran for a refused release env" || fail "Mill ran although the release env was refused"
-mkdir -p "$W/home"
-env HOME="$W/home" RELEASE_ENV="$W/release.env" make -C "$G" --no-print-directory publish-dry-run >/dev/null 2>&1
-saw "MILL_PGP_SECRET_BASE64 unset" \
-  && pass "an environment variable RELEASE_ENV does not choose the file that is sourced" || fail "RELEASE_ENV from the environment was sourced"
-
-# release-finalize commits the notes under the release ticket. With the stand-in Mill the dry run
-# writes no bundle, so it stops at release-bundle, after the notes commit and the local tag;
-# release-abort then undoes both, recognising the commit by that subject.
-git -C "$G" config user.name Test; git -C "$G" config user.email test@example.invalid
-git -C "$G" config commit.gpgsign false; git -C "$G" config tag.gpgsign false
-gh_reset
-HEAD_BEFORE=$(git -C "$G" rev-parse HEAD)
-printf '{"currentVersion":"%s","newVersion":"9.9.10","releaseType":"patch","branch":"main","head":"%s","embargo":false,"ticket":"TAIHEI-7"}\n' "$V" "$HEAD_BEFORE" > "$G/.release-state.json"
-printf '# Release 9.9.10\n' > "$G/RELEASE_9_9_10.md"
-OUT=$(env STANDIN_VERSION=9.9.10 "${M[@]}" release-finalize 2>&1)
-grep -qF "[bundle] refused; nothing left the machine" <<< "$OUT" \
-  && pass "release-finalize gets as far as the bundle with the stand-ins" || fail "release-finalize stopped early: $(tail -n 4 <<< "$OUT" | tr '\n' ';')"
-[ "$(git -C "$G" log -1 --format=%s)" = "TAIHEI-7: add the release notes of 9.9.10" ] \
-  && git -C "$G" log -1 --format=%b | grep -qF "The notes of version 9.9.10, written by make release-prepare" \
-  && [ "$(git -C "$G" rev-parse HEAD~1)" = "$HEAD_BEFORE" ] \
-  && pass "the notes commit names the release ticket and has a body" || fail "the notes commit: $(git -C "$G" log -1 --format='%s / %b' | tr '\n' ' ')"
-git -C "$G" rev-parse -q --verify "refs/tags/v9.9.10" >/dev/null && pass "and the tag is made, locally" || fail "release-finalize made no tag"
-expect "release-abort undoes a notes commit under the release ticket" 0 "Reverted local release-notes commit" "${M[@]}" release-abort
-[ "$(git -C "$G" rev-parse HEAD)" = "$HEAD_BEFORE" ] && ! git -C "$G" rev-parse -q --verify "refs/tags/v9.9.10" >/dev/null \
-  && [ -f "$G/.release-notes.aborted-9.9.10.md" ] && [ ! -e "$G/.release-state.json" ] \
-  && pass "and the tag, the commit and the state are gone, the notes kept aside" || fail "release-abort left the release in place"
-rm -f "$G/.release-notes.aborted-9.9.10.md"
-
-printf '{"currentVersion":"%s","newVersion":"9.9.10","releaseType":"patch","branch":"main","head":"%s","embargo":false}\n' "$V" "$HEAD_BEFORE" > "$G/.release-state.json"
-expect "release-finalize refuses a release state that names no ticket" 1 "names no ticket" "${M[@]}" release-finalize
-# The branch it tells the maintainer to push comes from the state, so a state without one stops it.
-printf '{"currentVersion":"%s","newVersion":"9.9.10","releaseType":"patch","branch":"","head":"%s","embargo":false,"ticket":"TAIHEI-7"}\n' "$V" "$HEAD_BEFORE" > "$G/.release-state.json"
-expect "release-finalize refuses a release state that names no branch" 1 "that names its branch" "${M[@]}" release-finalize
-[ "$(git -C "$G" rev-parse HEAD)" = "$HEAD_BEFORE" ] && pass "and commits nothing" || fail "release-finalize committed without a branch"
-printf '{"currentVersion":"%s","newVersion":"9.9.10","releaseType":"patch","branch":"main","head":"%s","embargo":false}\n' "$V" "$HEAD_BEFORE" > "$G/.release-state.json"
-# release-abort still recognises a notes commit the earlier machinery wrote, under a state without
-# a ticket.
-git -C "$G" commit -q --allow-empty -m "Add release notes for version 9.9.10"
-expect "release-abort undoes an earlier machinery's notes commit" 0 "Reverted local release-notes commit" "${M[@]}" release-abort
-[ "$(git -C "$G" rev-parse HEAD)" = "$HEAD_BEFORE" ] && pass "and HEAD is the prepared commit again" || fail "release-abort kept the earlier notes commit"
-printf '{"currentVersion":"%s","newVersion":"9.9.10","releaseType":"patch","branch":"main","head":"%s","embargo":false,"ticket":"TAIHEI-7"}\n' "$V" "$HEAD_BEFORE" > "$G/.release-state.json"
-echo "1.2.3" > "$G/.release-embargo"
-expect "release-finalize refuses while the earlier embargo list exists" 1 "the earlier machinery's list" "${M[@]}" release-finalize
-rm -f "$G/.release-embargo" "$G/.release-state.json"
-expect "release-prepare runs nothing a TICKET value holds" 1 "TICKET=<key>" "${M[@]}" release-prepare TYPE=patch EMBARGO=0 'TICKET=x"; touch injected; echo "'
-[ ! -e "$G/injected" ] && pass "and the value stayed data" || fail "a TICKET value ran as a command"
-
-# release-finalize runs repo-guard first, before it commits or tags anything.
-git -C "$G" tag -d "v$V" >/dev/null
-printf '{"currentVersion":"9.9.8","newVersion":"9.9.10","releaseType":"patch","branch":"main","head":"%s","embargo":false,"ticket":"TAIHEI-7"}\n' "$(git -C "$G" rev-parse HEAD)" > "$G/.release-state.json"
-HEAD_BEFORE=$(git -C "$G" rev-parse HEAD)
-expect "release-finalize runs repo-guard first" 1 "[repo-guard] COURSIER_REPOSITORIES" env COURSIER_REPOSITORIES=https://example.invalid "${M[@]}" release-finalize
-[ "$(git -C "$G" rev-parse HEAD)" = "$HEAD_BEFORE" ] && ! git -C "$G" rev-parse -q --verify "refs/tags/v9.9.10" >/dev/null \
-  && pass "and a refusal there commits and tags nothing" || fail "release-finalize committed or tagged before repo-guard"
-rm -f "$G/.release-state.json"
-
-# release-abort undoes no notes commit that the recorded branch on origin holds, also before the
-# tag is pushed: first a maintenance branch, which main does not hold, then main.
-git -C "$G" commit -q --allow-empty -m "TAIHEI-7: add the release notes of 9.9.10"
-git -C "$G" push -q origin +HEAD:refs/heads/9.9.x 2>/dev/null
-printf '{"currentVersion":"9.9.9","newVersion":"9.9.10","releaseType":"patch","branch":"9.9.x","head":"x","embargo":false,"ticket":"TAIHEI-7"}\n' > "$G/.release-state.json"
-NOTES_COMMIT=$(git -C "$G" rev-parse HEAD)
-expect "release-abort undoes no notes commit that is on origin's 9.9.x" 1 "holds the notes commit of v9.9.10" "${M[@]}" release-abort
-[ "$(git -C "$G" rev-parse HEAD)" = "$NOTES_COMMIT" ] && pass "and the notes commit stays on the maintenance branch" || fail "release-abort reset a commit pushed on 9.9.x"
-rm -f "$G/.release-state.json"
-# When GitHub cannot be asked about the branch, release-abort cannot tell, and undoes nothing. A git
-# whose ls-remote of a branch fails stands in; a pipe into cut must not hide that failure.
-mkdir -p "$W/failgit"; REALGIT=$(command -v git)
-printf '#!/usr/bin/env bash\ncase " $* " in *" ls-remote "*refs/heads/*) exit 128;; esac\nexec "%s" "$@"\n' "$REALGIT" > "$W/failgit/git"; chmod +x "$W/failgit/git"
-git -C "$G" commit -q --allow-empty -m "TAIHEI-7: add the release notes of 9.9.10"
-printf '{"currentVersion":"9.9.9","newVersion":"9.9.10","releaseType":"patch","branch":"9.9.x","head":"x","embargo":false,"ticket":"TAIHEI-7"}\n' > "$G/.release-state.json"
-NOTES_COMMIT=$(git -C "$G" rev-parse HEAD)
-expect "release-abort undoes nothing when it cannot read the branch on origin" 1 "cannot read 9.9.x" env PATH="$W/failgit:$W/bin:$PATH" "${M[@]:2}" release-abort
-[ "$(git -C "$G" rev-parse HEAD)" = "$NOTES_COMMIT" ] && pass "and the notes commit stays" || fail "release-abort reset a commit it could not check"
-rm -f "$G/.release-state.json"
-git -C "$G" commit -q --allow-empty -m "TAIHEI-7: add the release notes of 9.9.10"
-git -C "$G" push -q origin HEAD:refs/heads/main 2>/dev/null
-printf '{"currentVersion":"9.9.9","newVersion":"9.9.10","releaseType":"patch","branch":"main","head":"x","embargo":false,"ticket":"TAIHEI-7"}\n' > "$G/.release-state.json"
-NOTES_COMMIT=$(git -C "$G" rev-parse HEAD)
-expect "release-abort undoes no notes commit that is on origin's main" 1 "would need a force push" "${M[@]}" release-abort
-[ "$(git -C "$G" rev-parse HEAD)" = "$NOTES_COMMIT" ] && pass "and the notes commit stays" || fail "release-abort reset a pushed commit"
-rm -f "$G/.release-state.json"
+expect "publish-dry-run runs" 0 "bundle in" env MILL_PGP_SECRET_BASE64=dGVzdA== MILL_PGP_PASSPHRASE=test \
+  MILL_SONATYPE_USERNAME=env-user MILL_SONATYPE_PASSWORD=env-token "${M[@]}" publish-dry-run
+saw "MILL_SONATYPE_USERNAME placeholder" && saw "MILL_SONATYPE_PASSWORD placeholder" \
+  && pass "publish-dry-run: Mill gets a placeholder, never a Central token from the environment" || fail "publish-dry-run: Mill saw the Central token, or no placeholder"
+saw "MILL_PGP_SECRET_BASE64 set" && saw "MILL_PGP_PASSPHRASE set" && saw "MILL_TESTS_PUBLISH_DRY_RUN set" \
+  && pass "publish-dry-run: Mill gets the caller's key and the dry-run switch" || fail "publish-dry-run: Mill lacks the key or the switch"
+saw "$ARGS" && pass "publish-dry-run: Mill gets the bundle name and no other argument" || fail "publish-dry-run: Mill's arguments: $(grep '^args' "$MLOG")"
+! grep -v '^--no-daemon ' "$MLOG.calls" >/dev/null && pass "publish-dry-run: no Mill call runs on a daemon, which would keep the key" \
+  || fail "publish-dry-run: a Mill call may start a daemon: $(grep -v '^--no-daemon ' "$MLOG.calls" | tr '\n' ';')"
+rm -f "$MLOG"
+STANDIN_VERSION=$V.1-SNAPSHOT "${M[@]}" publish-dry-run >/dev/null 2>&1
+saw "args --no-daemon mill.javalib.SonatypeCentralPublishModule/" && pass "publish-dry-run: a SNAPSHOT bundle gets no name" \
+  || fail "publish-dry-run: a SNAPSHOT's arguments: $(grep '^args' "$MLOG")"
 
 grep -q '^PUT\|^POST' "$W/log" && fail "something was uploaded to a stand-in server" || pass "nothing was ever uploaded"
 [ "$FAILED" = 0 ] && echo "[release-test] all checks passed" || echo "[release-test] FAILED"

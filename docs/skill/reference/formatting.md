@@ -49,6 +49,5 @@ shared/test/src/dev/taihei/i18n/  specs (run on both platforms)
 - `make compile` / `make test` cover both platforms (`./mill __.compile`,
   `./mill __.test.testForked` → `i18n.jvm` **and** `i18n.js`; JS tests run on Node).
 - Single-platform: `./mill i18n.jvm.test` or `./mill i18n.js.test`.
-- Released from the Makefile (`make release-prepare TYPE=…` →
-  `make release-finalize`), the version taken from the git tag, as in the other
-  Taihei Framework libraries.
+- Released by the family's release workflow from the maintainer's signed tag, the version
+  taken from the git tag, as in the other Taihei Framework libraries.

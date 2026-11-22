@@ -28,7 +28,7 @@ object V {
 // Version from git: an exact v-tag on a clean tree is the release, anything else
 // a SNAPSHOT of the last tag. Untracked files do not count. A Task.Input, so a
 // new commit, tag or edit is seen without restarting the Mill daemon. The
-// release itself is the Makefile's (release-prepare / release-finalize).
+// release itself is the family's release workflow's, from a signed tag (ADR 0014).
 // ---------------------------------------------------------------------------
 object release extends Module {
   def gitVersion = Task.Input {
@@ -45,11 +45,30 @@ object release extends Module {
   // coordinates, so there is nothing on Central to compare them with.
   val firstRelease = "4.0.0"
 
+  // Whether taihei-i18n VERSION is on Maven Central, where 4.x users and MiMa resolve it, asked
+  // of its JVM module's POM without following a redirect. Central answers 404 for a spent version
+  // (tagged, never released, ADR 0014); any other answer than 200 or 404 fails the build: a
+  // baseline we cannot determine must not turn into an older one, or into none.
+  private def onCentral(v: String): Boolean = {
+    val url = s"https://repo1.maven.org/maven2/dev/taihei/taihei-i18n_3/$v/taihei-i18n_3-$v.pom"
+    val c   = java.net.URI.create(url).toURL.openConnection().asInstanceOf[java.net.HttpURLConnection]
+    c.setInstanceFollowRedirects(false)
+    c.setConnectTimeout(30000)
+    c.setReadTimeout(30000)
+    try
+      c.getResponseCode match {
+        case 200  => true
+        case 404  => false
+        case code => sys.error(s"no MiMa baseline: $url answers HTTP $code")
+      }
+    finally c.disconnect()
+  }
+
   // The release MiMa compares with: the newest v-tag reachable from HEAD and not on HEAD itself,
-  // none before firstRelease. On a tagged release commit that is the release before it: HEAD's
-  // own tag would compare the release with itself, and fails in CI until Central has synced it.
-  // MIMA_BASELINE overrides it: `none` for a major, which may break (release-prepare TYPE=major
-  // sets it), or a version.
+  // none before firstRelease, that is on Maven Central; a spent tag is passed over, so no list of
+  // spent versions is kept. On a tagged release commit that is the release before it: HEAD's own
+  // tag would compare the release with itself. MIMA_BASELINE overrides it: `none` for a major,
+  // which may break, or a version.
   def mimaBaseline = Task.Input {
     val root = os.Path(sys.env("MILL_WORKSPACE_ROOT"))
     def numbers(v: String) = v.split('.').toSeq.map(_.toIntOption.getOrElse(0))
@@ -59,11 +78,14 @@ object release extends Module {
       case Some(v)      => Some(v)
       case None         =>
         val exactTag = git("describe", "--tags", "--exact-match", "--match", "v[0-9]*").exitCode == 0
-        // A root commit has no HEAD^, so describe fails and there is no baseline.
-        val tag = git("describe", "--tags", "--abbrev=0", "--match", "v[0-9]*", if (exactTag) "HEAD^" else "HEAD")
-        Option
-          .when(tag.exitCode == 0)(tag.out.trim().stripPrefix("v"))
+        // A root commit has no HEAD^: git lists no tag, and there is no baseline.
+        val listed = git("tag", "--merged", if (exactTag) "HEAD^" else "HEAD", "--list", "v[0-9]*", "--sort=-v:refname")
+        listed.out
+          .lines()
+          .map(_.trim.stripPrefix("v"))
+          .filter(_.matches("[0-9]+\\.[0-9]+\\.[0-9]+"))
           .filter(v => Ordering.Implicits.seqOrdering[Seq, Int].gteq(numbers(v), numbers(firstRelease)))
+          .find(onCentral)
     }
   }
 }
@@ -115,6 +137,14 @@ trait TaiheiModule extends ScalaModule with ScalafmtModule with ScalafixModule w
 
   trait TaiheiTests extends ScalaTests with ScalafmtModule with ScalafixModule {
     def testFramework = "zio.test.sbt.ZTestFramework"
+
+    // The JDK the tests run on: the module's (Mill's own) unless TAIHEI_TEST_JAVA_HOME names
+    // another; make test-java-17 runs them on Java 17, the oldest Java the library supports. Only
+    // the tests: what is compiled and published does not depend on it.
+    def testJavaHome = Task.Input(Task.env.get("TAIHEI_TEST_JAVA_HOME").map(_.trim).filter(_.nonEmpty))
+    def javaHome     = Task {
+      testJavaHome().map(home => PathRef(os.Path(home), quick = true)).orElse(TaiheiModule.this.javaHome())
+    }
 
     def forkArgs = Seq(
       "-Xmx4G",

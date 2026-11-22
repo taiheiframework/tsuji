@@ -35,10 +35,5 @@ hs_err_pid*
 # Compiled bits
 *.class
 
-# Release state, written by make release-prepare and removed by release-finalize or release-abort
-.release-state.json
-.release-state.*
-.release-notes.*
-
 # Review reports, kept locally
 reviews/

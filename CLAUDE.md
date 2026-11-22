@@ -9,12 +9,21 @@ the JVM and Scala.js. Part of the Taihei Framework; the family's rules come from
 
 ```bash
 make validate          # scalafix, scalafmt, compile, test and MiMa, JVM and Scala.js
-make mima              # binary compatibility with the newest release tag only
+make mima              # against the newest 4.x release on Maven Central; a spent tag is passed over
 make test              # ./mill __.test.testForked (JS tests run under Node)
-make publish-dry-run   # the bundle Maven Central would receive, written to out/
-make release-prepare TYPE=patch|minor|major   # then review RELEASE_x_y_z.md
-make release-finalize  # publishes to Maven Central: only with the maintainer's yes
+TAIHEI_TEST_JAVA_HOME=<a JDK 17> make test-java-17   # the JVM tests on Java 17, as the release workflow runs them
+make publish-dry-run   # the bundle Maven Central would receive, written to out/ (a throwaway key in
+                       # MILL_PGP_SECRET_BASE64 and MILL_PGP_PASSPHRASE)
 ```
+
+Only the maintainer releases, through the family's release workflow (ADR 0014), where taihei-i18n
+4.x is a family entry of its own: his signed `v4.0.z` tag on this branch starts
+`.github/workflows/release.yml`, the caller pinned to a commit of the release repository's
+`open.yml`, and he approves its one `release` job. The run builds the tag with `make validate`,
+`make test-java-17` and `make publish-dry-run`, so those targets keep their names. A developer
+commits the release notes `RELEASE_4_0_z.md` through the merge gate; an agent never creates or
+pushes a release tag. A security patch goes to Maven Central afterwards, from the same bytes, by
+nakama's `make central`. Moving the caller's pin is a reviewed change here as on `main`.
 
 ## Layout
 

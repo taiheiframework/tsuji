@@ -53,9 +53,8 @@ jobs:
 
       # A symlink or a submodule is a tracked, clean entry to git, but Mill follows a symlink into
       # the published jars, wherever it points, and a filter (Git LFS) checks out other bytes than
-      # the reviewed ones. The release refuses them (make's STRAY_GUARD); a pull request that adds
-      # one fails here, visibly. This repository needs no .gitattributes, .lfsconfig or .gitmodules,
-      # so any of them fails too. bash with pipefail, so a failing git cannot pass as "none found".
+      # the reviewed ones. A pull request that adds one fails here, visibly. This repository needs
+      # no .gitattributes, .lfsconfig or .gitmodules, so any of them fails too. bash with pipefail, so a failing git cannot pass as "none found".
       - name: Refuse symlinks, submodules, filters and git attribute files
         shell: bash
         run: |

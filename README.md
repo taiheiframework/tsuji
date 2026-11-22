@@ -42,8 +42,12 @@ make test           # ./mill __.test.testForked    (JVM + JS; JS runs on Node)
 make fmt            # ./mill __.reformat
 make fix            # ./mill __.fix                 (scalafix)
 make validate       # fix + fmt + compile + test + mima
-make mima           # binary compatibility with the newest release tag
+make mima           # binary compatibility with the newest release on Maven Central; a spent
+                    # tag is passed over (MIMA_BASELINE=x.y.z|none)
+make test-java-17   # the JVM tests on Java 17 (TAIHEI_TEST_JAVA_HOME=<a JDK 17>)
 make publishLocal   # to ~/.ivy2/local (a SNAPSHOT only)
+make publish-dry-run  # the bundle Maven Central would receive, written to out/; needs a
+                      # throwaway signing key in MILL_PGP_SECRET_BASE64 and MILL_PGP_PASSPHRASE
 ```
 
 ## Releasing
@@ -51,17 +55,18 @@ make publishLocal   # to ~/.ivy2/local (a SNAPSHOT only)
 The version is the git tag: an exact `v`-tag on a clean tree is the release,
 anything else a SNAPSHOT of the last tag.
 
-```sh
-make release-prepare TYPE=patch|minor|major   # validate, write RELEASE_x_y_z.md
-make release-finalize                          # commit the notes, tag locally,
-                                               # check Central, publish to it
-git push origin main && git push origin vX.Y.Z # only after the publish succeeded
-make publish-dry-run                           # the signed bundle, written to out/
-```
+A 4.x version is released from the branch `4.0.x` by the Taihei Framework's
+[release workflow](https://github.com/taiheiframework/release), in two acts of the maintainer:
+he signs an annotated tag `v4.0.z` on a commit of `4.0.x` that holds the version's notes
+`RELEASE_4_0_z.md` and pushes it, and he approves the run's one `release` job. The tag starts
+`.github/workflows/release.yml`, which calls the release workflow at a pinned commit. It checks the
+tag's signature, builds a fresh checkout of the tag with no secret (`make validate`, `make
+test-java-17`, `make publish-dry-run`), and only then, in a job that runs no code of this
+repository, signs every jar and POM, keeps the bundle on an immutable GitHub Release of the tag and
+publishes its files to the family's Maven repository. 4.x users are on Maven Central, so a
+security patch goes there afterwards, from the same bytes. A tag whose run fails before the GitHub
+Release is published is spent: the next release takes the next number, and MiMa passes over it.
 
-Publishing reads the Central Portal user token and the release key from
-`~/.edo-release.env` or the environment (`MILL_SONATYPE_USERNAME`,
-`MILL_SONATYPE_PASSWORD`, `MILL_PGP_SECRET_BASE64`, `MILL_PGP_PASSPHRASE`).
 Releases are signed by the Taihei Framework release key, fingerprint
 `5026 B299 6DDB 697E C463  0BCF 14A7 33E2 A507 702F`, with the user ids
 `Taihei Framework Releases <releases@taihei.dev>` and, from before the family was renamed,

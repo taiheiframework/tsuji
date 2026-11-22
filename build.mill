@@ -256,6 +256,7 @@ object i18n extends Module {
     object test extends TaiheiJSTests {
       def sources = Task.Sources(
         wsRoot / "shared" / "test" / "src",
+        wsRoot / "js" / "test" / "src",
       )
     }
   }

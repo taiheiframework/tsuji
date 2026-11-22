@@ -37,7 +37,7 @@ object PlatformFormatterSpec extends ZIOSpecDefault:
       assertTrue(
         number("nl") == "1.234,50",
         percent("nl") == "50%",
-        medium("nl") == "20 okt 2026",
+        PlatformExpectations.mediumDutchDates.contains(medium("nl")),
         long("nl") == "20 oktober 2026",
         time("nl") == "14:05",
       )

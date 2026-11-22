@@ -1,0 +1,27 @@
+name: Release
+
+# The release of this library. The maintainer's push of a signed v-tag starts the Taihei
+# Framework's release workflow, pinned to a commit of its main; the workflow checks the tag's
+# signature against the maintainer's key at that pinned commit, and the maintainer approves the
+# one job that signs and publishes, as its required reviewer. Only
+# this file may start a release, and moving the pin is a reviewed change. The release workflow
+# runs one release job per family entry at a time and keeps one waiting; a third tag of one entry
+# cancels the one that waits, and its version is spent. So no more than two tags of one entry are
+# pushed while a release job of that entry runs.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions: {}
+
+jobs:
+  release:
+    if: github.repository == 'taiheiframework/tsuji'
+    permissions:
+      contents: write
+      id-token: write
+      actions: read
+    uses: taiheiframework/release/.github/workflows/open.yml@6b55f132916c6471f35feae21c570dde50306c14
+    with:
+      library: tsuji

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Tests of the build's checks that never touch a real registry (make release-test, part of make
-# validate): scripts/release.py, and repo-guard and publish-dry-run in the Makefile, run against
-# scripts/fake_servers.py on localhost, which stands in for Maven Central, the family's Maven
-# repository and the GitHub API. Files are signed by throwaway keys, never the release key. A
-# throwaway git repository holds a copy of the Makefile and scripts/; where a target starts Mill, a
-# stand-in answers and records what it was asked. Nothing leaves localhost. The mill launcher has
-# its own tests, scripts/test-mill-launcher. One line per check; exits non-zero when any check
-# fails.
+# validate): scripts/release.py, and repo-guard, publish-dry-run and test-java-17 in the Makefile,
+# run against scripts/fake_servers.py on localhost, which stands in for Maven Central, the
+# family's Maven repository and the GitHub API. Files are signed by throwaway keys, never the
+# release key. A throwaway git repository holds a copy of the Makefile and scripts/; where a target
+# starts Mill or a JDK, a stand-in answers and records what it was asked. Nothing leaves
+# localhost. The mill launcher has its own tests, scripts/test-mill-launcher. One line per check;
+# exits non-zero when any check fails.
 set -uo pipefail
 # make hands its command-line variables to every make below it, through MAKEFLAGS and as
 # environment variables, and the make calls here would inherit them. COURSIER_* the Makefile reads
@@ -274,18 +274,32 @@ expect "resolved: the same file from Central and from the site is checked in eac
 rm -rf "$CENTC/dev/taihei/$DA/$DV"
 expect "resolved: files from two Coursier caches are refused" 1 "more than one Coursier cache" resolved "$W/c9.json"
 
-# released: the MiMa baseline's check. A version on neither Central nor the site is spent (exit
-# 3), which the baseline passes over; any other answer stops it (exit 1).
-mkdir -p "$S/central/dev/taihei/$DA/6.6.6" "$S/site/dev/taihei/$DA/6.6.7"
-printf 'pom' > "$S/central/dev/taihei/$DA/6.6.6/$DA-6.6.6.pom"; printf 'pom' > "$S/site/dev/taihei/$DA/6.6.7/$DA-6.6.7.pom"
-expect "released: a version on Central" 0 "on Maven Central" R released --central "$CENTRAL" --url "$SITE" --artifact "$DA" 6.6.6
-expect "released: a version on the site" 0 "on $SITE" R released --central "$CENTRAL" --url "$SITE" --artifact "$DA" 6.6.7
-R released --central "$CENTRAL" --url "$SITE" --artifact "$DA" 6.6.8 >/dev/null 2>&1
-[ $? = 3 ] && pass "released: a version on neither is spent, exit 3" || fail "released: a version on neither does not exit 3"
-expect "released: and says so, naming it" 1 "v6.6.8 is neither on Maven Central nor on" R released --central "$CENTRAL" --url "$SITE" --artifact "$DA" 6.6.8
-R released --central "$CENTRAL" --url "$BASE/moved/" --artifact "$DA" 6.6.8 >/dev/null 2>&1
+# released: the MiMa baseline's check. A version on Central, or with an immutable GitHub Release,
+# is released (exit 0); one on neither Central nor GitHub is spent (exit 3), which the baseline
+# passes over; any other answer stops it (exit 1). A site that does not serve a file yet decides
+# nothing.
+rel_json() { # VERSION IMMUTABLE DRAFT: the stand-in API's GitHub Release of tag vVERSION
+  mkdir -p "$S/api/repos/$OWNER/$LIB/releases/tags"
+  printf '{"tag_name": "v%s", "immutable": %s, "draft": %s, "prerelease": false}\n' "$1" "$2" "$3" > "$S/api/repos/$OWNER/$LIB/releases/tags/v$1"
+}
+RL() { R released --central "$CENTRAL" --api "$API" --repo "$OWNER/$LIB" --artifact "$DA" "$@"; }
+mkdir -p "$S/central/dev/taihei/$DA/6.6.6"; printf 'pom' > "$S/central/dev/taihei/$DA/6.6.6/$DA-6.6.6.pom"
+rel_json 6.6.7 true false; rel_json 6.6.9 false false; rel_json 6.6.10 true true
+expect "released: a version on Central" 0 "on Maven Central" RL 6.6.6
+: > "$W/log"
+expect "released: a version with an immutable GitHub Release, which no site need serve yet" 0 "has an immutable GitHub Release" RL 6.6.7
+! grep -q 'auth=present' "$W/log" && pass "released: asks Central and the API without credentials" || fail "released: sent credentials"
+RL 6.6.8 >/dev/null 2>&1
+[ $? = 3 ] && pass "released: a tag with no GitHub Release and nothing on Central is spent, exit 3" || fail "released: a spent version does not exit 3"
+expect "released: and says so, naming it" 1 "v6.6.8 has no GitHub Release" RL 6.6.8
+mkdir -p "$S/site/dev/taihei/$DA/6.6.8"; printf 'pom' > "$S/site/dev/taihei/$DA/6.6.8/$DA-6.6.8.pom"
+RL 6.6.8 >/dev/null 2>&1
+[ $? = 3 ] && pass "released: a file on the site does not make a version without a GitHub Release released" || fail "released: the site decided"
+expect "released: a GitHub Release that is not immutable stops it" 1 "not published and immutable" RL 6.6.9
+expect "released: a draft stops it" 1 "not published and immutable" RL 6.6.10
+R released --central "$BASE/moved" --api "$API" --repo "$OWNER/$LIB" --artifact "$DA" 6.6.6 >/dev/null 2>&1
 [ $? = 1 ] && pass "released: a redirect is no answer, exit 1, never spent" || fail "released: a redirect did not exit 1"
-expect "released: and names it" 1 "HTTP 301" R released --central "$CENTRAL" --url "$BASE/moved/" --artifact "$DA" 6.6.7
+expect "released: and names it" 1 "HTTP 301" R released --central "$BASE/moved" --api "$API" --repo "$OWNER/$LIB" --artifact "$DA" 6.6.6
 
 # --- the Makefile targets, with a stand-in for Mill ---------------------------------------------
 G="$W/repo"; mkdir -p "$G/scripts" "$G/keys"
@@ -308,7 +322,9 @@ case "\$*" in
   "show __.resolverOrder") cat "$RESOLVERS_JSON";;
   "resolve __.resolvedMvnDeps") cat "$RESOLVING";;
   "show "*".pom") cat "$POMS_JSON";;
+  "show "*".javaHome") echo "\"\${STANDIN_JAVA_HOME:-/nowhere}\"";;
   "show __."*) cat "$RESOLVED_JSON";;
+  *".testForked"*) echo "tests \$*" >> "$MLOG.tests";;
   "--no-daemon mill.javalib.SonatypeCentralPublishModule/"*)
     for v in MILL_SONATYPE_USERNAME MILL_SONATYPE_PASSWORD MILL_PGP_SECRET_BASE64 MILL_PGP_PASSPHRASE MILL_TESTS_PUBLISH_DRY_RUN; do
       if [ "\${!v-}" = dry-run-no-upload ]; then echo "\$v placeholder"
@@ -372,6 +388,22 @@ rm -f "$MLOG"
 STANDIN_VERSION=$V.1-SNAPSHOT "${M[@]}" publish-dry-run >/dev/null 2>&1
 saw "args --no-daemon mill.javalib.SonatypeCentralPublishModule/" && pass "publish-dry-run: a SNAPSHOT bundle gets no name" \
   || fail "publish-dry-run: a SNAPSHOT's arguments: $(grep '^args' "$MLOG")"
+
+# test-java-17: the JDK TAIHEI_TEST_JAVA_HOME names must be a 17, and every test module must fork
+# on it, before any test runs. Stand-in JDKs print only their version.
+for v in 17.0.9 21.0.1; do
+  mkdir -p "$W/jdk-$v/bin"
+  printf '#!/bin/sh\necho '"'"'openjdk version "%s" 2025-01-01'"'"' >&2\n' "$v" > "$W/jdk-$v/bin/java"; chmod +x "$W/jdk-$v/bin/java"
+done
+rm -f "$MLOG.tests"
+expect "test-java-17 refuses without TAIHEI_TEST_JAVA_HOME" 1 "set TAIHEI_TEST_JAVA_HOME" env -u TAIHEI_TEST_JAVA_HOME "${M[@]}" test-java-17
+expect "test-java-17 refuses a JDK that is not 17" 1 "is not a JDK 17" env TAIHEI_TEST_JAVA_HOME="$W/jdk-21.0.1" "${M[@]}" test-java-17
+expect "test-java-17 refuses a test module that does not fork on it" 1 "does not fork on" \
+  env TAIHEI_TEST_JAVA_HOME="$W/jdk-17.0.9" STANDIN_JAVA_HOME=/elsewhere "${M[@]}" test-java-17
+[ ! -e "$MLOG.tests" ] && pass "test-java-17: and no test ran after a refusal" || fail "test-java-17 ran tests after a refusal"
+expect "test-java-17 runs the tests on a JDK 17 every module forks on" 0 "" \
+  env TAIHEI_TEST_JAVA_HOME="$W/jdk-17.0.9" STANDIN_JAVA_HOME="$W/jdk-17.0.9" "${M[@]}" test-java-17
+grep -q '\.testForked' "$MLOG.tests" 2>/dev/null && pass "test-java-17: the tests ran" || fail "test-java-17: no test ran"
 
 grep -q '^PUT\|^POST' "$W/log" && fail "something was uploaded to a stand-in server" || pass "nothing was ever uploaded"
 [ "$FAILED" = 0 ] && echo "[release-test] all checks passed" || echo "[release-test] FAILED"

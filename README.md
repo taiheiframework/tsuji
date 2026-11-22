@@ -76,8 +76,9 @@ make validate       # repo-guard + release-test + fix + fmt + lint + compile + t
 make repo-guard     # Coursier's defaults (local Ivy, Central), then REPO_URL for dev.taihei
                     # alone, nothing else; every resolved dev.taihei file checked
 make release-test   # the tests of repo-guard and the dry run, against stand-ins on localhost
-make mima           # binary compatibility with the newest release of the current major on
-                    # Central or REPO_URL; a spent tag is passed over (MIMA_BASELINE=x.y.z|none)
+make mima           # binary compatibility with the newest release of the current major (on
+                    # Central, or with an immutable GitHub Release); a spent tag, with
+                    # neither, is passed over (MIMA_BASELINE=x.y.z|none)
 make test-java-17   # the JVM tests on Java 17 (TAIHEI_TEST_JAVA_HOME=<a JDK 17>)
 make publishLocal   # to ~/.ivy2/local (a SNAPSHOT only)
 make publish-dry-run  # the bundle Maven Central would receive, written to out/; needs a

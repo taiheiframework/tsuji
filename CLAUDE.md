@@ -8,7 +8,8 @@ the JVM and Scala.js. Part of the Taihei Framework; the family's rules come from
 ## Commands
 
 ```bash
-make validate          # scalafix, scalafmt, compile, test and MiMa, JVM and Scala.js
+make fix && make fmt   # scalafix, scalafmt: rewrite the sources
+make validate          # check scalafmt and scalafix, compile, test and MiMa, JVM and Scala.js
 make mima              # against the newest 4.x release on Maven Central; a spent tag (no GitHub
                        # Release) is passed over; a released one not on Central yet fails
 make test              # ./mill __.test.testForked (JS tests run under Node)

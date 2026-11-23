@@ -12,7 +12,7 @@ BUNDLE_PREFIX = dev.taihei-taihei-i18n
 # its own subdirectory, <bundle name>/, in Maven layout.
 DRY_RUN_DIR = $(CURDIR)/out/mill.javalib.SonatypeCentralPublishModule/publishAll.dest/repository
 
-.PHONY: clean fix fmt compile prepare build test test-java-17 mima validate deps publishLocal publish-dry-run
+.PHONY: clean fix fmt lint compile prepare build test test-java-17 mima validate deps publishLocal publish-dry-run
 
 # ---------------------------------------------------------------------------
 # Build (cross-platform: __ covers the JVM and Scala.js modules)
@@ -26,6 +26,11 @@ fix:
 
 fmt:
 	./mill __.reformat
+
+# What CI checks: fails on a file scalafmt or scalafix would change, and changes nothing.
+lint:
+	./mill __.checkFormat
+	./mill __.fix --check
 
 compile:
 	./mill __.compile
@@ -46,7 +51,9 @@ mima:
 	@echo "[mima] baseline: $$(./mill show release.mimaBaseline | tr -d '\n "' | sed 's/^null$$/none/')"
 	./mill __.mimaReportBinaryIssues
 
-validate: fix fmt compile test mima
+# Checks and never rewrites: run make fix and make fmt first, so unformatted code fails here
+# and in the release run instead of passing reformatted.
+validate: lint compile test mima
 
 # The JVM tests on Java 17, the oldest Java the library supports, where locale data and the JDK's
 # behaviour can differ from the newest JDK: TAIHEI_TEST_JAVA_HOME names that JDK (Mill runs on its

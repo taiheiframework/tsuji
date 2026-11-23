@@ -41,7 +41,8 @@ make compile        # ./mill __.compile           (JVM + JS)
 make test           # ./mill __.test.testForked    (JVM + JS; JS runs on Node)
 make fmt            # ./mill __.reformat
 make fix            # ./mill __.fix                 (scalafix)
-make validate       # fix + fmt + compile + test + mima
+make lint           # ./mill __.checkFormat and __.fix --check, as CI checks them
+make validate       # lint + compile + test + mima (run make fix and make fmt first)
 make mima           # binary compatibility with the newest release on Maven Central; a spent
                     # tag, with no GitHub Release, is passed over (MIMA_BASELINE=x.y.z|none)
 make test-java-17   # the JVM tests on Java 17 (TAIHEI_TEST_JAVA_HOME=<a JDK 17>)

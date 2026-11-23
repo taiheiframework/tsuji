@@ -23,26 +23,36 @@ object TimeBudget:
 
   val MaxAttempts = 3
 
-  // The most a budget grows, so that a reference that ran slow for a reason of its own cannot
-  // make a budget meaningless, and work that grows with the square of its input still misses
-  // it. On the JVM the specs run side by side, and in a full test run the reference took up to
-  // this much longer than on a quiet machine; on Scala.js, one spec at a time, about twice.
-  val MaxScale = 20.0
-
-  /** How slow the machine is now, against an idle one: at least 1, at most MaxScale. */
-  final case class Speed(millis: () => Double, idleMillis: Double):
+  /**
+   * How slow the machine is now, against a quiet one: the reference's time over `idleMillis`, at
+   * least 1 and at most `maxScale`.
+   */
+  final case class Speed(
+    millis: () => Double,
+    idleMillis: Double,
+    maxScale: Double):
 
     def scale(): Double =
       val samples = Vector.fill(Speed.Samples)(millis()).sorted
-      math.min(MaxScale, math.max(1.0, samples(Speed.Samples / 2) / idleMillis))
+      math.min(maxScale, math.max(1.0, samples(Speed.Samples / 2) / idleMillis))
 
   object Speed:
 
     val Samples = 3
 
+    private val js = java.lang.System.getProperty("java.vm.name") == "Scala.js"
+
     // What the reference takes on a quiet machine of the family (a 2019 32-core desktop).
-    private val IdleMillisJs  = 12.0
-    private val IdleMillisJvm = 10.0
+    private val IdleMillisJs  = 20.0
+    private val IdleMillisJvm = 14.0
+
+    // The most a budget grows, so that a reference that ran slow for a reason of its own cannot
+    // make a budget meaningless, and work that grows with the square of its input still misses
+    // it. Scala.js runs one spec at a time, and in full test runs with every core busy its work
+    // took up to three times as long as on a quiet machine. The JVM runs its specs side by side
+    // and collects their garbage together: one spec took from 0.7 to 6.5 seconds.
+    val MaxScaleJs  = 5.0
+    val MaxScaleJvm = 20.0
 
     val machine: Speed = Speed(
       () =>
@@ -50,20 +60,21 @@ object TimeBudget:
         reference()
         (java.lang.System.nanoTime() - start) / 1e6
       ,
-      if java.lang.System.getProperty("java.vm.name") == "Scala.js" then IdleMillisJs else IdleMillisJvm,
+      if js then IdleMillisJs else IdleMillisJvm,
+      if js then MaxScaleJs else MaxScaleJvm,
     )
 
-    // 4 MB of numbers, read in an order each step decides: arithmetic, and memory the shared
-    // caches serve or fail to serve, as they serve the work. It allocates nothing, so it never pays for collecting
-    // what the work left behind, which made an earlier reference that built strings several
-    // times slower than the work right after it.
-    private val table = Array.tabulate(1 << 20)(i => i * 0x9e3779b1)
+    // 256 KB of numbers, read in an order each step decides: arithmetic and memory that a core
+    // and its own caches serve, as they serve most of the work. It allocates nothing, so it never
+    // pays for collecting what the work left behind. A table larger than those caches made the
+    // reference slow down several times more than the work.
+    private val table = Array.tabulate(1 << 16)(i => i * 0x9e3779b1)
 
     private def reference(): Int =
       var x = 1
       var i = 0
-      while i < 1000000 do
-        x = x * 1103515245 + table((x >>> 12) & 0xfffff)
+      while i < 4000000 do
+        x = x * 1103515245 + table((x >>> 16) & 0xffff)
         i += 1
       x
 

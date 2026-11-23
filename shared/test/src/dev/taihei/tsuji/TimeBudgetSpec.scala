@@ -24,7 +24,7 @@ object TimeBudgetSpec extends ZIOSpecDefault:
       runs += 1
       runs
 
-  private def machine(referenceMillis: Double) = TimeBudget.Speed(() => referenceMillis, idleMillis = 10)
+  private def machine(referenceMillis: Double) = TimeBudget.Speed(() => referenceMillis, idleMillis = 10, maxScale = 5)
 
   private val idle = machine(10)
 
@@ -72,17 +72,16 @@ object TimeBudgetSpec extends ZIOSpecDefault:
         failed <- later(wrong, _ => false)
       yield assertTrue(passed.isSuccess, slow.runs == 3, failed.isFailure, wrong.runs == 1)
     },
-    test("on a slow machine the budget grows as much as the reference took longer, at most MaxScale times") {
+    test("on a slow machine the budget grows as much as the reference took longer, at most its cap") {
       val busy   = Run(290)
       val busier = Run(301, 301, 301)
-      val stuck  = Run(2001, 2001, 2001)
+      val stuck  = Run(501, 501, 501)
       assertTrue(
         run(busy, speed = machine(30)).isSuccess,
         busy.lines.toList == List("work: attempt 1 of 3 took 290 ms, budget 100 ms times 3.0"),
         run(busier, speed = machine(30)).isFailure,
-        TimeBudget.MaxScale == 20.0,
         run(stuck, speed = machine(1000)).isFailure,
-        stuck.lines.forall(_.endsWith("times 20.0")),
+        stuck.lines.forall(_.endsWith("times 5.0")),
       )
     },
     test("on a fast machine the budget stays as named") {
@@ -91,19 +90,19 @@ object TimeBudgetSpec extends ZIOSpecDefault:
     },
     test("the reference is timed on both sides of the work, and the slower side counts") {
       val readings = Iterator(10.0, 10.0, 10.0, 20.0, 20.0, 20.0)
-      val speed    = TimeBudget.Speed(() => readings.next(), idleMillis = 10)
+      val speed    = TimeBudget.Speed(() => readings.next(), idleMillis = 10, maxScale = 5)
       val r        = Run(150)
       assertTrue(run(r, speed = speed).isSuccess, r.lines.head.endsWith("times 2.0"))
     },
     test("one slow reading of the reference does not move the scale") {
       val readings = Iterator(10.0, 500.0, 10.0, 10.0, 10.0, 500.0)
-      val speed    = TimeBudget.Speed(() => readings.next(), idleMillis = 10)
+      val speed    = TimeBudget.Speed(() => readings.next(), idleMillis = 10, maxScale = 5)
       val r        = Run(40)
       assertTrue(run(r, speed = speed).isSuccess, r.lines.head.endsWith("times 1.0"))
     },
-    // However slow the machine, a budget grows at most MaxScale times, and inputs are sized so that
-    // work beyond linear takes far longer than that: here twenty thousand steps against two
-    // hundred million, on the real reference.
+    // However slow the machine, a budget grows at most twenty times, and inputs are sized so that
+    // work beyond linear takes far longer than that: here thirty thousand steps against 450
+    // million, on the real reference.
     test("on any machine, work that grows with the square of its input misses a budget its linear form keeps") {
       def steps(n: Int, square: Boolean): Int =
         var acc = 0
@@ -115,21 +114,12 @@ object TimeBudgetSpec extends ZIOSpecDefault:
             j += 1
           i += 1
         acc
-      val quiet                               = ListBuffer.empty[String]
       val runs                                = ListBuffer.empty[String]
       assertTrue(
-        TimeBudget.within(
-          "linear",
-          2,
-          log = line =>
-            quiet.append(line); (),
-        )(steps(20000, square = false))(_ => assertTrue(true)).isSuccess,
-        TimeBudget.within(
-          "square",
-          2,
-          log = line =>
-            runs.append(line); (),
-        )(steps(20000, square = true))(_ => assertTrue(true)).isFailure,
+        TimeBudget.within("linear", 3)(steps(30000, square = false))(_ => assertTrue(true)).isSuccess,
+        TimeBudget.within("square", 3, log = line => runs.append(line))(steps(30000, square = true))(_ =>
+          assertTrue(true)
+        ).isFailure,
         runs.size == TimeBudget.MaxAttempts,
       )
     },

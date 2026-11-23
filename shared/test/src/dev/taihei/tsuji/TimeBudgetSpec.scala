@@ -101,6 +101,38 @@ object TimeBudgetSpec extends ZIOSpecDefault:
       val r        = Run(40)
       assertTrue(run(r, speed = speed).isSuccess, r.lines.head.endsWith("times 1.0"))
     },
+    // However slow the machine, a budget grows at most MaxScale times, and inputs are sized so that
+    // work beyond linear takes far longer than that: here twenty thousand steps against two
+    // hundred million, on the real reference.
+    test("on any machine, work that grows with the square of its input misses a budget its linear form keeps") {
+      def steps(n: Int, square: Boolean): Int =
+        var acc = 0
+        var i   = 0
+        while i < n do
+          var j = if square then 0 else i
+          while j <= i do
+            acc = acc * 31 + (i ^ j)
+            j += 1
+          i += 1
+        acc
+      val quiet                               = ListBuffer.empty[String]
+      val runs                                = ListBuffer.empty[String]
+      assertTrue(
+        TimeBudget.within(
+          "linear",
+          2,
+          log = line =>
+            quiet.append(line); (),
+        )(steps(20000, square = false))(_ => assertTrue(true)).isSuccess,
+        TimeBudget.within(
+          "square",
+          2,
+          log = line =>
+            runs.append(line); (),
+        )(steps(20000, square = true))(_ => assertTrue(true)).isFailure,
+        runs.size == TimeBudget.MaxAttempts,
+      )
+    },
     test("the real reference takes some time on this platform") {
       val taken = Vector.fill(3)(TimeBudget.Speed.machine.millis())
       assertTrue(taken.forall(_ > 0.0), TimeBudget.Speed.machine.scale() >= 1.0)

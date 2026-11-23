@@ -24,8 +24,9 @@ object TimeBudget:
   val MaxAttempts = 3
 
   // The most a budget grows, so that a reference that ran slow for a reason of its own cannot
-  // make a budget meaningless. On the JVM the specs run side by side, and with every core of the
-  // machine busy the reference took up to ten times as long as on an idle machine.
+  // make a budget meaningless, and work that grows with the square of its input still misses
+  // it. On the JVM the specs run side by side, and in a full test run the reference took up to
+  // this much longer than on a quiet machine; on Scala.js, one spec at a time, about twice.
   val MaxScale = 20.0
 
   /** How slow the machine is now, against an idle one: at least 1, at most MaxScale. */
@@ -39,10 +40,9 @@ object TimeBudget:
 
     val Samples = 3
 
-    // What the reference takes on an idle machine of the family (a 2019 32-core desktop): about
-    // a third of what it takes there while every core is busy, as the specs that run long do.
+    // What the reference takes on a quiet machine of the family (a 2019 32-core desktop).
     private val IdleMillisJs  = 12.0
-    private val IdleMillisJvm = 6.0
+    private val IdleMillisJvm = 10.0
 
     val machine: Speed = Speed(
       () =>
@@ -53,11 +53,19 @@ object TimeBudget:
       if java.lang.System.getProperty("java.vm.name") == "Scala.js" then IdleMillisJs else IdleMillisJvm,
     )
 
-    // Strings, a map and a sort, as the specs' work is made of, in the standard library alone.
+    // 4 MB of numbers, read in an order each step decides: arithmetic, and memory the shared
+    // caches serve or fail to serve, as they serve the work. It allocates nothing, so it never pays for collecting
+    // what the work left behind, which made an earlier reference that built strings several
+    // times slower than the work right after it.
+    private val table = Array.tabulate(1 << 20)(i => i * 0x9e3779b1)
+
     private def reference(): Int =
-      val words  = Vector.tabulate(20000)(i => (i.toLong * 7919 % 100003).toString)
-      val counts = words.groupMapReduce(_.takeRight(2))(_.length)(_ + _)
-      counts.size + words.sorted.mkString(",").length
+      var x = 1
+      var i = 0
+      while i < 1000000 do
+        x = x * 1103515245 + table((x >>> 12) & 0xfffff)
+        i += 1
+      x
 
   end Speed
 

@@ -12,4 +12,3 @@ object PlatformExpectations:
     case 17          => Set("20 okt. 2026")
     case v if v < 21 => Set("20 okt. 2026", "20 okt 2026")
     case _           => Set("20 okt 2026")
-

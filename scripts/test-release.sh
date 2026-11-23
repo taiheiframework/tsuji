@@ -277,7 +277,8 @@ expect "resolved: files from two Coursier caches are refused" 1 "more than one C
 # released: the MiMa baseline's check. A version on Central, or with an immutable GitHub Release,
 # is released (exit 0); one on neither Central nor GitHub is spent (exit 3), which the baseline
 # passes over; any other answer stops it (exit 1). A site that does not serve a file yet decides
-# nothing.
+# nothing. Asked without a token, GitHub answers 404 for a draft, so a draft is spent; the draft
+# case below guards a caller that would see one.
 rel_json() { # VERSION IMMUTABLE DRAFT: the stand-in API's GitHub Release of tag vVERSION
   mkdir -p "$S/api/repos/$OWNER/$LIB/releases/tags"
   printf '{"tag_name": "v%s", "immutable": %s, "draft": %s, "prerelease": false}\n' "$1" "$2" "$3" > "$S/api/repos/$OWNER/$LIB/releases/tags/v$1"
@@ -285,6 +286,7 @@ rel_json() { # VERSION IMMUTABLE DRAFT: the stand-in API's GitHub Release of tag
 RL() { R released --central "$CENTRAL" --api "$API" --repo "$OWNER/$LIB" --artifact "$DA" "$@"; }
 mkdir -p "$S/central/dev/taihei/$DA/6.6.6"; printf 'pom' > "$S/central/dev/taihei/$DA/6.6.6/$DA-6.6.6.pom"
 rel_json 6.6.7 true false; rel_json 6.6.9 false false; rel_json 6.6.10 true true
+printf '{"tag_name": "v6.6.11", "immutable": true, "prerelease": false}\n' > "$S/api/repos/$OWNER/$LIB/releases/tags/v6.6.11"
 expect "released: a version on Central" 0 "on Maven Central" RL 6.6.6
 : > "$W/log"
 expect "released: a version with an immutable GitHub Release, which no site need serve yet" 0 "has an immutable GitHub Release" RL 6.6.7
@@ -296,7 +298,8 @@ mkdir -p "$S/site/dev/taihei/$DA/6.6.8"; printf 'pom' > "$S/site/dev/taihei/$DA/
 RL 6.6.8 >/dev/null 2>&1
 [ $? = 3 ] && pass "released: a file on the site does not make a version without a GitHub Release released" || fail "released: the site decided"
 expect "released: a GitHub Release that is not immutable stops it" 1 "not published and immutable" RL 6.6.9
-expect "released: a draft stops it" 1 "not published and immutable" RL 6.6.10
+expect "released: a draft, if the API ever shows one, stops it" 1 "not published and immutable" RL 6.6.10
+expect "released: a GitHub Release that does not say it is no draft stops it" 1 "not published and immutable" RL 6.6.11
 R released --central "$BASE/moved" --api "$API" --repo "$OWNER/$LIB" --artifact "$DA" 6.6.6 >/dev/null 2>&1
 [ $? = 1 ] && pass "released: a redirect is no answer, exit 1, never spent" || fail "released: a redirect did not exit 1"
 expect "released: and names it" 1 "HTTP 301" R released --central "$BASE/moved" --api "$API" --repo "$OWNER/$LIB" --artifact "$DA" 6.6.6

@@ -70,10 +70,11 @@ object release extends Module {
   // Whether a version of this library is released, asked by scripts/release.py of Maven Central
   // (its JVM module's POM, for the versions from before the family's repository) and otherwise of
   // the tag's GitHub Release, without a token. A tag without a GitHub Release is spent: tagged, and
-  // never released (ADR 0014), and passed over, which is said in the build's output. Whether a site
-  // serves the files yet decides nothing. Any other answer, a redirect, a draft or a release that
-  // is not immutable included, fails the build: a baseline we cannot determine must not turn into
-  // an older one, or into none.
+  // never released (ADR 0014), and passed over, which is said in the build's output. A draft, what
+  // a failed release run leaves, is invisible without a token and so spent as well. Whether a site
+  // serves the files yet decides nothing. Any other answer, a redirect or a release that is not
+  // immutable included, fails the build: a baseline we cannot determine must not turn into an
+  // older one, or into none.
   private def released(root: os.Path, v: String): Boolean = {
     val r = os
       .proc("python3", "-I", "-B", root / "scripts" / "release.py", "released", "--central", "https://repo1.maven.org/maven2",

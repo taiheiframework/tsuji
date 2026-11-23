@@ -56,9 +56,8 @@ fix:
 fmt:
 	./mill __.reformat
 
-# The checks CI runs, after fix and fmt have rewritten the sources: when scalafmt and scalafix
-# disagree on a line, the one that ran last wins locally and the other fails in CI, so validate
-# checks with both instead of trusting the rewrite.
+# What CI checks: fails on a file scalafmt or scalafix would change, and changes nothing. Both
+# check, since where they disagree on a line the one that ran last wins a rewrite.
 lint:
 	./mill __.checkFormat
 	./mill __.fix --check
@@ -171,7 +170,9 @@ zio-json-newest:
 	@[ -n "$(ZIO_JSON_TEST_VERSION)" ] || { echo "[zio-json-newest] set ZIO_JSON_TEST_VERSION=x.y.z, the newest zio-json on Maven Central"; exit 1; }
 	ZIO_JSON_TEST_VERSION="$(ZIO_JSON_TEST_VERSION)" ./mill '{ziojson.jvm,ziojson.js}.test.zioJsonTested' + '{ziojson.jvm,ziojson.js}.test.testForked'
 
-validate: repo-guard release-test fix fmt lint compile test mima no-zio
+# Checks and never rewrites: run make fix and make fmt first, so unformatted code fails here
+# and in the release run instead of passing reformatted.
+validate: repo-guard release-test lint compile test mima no-zio
 
 # The JVM tests on Java 17, the oldest Java the library supports, where locale data and the JDK's
 # behaviour can differ from the newest JDK: TAIHEI_TEST_JAVA_HOME names that JDK (Mill runs on its

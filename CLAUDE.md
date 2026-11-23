@@ -9,7 +9,8 @@ come from the parent folder's `CLAUDE.md` when this repo is checked out under `~
 ## Commands
 
 ```bash
-make validate          # repo-guard, release-test, scalafix, scalafmt, both checked as CI does, compile, test, MiMa and no-zio
+make fix && make fmt   # scalafix, scalafmt: rewrite the sources
+make validate          # repo-guard, release-test, check scalafmt and scalafix, compile, test, MiMa and no-zio
 make repo-guard        # Coursier's defaults (local Ivy, Central), then REPO_URL for dev.taihei alone;
                        # pins released; resolved dev.taihei files checked
 make mima              # against the newest released tag of release.majorLine (on Central, or with an

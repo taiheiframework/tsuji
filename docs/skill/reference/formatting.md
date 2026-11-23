@@ -38,7 +38,8 @@ zio-json/src                         taihei-tsuji-zio-json: TsujiZioJson
 ```
 
 - `make validate`: repo-guard (the build's repositories), release-test (the tests of repo-guard
-  and the dry run), scalafix, scalafmt, compile, tests on the JVM and Node, MiMa against the newest
+  and the dry run), scalafix and scalafmt as checks that change nothing (run `make fix` and
+  `make fmt` first), compile, tests on the JVM and Node, MiMa against the newest
   release of the current major line, and `no-zio`: only `taihei-tsuji-zio-json`'s POM may name
   `dev.zio`.
 - Released by the family's release workflow from the maintainer's signed tag, the

@@ -107,7 +107,8 @@ make test           # ./mill __.test.testForked    (JVM + JS; JS runs on Node)
 make fmt            # ./mill __.reformat
 make fix            # ./mill __.fix                 (scalafix)
 make lint           # ./mill __.checkFormat and __.fix --check, as CI checks them
-make validate       # repo-guard + release-test + fix + fmt + lint + compile + test + mima + no-zio
+make validate       # repo-guard + release-test + lint + compile + test + mima + no-zio
+                    # (checks only: run make fix and make fmt first)
 make repo-guard     # Coursier's defaults (local Ivy, Central), then REPO_URL for dev.taihei
                     # alone, nothing else; every resolved dev.taihei file checked
 make release-test   # the tests of repo-guard and the dry run, against stand-ins on localhost

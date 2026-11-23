@@ -69,7 +69,9 @@ object release extends Module {
   private def released(v: String): Boolean =
     status(s"https://repo1.maven.org/maven2/dev/taihei/taihei-i18n_3/$v/taihei-i18n_3-$v.pom") == 200 || {
       if (status(s"https://api.github.com/repos/taiheiframework/tsuji/releases/tags/v$v") == 200)
-        sys.error(s"no MiMa baseline: v$v has a GitHub Release but is not on Maven Central; set MIMA_BASELINE")
+        sys.error(
+          s"no MiMa baseline: v$v has a GitHub Release but is not on Maven Central; it goes there before the next 4.x tag (MIMA_BASELINE=x.y.z overrides it locally)"
+        )
       println(s"[mima] v$v has no GitHub Release and is not on Maven Central: spent, passed over")
       false
     }

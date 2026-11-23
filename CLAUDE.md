@@ -26,6 +26,12 @@ commits the release notes `RELEASE_4_0_z.md` through the merge gate; an agent ne
 pushes a release tag. A security patch goes to Maven Central afterwards, from the same bytes, by
 nakama's `make central`. Moving the caller's pin is a reviewed change here as on `main`.
 
+A release step of its own on this line: `make central` runs for a released 4.x version before the
+next 4.x tag is pushed. The 4.x MiMa baseline reads Maven Central only, with no fallback to the
+family's repository, and a released version that Central does not serve fails `make validate`; the
+release run cannot set `MIMA_BASELINE`, so the next tag's run would fail and spend its version. A
+version Central refuses therefore blocks every later 4.x release.
+
 ## Layout
 
 - `shared/src/dev/taihei/i18n/`: `Language`, `Message`, `MessageFormat2`, `CoreMessages`.

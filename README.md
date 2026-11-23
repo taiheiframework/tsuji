@@ -67,6 +67,13 @@ publishes its files to the family's Maven repository. 4.x users are on Maven Cen
 security patch goes there afterwards, from the same bytes. A tag whose run fails before the GitHub
 Release is published is spent: the next release takes the next number, and MiMa passes over it.
 
+Before the next 4.x tag is pushed, the version released before it must be on Maven Central. MiMa
+takes its 4.x baseline from Central only, and a released 4.x version that Central does not serve
+yet fails `make validate`, in the release run too, which cannot set `MIMA_BASELINE`; that run would
+fail and spend its version. So the maintainer's release steps for 4.x are: the signed tag, the
+approved `release` job, the version copied to Central from the same bytes, and only then the next
+tag. A version Central refuses blocks every later 4.x release until that is resolved.
+
 Releases are signed by the Taihei Framework release key, fingerprint
 `5026 B299 6DDB 697E C463  0BCF 14A7 33E2 A507 702F`, with the user ids
 `Taihei Framework Releases <releases@taihei.dev>` and, from before the family was renamed,

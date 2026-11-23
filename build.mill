@@ -533,6 +533,7 @@ object ziojson extends Module {
         wsRoot / "zio-json" / "test" / "src",
         wsRoot / "golden" / "corpus",
         wsRoot / "shared" / "test" / "src" / "dev" / "taihei" / "tsuji" / "TestJson.scala",
+        wsRoot / "shared" / "test" / "src" / "dev" / "taihei" / "tsuji" / "TimeBudget.scala",
       )
 
       def mvnDeps = Task {
@@ -565,6 +566,7 @@ object ziojson extends Module {
         wsRoot / "zio-json" / "test" / "src",
         wsRoot / "golden" / "corpus",
         wsRoot / "shared" / "test" / "src" / "dev" / "taihei" / "tsuji" / "TestJson.scala",
+        wsRoot / "shared" / "test" / "src" / "dev" / "taihei" / "tsuji" / "TimeBudget.scala",
       )
 
       def mvnDeps = Task {

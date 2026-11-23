@@ -3,8 +3,6 @@ package dev.taihei.tsuji
 import java.time.{LocalDate, LocalDateTime, LocalTime}
 import java.util.concurrent.atomic.AtomicInteger
 
-import scala.util.Try
-
 import zio.test.*
 
 // What one evaluation reads and when: a date or time style, an option's value, a spent budget,
@@ -23,11 +21,20 @@ object EvaluationCostSpec extends ZIOSpecDefault:
       count.incrementAndGet()
       "x"
 
-  // A budget with exactly `left` units left, or already spent when `left` is negative.
-  private def budgetWith(left: Int): Budget =
-    val budget = Budget.fresh()
-    Try(budget.charge(Budget.PerMessage.toInt - left))
-    budget
+  // Options that count every walk over them: a key made of the options, their hash or a filter
+  // over them walks them all, a lookup of one option does not.
+  final private class Walked(options: Map[String, String], walks: AtomicInteger)
+    extends scala.collection.immutable.AbstractMap[String, String]:
+
+    def get(key: String): Option[String] = options.get(key)
+
+    def iterator: Iterator[(String, String)] =
+      walks.incrementAndGet()
+      options.iterator
+
+    def removed(key: String): Map[String, String] = Walked(options - key, walks)
+
+    def updated[V >: String](key: String, value: V): Map[String, V] = options.updated(key, value)
 
   def spec = suite("What an evaluation reads")(
     test("the platform formatters read a date or time style of at most six letters") {
@@ -39,6 +46,20 @@ object EvaluationCostSpec extends ZIOSpecDefault:
         ).last
       ): out =>
         assertTrue(out == List(medium(day), medium(dayTime), medium(time)))
+    },
+    // How long the formatters take depends on the machine; how that time grows with the style
+    // does not. Reading a style of 600K letters, even once per date, takes a hundred times as long.
+    test("the platform formatters take as long for a style of 600K letters as for one of seven") {
+      def formatted(style: String) =
+        val options = Map("dateStyle" -> style, "timeStyle" -> style)
+        (1 to 2000).map(_ =>
+          List(day, dayTime, time).map(PlatformDateTimeFormatter.formatDateTime(_, options, "en"))
+        ).last
+      val growth                   =
+        TimeBudget.growth("2000 dates, times and both, a style of 7 and of 600K letters", _ < 20)(
+          formatted("mediumx")
+        )(formatted("l" * 600000))
+      assertTrue(growth.ratio < 20, growth.first == growth.second, growth.second == formatted("medium"))
     },
     test("an over-long option is no option: a 60K dateStyle formats as medium, cheaply") {
       val shapes = List(
@@ -73,15 +94,15 @@ object EvaluationCostSpec extends ZIOSpecDefault:
         )
         (count.get, left)
       assertTrue(
-        written(budgetWith(-1), 5000) == (0, 5000),
+        written(Budgets.withLeft(-1), 5000) == (0, 5000),
         // One step for the evaluation, one for each of two selectors, and nothing for a third.
-        written(budgetWith(3), 1) == (2, 1),
+        written(Budgets.withLeft(3), 1) == (2, 1),
         written(Budget.fresh(), 1) == (3, 0),
       )
     },
     // Looked up by every option, 20000 uses cost 4.4 s on Scala.js and 0.66 s on the JVM; looked
     // up by what the options come to, about 30 ms on both. The budget leaves room for a loaded
-    // machine, so Scala.js is where this test catches the old key.
+    // machine, so the test after this one catches the old key on any machine.
     test("two thousand options a function does not read cost nothing per use") {
       val many    = (1 to 2000).map(i => s"o$i=aaaaaaaaaaaaaa").mkString(" ")
       val message = MessageFormat2.parse(s".match {$$v :date $many}\nwhen * {}").message
@@ -89,6 +110,21 @@ object EvaluationCostSpec extends ZIOSpecDefault:
         (1 to 20000).map(_ => MessageFormat2.formatted(message, Map("v" -> day), "en", Budget.fresh())).last
       ): out =>
         assertTrue(out == Right(""))
+    },
+    test("a function's options are not walked over, whichever use of the function it is") {
+      val walks   = new AtomicInteger
+      val many    = Walked((1 to 2000).map(i => s"o$i" -> "aaaaaaaaaaaaaa").toMap, walks)
+      val message = MessageFormat2.Message(
+        Nil,
+        Right(
+          MessageFormat2.MatchStatement(
+            List(MessageFormat2.FunctionAnnotation(MessageFormat2.Variable("v"), "date", many)),
+            List(MessageFormat2.MatchCase(List("*"), MessageFormat2.Text(""))),
+          )
+        ),
+      )
+      val out     = (1 to 20000).map(_ => MessageFormat2.formatted(message, Map("v" -> day), "en", Budget.fresh()))
+      assertTrue(out.forall(_ == Right("")), walks.get == 0)
     },
     // One evaluation writes a value with the same options once, and looks it up by what the
     // options come to: every option set a formatter reads must give, inside one message among

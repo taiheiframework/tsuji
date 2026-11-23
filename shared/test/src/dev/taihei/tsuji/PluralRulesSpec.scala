@@ -419,6 +419,17 @@ object PluralRulesSpec extends ZIOSpecDefault:
             assertTrue(declared.length < 65536, errors.isEmpty, a == "x", b == "y", c == "few")
         }
       },
+      // The budget a message is charged counts the work whatever the machine: reading a number of
+      // `distinct` costs some 360 units, a selector and its `*` key 3.
+      test("past 64 plural selectors in one match, a selector is charged its steps and not its number") {
+        def distinct(n: Int) = MessageFormat2
+          .parse(
+            ".match " + (1 to n).map(i => s"{(2.22507385850${10000 + i}E-308) :plural}").mkString + "\nwhen " +
+            "* " * n + "{y}"
+          )
+          .message
+        assertTrue(Budgets.needed(distinct(2000)) - Budgets.needed(distinct(1000)) == 3 * 1000)
+      },
       test("past 64 plural selectors in one match, a selector counts as no number") {
         val keys = List.fill(65)("one")
         val t    = ".match " + "{$n :plural}" * 65 + "\nwhen " + keys.mkString(" ") + " {all one}\nwhen " +

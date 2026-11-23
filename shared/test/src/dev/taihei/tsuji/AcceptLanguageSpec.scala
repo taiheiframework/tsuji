@@ -143,11 +143,31 @@ object AcceptLanguageSpec extends ZIOSpecDefault:
       test("32 requested tags of the greatest length are negotiated within the budget") {
         // The costliest request a header can make: 32 distinct tags of 50 variants each, every
         // one walked down a subtag at a time, none supported. The budget catches a walk that grows
-        // far faster than the tag; one that is only a few times slower stays within it.
+        // far faster than the tag; the test after this one catches one that is a few times slower.
         val requested = (0 until 32).map(i => Language("en" + "-1234" * 49 + f"-9$i%03d"))
         TimeBudget.within("negotiate 32 long tags", budgetMillis = 200) {
           (1 to 5).map(_ => negotiate(requested, Seq(Dutch), French)).last
         }(chosen => assertTrue(requested.forall(_.tag.length == 252), chosen == French))
+      },
+      test("walking 32 long tags down takes less than half as long as parsing each of their prefixes") {
+        // A walk that parsed each prefix again would take about as long as parsing them does: on
+        // a quiet or a busy machine, the walk takes a quarter of that time on the JVM and a tenth
+        // on Scala.js. The measure is parsing itself: should parsing become several times faster
+        // on its own, the bound fails without a regression of the walk, and is to be set again.
+        val requested             = (0 until 32).map(i => Language("en" + "-1234" * 49 + f"-9$i%03d"))
+        def prefixes(l: Language) =
+          val parts = l.tag.split('-').toList
+          (parts.length to 1 by -1).map(n => parts.take(n).mkString("-"))
+        val growth                =
+          TimeBudget.growth("negotiate 32 long tags, and parse their prefixes", _ > 2, rounds = 7)(
+            (1 to 5).map(_ => negotiate(requested, Seq(Dutch), French)).last
+          )((1 to 5).map(_ => requested.flatMap(prefixes).map(Language.parse)).last)
+        assertTrue(
+          growth.ratio > 2,
+          growth.first == French,
+          growth.second.size == 32 * 51,
+          growth.second.forall(_.isRight),
+        )
       },
       test("the result agrees with the chain a registry walks to find a message") {
         val catalogues = Catalogues(Nil)

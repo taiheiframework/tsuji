@@ -131,6 +131,25 @@ object TimeBudgetSpec extends ZIOSpecDefault:
       val r = Run(150, 40, 40)
       assertTrue(run(r, _ == 1).isFailure, r.runs == 2)
     },
+    test("growth sets the fastest run of the second against the fastest of the first, after a warm-up") {
+      // First and second in turn: a warm-up of each, faster than any timed run, then two rounds.
+      val r      = Run(1, 1, 10, 50, 20, 30)
+      val growth = TimeBudget.growth("work", _ => true, rounds = 2, r.nanos, r.log)(r.work())(r.work())
+      assertTrue(
+        growth == TimeBudget.Growth(3.0, 5, 6),
+        r.lines.toList == List("work: attempt 1 of 3, the second took 30000 µs, 3.0 times the 10000 µs of the first"),
+      )
+    },
+    test("a ratio that does not hold is measured again, and the attempt where it holds is returned") {
+      val r      = Run(1, 1, 10, 50, 20, 30, 1, 1, 10, 15, 20, 15)
+      val growth = TimeBudget.growth("work", _ < 2, rounds = 2, r.nanos, r.log)(r.work())(r.work())
+      assertTrue(growth == TimeBudget.Growth(1.5, 11, 12), r.runs == 12, r.lines.size == 2)
+    },
+    test("a ratio that never holds is measured MaxAttempts times, and the last attempt is returned") {
+      val r      = Run(Seq.fill(3)(Seq(1L, 1L, 10L, 50L, 20L, 40L)).flatten*)
+      val growth = TimeBudget.growth("work", _ < 2, rounds = 2, r.nanos, r.log)(r.work())(r.work())
+      assertTrue(growth == TimeBudget.Growth(4.0, 17, 18), r.lines.size == TimeBudget.MaxAttempts)
+    },
   )
 
 end TimeBudgetSpec

@@ -296,6 +296,28 @@ object PlatformLocalesSpec extends ZIOSpecDefault:
       ): out =>
         assertTrue(legacy.length > 1000000, plain.length > 1000000, out == List("1 2 3 4 5", "1 2 3 4 5"))
     },
+    test("one tag takes less than three times as long to read as sixteen of a sixteenth of its length") {
+      // The same number of characters on both sides: in linear time it takes as long, and work that
+      // grows with the square of the tag takes sixteen times as long. Both sides last as long, so
+      // the other tests running beside this one slow both alike. The platform is given the tags
+      // themselves, so nothing on the way can cut them short.
+      def tags(subtags: Int)       = List(
+        "de-DE-x-lvariant-" + List.fill(subtags)("abc").mkString("-"),
+        "de-DE-" + List.fill(subtags * 2 / 3)("abcde").mkString("-"),
+      )
+      val (sixteenth, whole)       = (tags(15625), tags(250000))
+      def read(tags: List[String]) = tags.map(PlatformLocales.javaLocale)
+      val growth                   =
+        TimeBudget.growth("the locales of 32 tags of a sixteenth, and of two tags of a megabyte", _ < 3)(
+          List.fill(16)(read(sixteenth)).last
+        )(read(whole))
+      assertTrue(
+        whole.forall(_.length > 1000000),
+        growth.ratio < 3,
+        growth.first == read(List("de-DE", "de-DE")),
+        growth.second == growth.first,
+      )
+    },
     test("formatting and naming for distinct reader languages needs no more than a small heap") {
       // A small heap shows that what the JDK keeps does not grow with the number of distinct tags
       // or names: 30000 long tags through a template's locale and a language name, and 400000

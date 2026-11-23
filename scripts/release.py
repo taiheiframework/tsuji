@@ -30,9 +30,10 @@ problem on stderr, when anything is not exactly as expected.
            Exit 0 when Maven Central has VERSION of artifact A (its POM answers 200) or the tag
            vVERSION has a published, immutable GitHub Release in the repository (asked without a
            token), and 3 when Central answers 404 and the tag has no GitHub Release: the version
-           is spent, tagged and never released. Any other answer, a redirect from Central or a
-           release that is a draft or not immutable included, exits 1. The MiMa baseline passes
-           over a spent tag only.
+           is spent, tagged and never released. A draft, which is what a failed release run
+           leaves, is invisible without a token (the API answers 404), so it counts as spent too.
+           Any other answer, a redirect from Central or a release that is not immutable included,
+           exits 1. The MiMa baseline passes over a spent tag only.
 """
 
 import argparse
@@ -333,6 +334,25 @@ def cache_key(url):
     return f"/https/{u.netloc}{u.path}"
 
 
+def published_release(url, where):
+    """The GitHub Release at url (an API /releases/tags/ URL), None when it answers 404.
+
+    Anything other than a published, immutable release is refused: a draft or prerelease, an
+    absent field, or a body that is not a JSON object.
+    """
+    code, body = http_get(url, MAX_JSON, accept="application/vnd.github+json")
+    if code == 404:
+        return None
+    try:
+        release = json.loads(body)
+    except ValueError:
+        raise Refused(f"{url}: not JSON")
+    if (not isinstance(release, dict) or release.get("immutable") is not True
+            or release.get("draft") is not False or release.get("prerelease") is not False):
+        raise Refused(f"{where}: the GitHub Release is not published and immutable")
+    return release
+
+
 class Releases:
     """The SHA256SUMS of each version's immutable GitHub Release, asked once per version."""
 
@@ -351,17 +371,10 @@ class Releases:
         return self.seen[key]
 
     def fetch(self, library, version):
-        url = f"{self.api}/repos/{self.owner}/{library}/releases/tags/v{version}"
-        code, body = http_get(url, MAX_JSON, accept="application/vnd.github+json")
-        if code == 404:
-            return None
-        try:
-            release = json.loads(body)
-        except ValueError:
-            raise Refused(f"{url}: not JSON")
         where = f"{self.owner}/{library} v{version}"
-        if release.get("immutable") is not True or release.get("draft") is not False or release.get("prerelease") is not False:
-            raise Refused(f"{where}: the GitHub Release is not published and immutable")
+        release = published_release(f"{self.api}/repos/{self.owner}/{library}/releases/tags/v{version}", where)
+        if release is None:
+            return None
         assets = [a for a in release.get("assets", []) if isinstance(a, dict) and a.get("name") == "SHA256SUMS"]
         if len(assets) != 1 or not isinstance(assets[0].get("browser_download_url"), str):
             raise Refused(f"{where}: the GitHub Release has no single SHA256SUMS")
@@ -529,16 +542,9 @@ def released(args):
     # Not on Central: the tag's GitHub Release decides, never whether a site serves it yet.
     check_url(args.api.rstrip("/") + "/")
     url = f"{args.api.rstrip('/')}/repos/{args.repo}/releases/tags/v{args.version}"
-    code, body = http_get(url, MAX_JSON, accept="application/vnd.github+json")
-    if code == 404:
+    if published_release(url, f"{args.repo} v{args.version}") is None:
         print(f"[release] v{args.version} has no GitHub Release in {args.repo} and is not on Maven Central: spent, passed over", file=sys.stderr)
         sys.exit(SPENT)
-    try:
-        release = json.loads(body)
-    except ValueError:
-        fail([f"{url}: not JSON"])
-    if not isinstance(release, dict) or release.get("immutable") is not True or release.get("draft") or release.get("prerelease"):
-        fail([f"v{args.version} has a GitHub Release in {args.repo} that is not published and immutable"])
     print(f"{args.version} has an immutable GitHub Release")
 
 

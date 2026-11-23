@@ -231,30 +231,32 @@ object NumberArgumentSpec extends ZIOSpecDefault:
           .takeWhile(_.isRight)
           .size
         paid -> (1 to 5000).count(_ => MessageFormat2.formatted(message, Map("v" -> value), "en", budget).isLeft)
-      TimeBudget.within("eight templates that write one character, until the budget is spent and after", 30000)(
-        scenarios.map(
+      // What an evaluation costs follows from the charges alone, so the counts are the same on
+      // both platforms, and exact: a charge that goes missing or changes shows here, and whoever
+      // changes one changes its count with it. Each template has a time budget of its own, a few
+      // times what it takes on Scala.js, where building a date formatter or a language's name
+      // costs most, so that a retry on a busy machine runs one template again, not eight.
+      val expected                                                             = Map(
+        "1300 dates declared" -> (2996, 20000),
+        "3700 dates selected" -> (359, 3000),
+        "4500 number keys" -> (93, 3000),
+        "2400 times shown" -> (207, 3000),
+        "2950 language names declared" -> (1340, 20000),
+        "4000 language names selected" -> (332, 3000),
+        "9000 selectors on a number of ten thousand digits" -> (148, 3000),
+        "64 plural selectors on a costly Double" -> (2470, 3000),
+      )
+      scenarios
+        .map:
           (
             name,
             message,
             value,
-          ) => name -> evaluations(message, value)
-        )
-      ): counts =>
-        // What an evaluation costs follows from the charges alone, so the counts are the same
-        // on both platforms, and exact: a charge that goes missing or changes shows here, and
-        // whoever changes one changes its count with it.
-        val expected = Map(
-          "1300 dates declared" -> 2996,
-          "3700 dates selected" -> 359,
-          "4500 number keys" -> 93,
-          "2400 times shown" -> 207,
-          "2950 language names declared" -> 1340,
-          "4000 language names selected" -> 332,
-          "9000 selectors on a number of ten thousand digits" -> 148,
-          "64 plural selectors on a costly Double" -> 2470,
-        )
-        val outside  = counts.filter((name, result) => result != (expected(name), 5000))
-        assertTrue(outside.isEmpty)
+          ) =>
+            val (count, budgetMillis) = expected(name)
+            TimeBudget.within(s"$name, until the budget is spent and after", budgetMillis)(evaluations(message, value)):
+              counts => assert(name -> counts)(Assertion.equalTo(name -> (count, 5000)))
+        .reduce(_ && _)
     },
     // What a function made of a value was once looked up by its options, all of them, at
     // every use: an option that means nothing was read through each time. An option value is

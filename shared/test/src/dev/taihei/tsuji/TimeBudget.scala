@@ -135,6 +135,51 @@ object TimeBudget:
 
   end withinZIO
 
+  /** How many times longer the second piece of work took than the first, and what each gave. */
+  final case class Growth[A, B](
+    ratio: Double,
+    first: A,
+    second: B)
+
+  /**
+   * How the time of one piece of work compares with another's, whatever the load: the two run in
+   * turn, once each to warm up and then `rounds` times each, and the fastest run of the second is
+   * set against the fastest of the first. Run back to back, both share the load of the moment, so
+   * a busy machine moves the ratio far less than it moves either time. Where a budget only catches
+   * work that grows far faster than its input, a ratio catches work a few times larger than it
+   * should be. A ratio that `holds` rejects is measured again, as a slow run of `within` is, at
+   * most MaxAttempts times; the last attempt is returned, and every attempt is logged. A busy
+   * moment can skew one attempt; a regression skews them all. One attempt within the bound
+   * passes, so the bound is set where the guarded regression lands well clear of it.
+   */
+  def growth[A, B](
+    label: String,
+    holds: Double => Boolean,
+    rounds: Int = 5,
+    nanos: () => Long = () => java.lang.System.nanoTime(),
+    log: String => Unit = line => println(line),
+  )(
+    first: => A
+  )(
+    second: => B
+  ): Growth[A, B] =
+    def timed[C](work: => C): (Long, C)        =
+      val start  = nanos()
+      val result = work
+      (nanos() - start, result)
+    @tailrec def attempt(n: Int): Growth[A, B] =
+      val runs         = (0 to rounds).map(_ => (timed(first), timed(second))).drop(1)
+      val (fast, slow) = (runs.map(_._1._1).min, runs.map(_._2._1).min)
+      val growth       = Growth(slow.toDouble / math.max(fast, 1L), runs.last._1._2, runs.last._2._2)
+      val tenths       = math.round(growth.ratio * 10)
+      // Written by hand: a format string follows the default locale, and Scala.js writes 3.0 as 3.
+      log(s"$label: attempt $n of $MaxAttempts, the second took ${slow / 1000} µs, ${tenths / 10}.${tenths %
+        10} times the ${fast / 1000} µs of the first")
+      if holds(growth.ratio) || n == MaxAttempts then growth else attempt(n + 1)
+    attempt(1)
+
+  end growth
+
   // Left is the verdict; Right a correct run over the budget that has an attempt left. A wrong
   // result is the verdict at once; a correct one passes on the fastest run. A timing is the
   // elapsed time divided by how slow the machine was, so it compares with the budget as named.

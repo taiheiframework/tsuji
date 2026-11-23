@@ -30,7 +30,8 @@ jvm/src, js/src                      platform formatters; ClasspathCatalogues (J
 tools/src                            taihei-tsuji-tools: ExportCatalogues
 ```
 
-- `make validate`: scalafix, scalafmt, compile, tests on the JVM and Node, MiMa against the newest
-  release of the current major line.
+- `make validate`: scalafix and scalafmt as checks that change nothing (run `make fix` and
+  `make fmt` first), compile, tests on the JVM and Node, MiMa against the newest release of the
+  current major line.
 - Released by the family's release workflow from the maintainer's signed tag, the
   version from the git tag; one release publishes `taihei-tsuji` and `taihei-tsuji-tools`.

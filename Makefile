@@ -40,7 +40,7 @@ PUBLISHED = tsuji.js.publishArtifacts tsuji.jvm.publishArtifacts tsuji.tools.pub
 # (a redirect is an answer that stops a check), 000 when there is no answer.
 HTTP_CODE = { curl -q -s --proto '=https' --max-time 30 -o /dev/null -w '%{http_code}' "$$URL" || true; }
 
-.PHONY: clean fix fmt compile prepare build test test-java-17 mima repo-guard release-test validate deps \
+.PHONY: clean fix fmt lint compile prepare build test test-java-17 mima repo-guard release-test validate deps \
         publishLocal publish-dry-run
 
 # ---------------------------------------------------------------------------
@@ -55,6 +55,12 @@ fix:
 
 fmt:
 	./mill __.reformat
+
+# What CI checks: fails on a file scalafmt or scalafix would change, and changes nothing. Both
+# check, since where they disagree on a line the one that ran last wins a rewrite.
+lint:
+	./mill __.checkFormat
+	./mill __.fix --check
 
 compile:
 	./mill __.compile
@@ -151,7 +157,9 @@ release-test:
 	@bash scripts/test-release.sh
 	@bash scripts/test-mill-launcher
 
-validate: repo-guard release-test fix fmt compile test mima
+# Checks and never rewrites: run make fix and make fmt first, so unformatted code fails here
+# and in the release run instead of passing reformatted.
+validate: repo-guard release-test lint compile test mima
 
 # The JVM tests on Java 17, the oldest Java the library supports, where locale data and the JDK's
 # behaviour can differ from the newest JDK: TAIHEI_TEST_JAVA_HOME names that JDK (Mill runs on its

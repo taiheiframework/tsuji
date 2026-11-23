@@ -41,19 +41,15 @@ object BoundedNumbersSpec extends ZIOSpecDefault:
       )
     },
     test("a catalogue with a number of a million digits is refused at once") {
-      val start  = java.lang.System.nanoTime()
-      val result = guarded(Catalogue.parse(catalogue("1" + "0" * 1000000)))
-      val millis = (java.lang.System.nanoTime() - start) / 1000000
-      assertTrue(result.left.exists(_.contains("longer than 1100 characters")), millis < 1000)
+      TimeBudget.within("a million digits", 1000)(guarded(Catalogue.parse(catalogue("1" + "0" * 1000000)))): result =>
+        assertTrue(result.left.exists(_.contains("longer than 1100 characters")))
     },
     test("4M characters of catalogue numbers just under the bound are read in time that grows with them") {
-      val near   = "0." + "0" * (BoundedJson.MaxNumberLength - 3) + "1"
-      val many   = List.fill((Catalogue.MaxLength - 200) / (near.length + 1))(near).mkString("[", ",", "]")
-      val input  = catalogue(many)
-      val start  = java.lang.System.nanoTime()
-      val result = guarded(Catalogue.parse(input))
-      val millis = (java.lang.System.nanoTime() - start) / 1000000
-      assertTrue(input.length <= Catalogue.MaxLength, input.length > 4000000, result.isRight, millis < 5000)
+      val near  = "0." + "0" * (BoundedJson.MaxNumberLength - 3) + "1"
+      val many  = List.fill((Catalogue.MaxLength - 200) / (near.length + 1))(near).mkString("[", ",", "]")
+      val input = catalogue(many)
+      TimeBudget.within("4M characters of long numbers", 5000)(guarded(Catalogue.parse(input))): result =>
+        assertTrue(input.length <= Catalogue.MaxLength, input.length > 4000000, result.isRight)
     },
     test("a valid catalogue parses as before") {
       val parsed = Catalogue.parse(catalogue("1e999999999"))

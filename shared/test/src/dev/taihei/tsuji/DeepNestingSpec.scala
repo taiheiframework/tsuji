@@ -129,21 +129,20 @@ object DeepNestingSpec extends ZIOSpecDefault:
         s"""{"key":"no.such","args":{"a":$long},"text":"t"}""",
         s"""{"key":"order.greeting","args":{"name":$long}}""",
       )
-      val start   = java.lang.System.nanoTime()
-      val results = inputs.flatMap(i => List(i.fromJson[Message], i.fromJson[Displayable], i.fromJson[Text]))
-      val millis  = (java.lang.System.nanoTime() - start) / 1000000
       val longest = "9" * BoundedJson.MaxNumberLength
-      assertTrue(
-        results.size == 12,
-        results.forall(_.left.exists(_.contains(s"longer than ${BoundedJson.MaxNumberLength}"))),
-        millis < 1000,
-        longest.fromJson[Json](
-          using BoundedJson.decoder
-        ) == longest.fromJson[Json],
-        ("1" + longest).fromJson[Json](
-          using BoundedJson.decoder
-        ).left.exists(_.contains("longer than")),
-      )
+      TimeBudget.within("a number longer than the bound in every place", 1000)(
+        inputs.flatMap(i => List(i.fromJson[Message], i.fromJson[Displayable], i.fromJson[Text]))
+      ): results =>
+        assertTrue(
+          results.size == 12,
+          results.forall(_.left.exists(_.contains(s"longer than ${BoundedJson.MaxNumberLength}"))),
+          longest.fromJson[Json](
+            using BoundedJson.decoder
+          ) == longest.fromJson[Json],
+          ("1" + longest).fromJson[Json](
+            using BoundedJson.decoder
+          ).left.exists(_.contains("longer than")),
+        )
     },
     test("an odd number inside an array or an object is read or refused as zio-json's reader does") {
       // At the top level zio-json reads the number's longest prefix and ignores the rest; no
@@ -166,21 +165,20 @@ object DeepNestingSpec extends ZIOSpecDefault:
     },
     test("short numbers with extreme exponents are read or refused at once") {
       val extreme  = List("1e2147483647", "1e-2147483648", "1.5e999999999", "-0e-999999999", "9e+2147483648")
-      val start    = java.lang.System.nanoTime()
-      val results  = extreme.map(n =>
-        s"[$n]".fromJson[Json](
-          using BoundedJson.decoder
-        )
-      )
-      val millis   = (java.lang.System.nanoTime() - start) / 1000000
       // Within nine digits of exponent the two readers agree; beyond, see the next test.
       val agreeing = List("1.5e999999999", "-0e-999999999", "1e-999999999", "77e+000000123")
-      assertTrue(
-        results.size == 5,
-        results.map(_.isRight) == List(false, false, true, true, false),
-        millis < 1000,
-        agreeing.map(n => s"[$n]").forall(agree),
-      )
+      TimeBudget.within("short numbers with extreme exponents", 1000)(
+        extreme.map(n =>
+          s"[$n]".fromJson[Json](
+            using BoundedJson.decoder
+          )
+        )
+      ): results =>
+        assertTrue(
+          results.size == 5,
+          results.map(_.isRight) == List(false, false, true, true, false),
+          agreeing.map(n => s"[$n]").forall(agree),
+        )
     },
     // BoundedJson also turns anything that goes wrong while it reads a number into a decoding
     // error. No input known reaches that guard within the bounds, so no test does.
@@ -237,14 +235,14 @@ object DeepNestingSpec extends ZIOSpecDefault:
     },
     test("4 MB of numbers just under the bound are read in time that grows with their number") {
       // A number of the full length that zio-json reads to a value: its digits are leading zeros.
-      val near   = "0." + "0" * (BoundedJson.MaxNumberLength - 3) + "1"
-      val many   = List.fill(4 * 1024 * 1024 / (near.length + 1))(near).mkString("[", ",", "]")
-      val start  = java.lang.System.nanoTime()
-      val result = many.fromJson[Json](
-        using BoundedJson.decoder
-      )
-      val millis = (java.lang.System.nanoTime() - start) / 1000000
-      assertTrue(near.length == BoundedJson.MaxNumberLength, many.length > 4000000, result.isRight, millis < 5000)
+      val near = "0." + "0" * (BoundedJson.MaxNumberLength - 3) + "1"
+      val many = List.fill(4 * 1024 * 1024 / (near.length + 1))(near).mkString("[", ",", "]")
+      TimeBudget.within("4 MB of numbers just under the bound", 5000)(
+        many.fromJson[Json](
+          using BoundedJson.decoder
+        )
+      ): result =>
+        assertTrue(near.length == BoundedJson.MaxNumberLength, many.length > 4000000, result.isRight)
     },
     test("the bounded reader reads and refuses what zio-json's reader does, with the same errors") {
       val differ = samples.filterNot(agree)

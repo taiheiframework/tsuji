@@ -46,6 +46,14 @@ object ExportCataloguesSpec extends ZIOSpecDefault:
 
   private def tempDir(): Path = kept(Files.createTempDirectory("taihei-export"))
 
+  // Exploding's line on stderr, with its reason: the first test to touch it sees the
+  // initialiser's own message, every later one the JVM's NoClassDefFoundError.
+  private def explodingReported(err: String, prefix: String): Boolean =
+    err.linesIterator.exists: line =>
+      line.startsWith(s"${prefix}dev.taihei.tsuji.tools.exploding.Exploding: cannot load: ") &&
+      (line.contains("boom") ||
+      line.contains("Could not initialize class dev.taihei.tsuji.tools.exploding.Exploding"))
+
   private def remove(path: Path): Unit =
     val tree = Files.walk(path)
     try tree.sorted(Comparator.reverseOrder[Path]).forEach(p => Files.deleteIfExists(p): Unit)
@@ -71,7 +79,7 @@ object ExportCataloguesSpec extends ZIOSpecDefault:
         // out, and Exploding, which cannot be loaded: both make the status 1.
         status == 1,
         err.contains("broken.a"),
-        err.contains("dev.taihei.tsuji.tools.exploding.Exploding: cannot initialise: "),
+        explodingReported(err, "dev.taihei.tsuji: "),
         !nl.contains("broken.a"),
       )
     },
@@ -120,8 +128,7 @@ object ExportCataloguesSpec extends ZIOSpecDefault:
       )
       assertTrue(
         status == 1,
-        // The first test to touch Exploding sees its own message, every later one the JVM's.
-        err.contains("dev.taihei.tsuji.tools.exploding: dev.taihei.tsuji.tools.exploding.Exploding: cannot initialise: "),
+        explodingReported(err, "dev.taihei.tsuji.tools.exploding: "),
         !err.contains("null"),
         out.contains("2 messages in nl"),
       )
@@ -133,7 +140,7 @@ object ExportCataloguesSpec extends ZIOSpecDefault:
       assertTrue(
         status == 2,
         out.isEmpty,
-        err.contains("dev.taihei.tsuji.tools.exploding.Exploding: cannot initialise: "),
+        explodingReported(err, ""),
         !err.contains("not a MessageFamily object"),
       )
     },

@@ -101,9 +101,9 @@ dev.taihei.tsuji.tools.ExportCatalogues --out <dir> [--scan <package>]... [--fam
 ```
 
 Runs on the JVM, in a module whose classpath holds the families (for a cross-built app, the
-JVM side of its shared code). Writes `<dir>/<tag>.json` per language, merging every family found (libraries included): the
-source templates for families in that language, else classpath files over inline translations.
-Failing templates, and family objects that cannot be loaded, are left out and printed (exit 1);
-a `--scan` that finds no family and a classpath jar or directory that cannot be read are printed
-too (exit 1); usage errors, and finding no family at all, exit 2. Run as `runMain` (Mill)
-or a forked `run` (sbt).
+JVM side of its shared code). Writes `<dir>/<tag>.json` per language, merging every family found
+(libraries included): the source templates for families in that language, else classpath files
+over inline translations. Failing templates, and family objects that cannot be loaded, are left
+out and printed (exit 1, or 2 when no family could be loaded at all, and then nothing is
+written); a `--scan` that finds no family and a classpath jar or directory that cannot be read
+are printed too (exit 1); usage errors exit 2. Run as `runMain` (Mill) or a forked `run` (sbt).

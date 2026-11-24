@@ -27,9 +27,9 @@ import dev.taihei.tsuji.*
  *
  * Problems are printed and make the exit status 1: a template that fails its checks, a family
  * that cannot be loaded, a `--scan` that finds no family, a jar or directory of the classpath
- * that cannot be read. A usage error makes it 2. Run it as an
- * ordinary `runMain` step of the application's build, forked in sbt so that the classpath is the
- * application's.
+ * that cannot be read. A usage error makes it 2, and so does finding no family that loads at all,
+ * when nothing is written. Run it as an ordinary `runMain` step of the application's build,
+ * forked in sbt so that the classpath is the application's.
  */
 object ExportCatalogues:
 
@@ -286,11 +286,12 @@ private object Classpath:
       catch
         case _: NoSuchFieldException        => Right(None)
         // The first use of a failing initialiser throws ExceptionInInitializerError, every later
-        // one NoClassDefFoundError: both are the same fault.
+        // one NoClassDefFoundError, as does a class the object needs that is missing: all are a
+        // family that cannot be loaded, and the reason after the prefix tells them apart.
         case e: ExceptionInInitializerError =>
-          Left(s"cannot initialise: ${Printable(describe(Option(e.getCause).getOrElse(e)), 400)}")
+          Left(s"cannot load: ${Printable(describe(Option(e.getCause).getOrElse(e)), 400)}")
         case e: LinkageError                =>
-          Left(s"cannot initialise: ${Printable(describe(e), 400)}")
+          Left(s"cannot load: ${Printable(describe(e), 400)}")
         case NonFatal(e)                    => Left(Printable(describe(e), 400))
 
   // A class that cannot be loaded or linked is not known to be a family, so it is not one.

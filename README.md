@@ -437,7 +437,7 @@ Compile / run / fork := true
 Templates that fail their checks are left out and printed, and make the exit status 1; so does
 a family object that cannot be loaded, such as one whose initialiser throws, a `--scan` that
 finds no family (a misspelt package), and a jar or directory of the classpath that cannot be read.
-When no family is found at all, nothing is written and the status is 2.
+When no family could be loaded at all, nothing is written and the status is 2.
 
 ### Checking catalogues in your tests
 

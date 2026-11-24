@@ -77,10 +77,10 @@ jobs:
         run: make lint
 
       - name: Compile all modules (JVM + JS)
-        run: ./mill __.compile
+        run: make compile
 
       - name: Run all tests (JVM + JS)
-        run: ./mill __.test.testForked
+        run: make test
 
       # Against the newest v-tag before HEAD (fetch-depth 0 brings the tags), as make validate does.
       - name: Check binary compatibility (MiMa)

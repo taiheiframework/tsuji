@@ -9,9 +9,9 @@ on:
       - main
   workflow_dispatch:
 
-# Read-only: CI builds and tests, it publishes nothing.
-permissions:
-  contents: read
+# No permission at workflow level: each job names its own. CI builds and tests, it publishes
+# nothing, so every job only reads.
+permissions: {}
 
 env:
   JAVA_VERSION: '25'
@@ -23,6 +23,8 @@ jobs:
   validate:
     name: Validate (Format, Lint, Compile, Test, MiMa, JVM & JS)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout code
@@ -81,11 +83,9 @@ jobs:
       - name: Build check tests (release-test)
         run: make release-test
 
-      - name: Check formatting
-        run: ./mill __.checkFormat
-
-      - name: Check linting (scalafix)
-        run: ./mill __.fix --check
+      # Formatting and scalafix, checked only, as make validate does.
+      - name: Check formatting and linting (scalafmt, scalafix)
+        run: make lint
 
       - name: Compile all modules (JVM + JS)
         run: ./mill __.compile
@@ -107,6 +107,8 @@ jobs:
   test-java-17:
     name: JVM tests on Java 17
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout code

@@ -333,7 +333,7 @@ expect "newest: Central over http is refused" 1 "not an https URL" R newest --ce
 
 # candidates: the J2 reading of every release above a pin, for make jsoniter-candidates. The
 # stand-in Central dates a file by its modification time; a version it cannot read in full fails it.
-dated() { python3 -I -B -c 'import os, sys, time; t = 0 if sys.argv[2] == "none" else time.time() - int(sys.argv[2]) * 86400; os.utime(sys.argv[1], (t, t))' "$1" "$2"; }
+dated() { python3 -I -B -c 'import os, sys, time; t = 0 if sys.argv[2] == "none" else time.time() - float(sys.argv[2]) * 86400; os.utime(sys.argv[1], (t, t))' "$1" "$2"; }
 cand_release() { # VERSION DAYS-AGO|none [LICENCE-XML]: a release of $CG:$CA on the stand-in Central, signed by the stand-in key
   local v="$1" d="$S/central/${CG//.//}/$CA/$1"; mkdir -p "$d"
   printf '<?xml version="1.0"?>\n<project xmlns="http://maven.apache.org/POM/4.0.0"><artifactId>%s</artifactId><version>%s</version>%s<scm><url>https://github.com/example/cand</url></scm></project>\n' \
@@ -341,6 +341,8 @@ cand_release() { # VERSION DAYS-AGO|none [LICENCE-XML]: a release of $CG:$CA on 
   printf 'jar %s\n' "$v" > "$d/$CA-$v.jar"
   sign "$KEY" "$d/$CA-$v.pom"; sign "$KEY" "$d/$CA-$v.jar"; dated "$d/$CA-$v.pom" "$2"
 }
+since() { sed -n "$(( $1 + 1 )),\$p" "$W/log"; } # the stand-in's log after its first N lines
+CL=$(wc -l < "$W/log")
 CG=org.example.cand; CA=core_3; CJ="$S/central/org/example/cand/$CA/2.10.0/$CA-2.10.0.jar"
 meta "$CG" "$CA" "$CA" 2.7.0 2.8.0 2.10.0 2.9.0 2.11.0-RC1 3.0.0
 # Only the versions above the pin have files: reading any other would fail with HTTP 404.
@@ -354,6 +356,9 @@ expect "candidates: 13 days on Central is not" 0 "2.10.0  on Central since $(dat
 expect "candidates: the signature, the licence and the release notes" 0 "jar and POM signed by $KEY  licence MIT  notes https://github.com/example/cand/releases/tag/v2.9.0" CAND --pin 2.8.0
 expect "candidates: none on Central for 14 days" 0 "none above 2.9.0 has been on Central for 14 days or more" CAND --pin 2.9.0
 expect "candidates: nothing above the pin" 0 "lists no 2.x release of $CG:$CA above the pin 2.10.0" CAND --pin 2.10.0
+cand_release 2.10.0 14.001
+expect "candidates: 14 days and a minute on Central is J2" 0 "(14 days)  J2 yes" CAND --pin 2.8.0
+cand_release 2.10.0 13
 sign "$OTHER" "$CJ"
 expect "candidates: a jar signed by another key stops it" 1 "$CA-2.10.0.jar: the signature does not verify" CAND --pin 2.8.0
 expect "candidates: and still lists the others" 1 "2.9.0  on Central since" CAND --pin 2.8.0
@@ -366,7 +371,10 @@ expect "candidates: a POM that names no licence stops it" 1 "names no licence" C
 cand_release 2.10.0 none
 expect "candidates: a POM without a date stops it" 1 "no Last-Modified date" CAND --pin 2.8.0
 cand_release 2.10.0 13
+grep -q 'auth=present' <<<"$(since "$CL")" && fail "candidates: sent credentials" || pass "candidates: asks Central without credentials"
+CL=$(wc -l < "$W/log")
 expect "candidates: a key file that is not the pinned key stops it" 1 "is not the key $OTHER" CAND --pin 2.8.0 --fingerprint "$OTHER"
+[ -z "$(since "$CL")" ] && pass "candidates: and asks Central nothing" || fail "candidates: asked Central with the wrong key: $(since "$CL" | tr '\n' ';')"
 expect "candidates: a pin that is not x.y.z is refused" 1 "is not an x.y.z version" CAND --pin 2.8
 expect "candidates: a redirect stops it" 1 "HTTP 301" R candidates --central "$BASE/moved" --group "$CG" --artifact "$CA" --pin 2.8.0 --key "$W/release-key.asc" --fingerprint "$KEY"
 expect "candidates: Central over http is refused" 1 "not an https URL" R candidates --central "http://localhost:$PORT/central" --group "$CG" --artifact "$CA" --pin 2.8.0 --key "$W/release-key.asc" --fingerprint "$KEY"
@@ -505,9 +513,11 @@ meta "$CG" "$CA" "$CA" 2.41.7 2.42.0 2.42.1 2.43.0
 cand_release 2.42.1 20; cand_release 2.43.0 2
 JC=("${M[@]}" "JSONITER_KEY=$KEY" "JSONITER_KEY_FILE=$G/keys/release-key.asc")
 { override "$SITE"; printf '  val jsoniter      = "2.42.0"\n'; } > "$G/build.mill"
-expect "jsoniter-candidates reads the pin from build.mill" 0 "above the pin 2.42.0 on Maven Central" "${JC[@]}" jsoniter-candidates
+expect "jsoniter-candidates names the pin, Central and the key it uses" 0 "above the pin 2.42.0 on $CENTRAL, key $G/keys/release-key.asc" "${JC[@]}" jsoniter-candidates
 expect "jsoniter-candidates: and gives the J2 reading" 0 "newest on Central for 14 days or more: 2.42.1" "${JC[@]}" jsoniter-candidates
+CL=$(wc -l < "$W/log")
 expect "jsoniter-candidates stops without the committed key" 1 "keys/none.asc is missing" "${M[@]}" jsoniter-candidates "JSONITER_KEY_FILE=$G/keys/none.asc"
+[ -z "$(since "$CL")" ] && pass "jsoniter-candidates: and asks Central nothing" || fail "jsoniter-candidates asked Central without a key"
 rm "$S/central/${CG//.//}/$CA/2.43.0/$CA-2.43.0.pom.asc"
 expect "jsoniter-candidates fails when a version cannot be read" 1 "$CA-2.43.0.pom.asc: HTTP 404" "${JC[@]}" jsoniter-candidates
 override "$SITE" > "$G/build.mill"

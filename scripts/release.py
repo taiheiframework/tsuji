@@ -640,16 +640,17 @@ def candidates(args):
     if not RELEASE_VERSION.match(args.pin):
         fail([f"the pin '{args.pin}' is not an x.y.z version"])
     pin = numbers(args.pin)
-    above = sorted((v for v in listed_versions(central, args.group, args.artifact) if numbers(v)[0] == pin[0] and numbers(v) > pin), key=numbers)
     name = f"{args.group}:{args.artifact}"
-    if not above:
-        print(f"Maven Central lists no {pin[0]}.x release of {name} above the pin {args.pin}")
-        return
     now = datetime.datetime.now(datetime.timezone.utc)
     cooling = datetime.timedelta(days=COOLING_OFF_DAYS)
-    keyring = Keyring(args.key, args.fingerprint)
     problems, qualified = [], []
+    # The key first: a key file that is not the pinned key stops the run before any request.
+    keyring = Keyring(args.key, args.fingerprint)
     try:
+        above = sorted((v for v in listed_versions(central, args.group, args.artifact) if numbers(v)[0] == pin[0] and numbers(v) > pin), key=numbers)
+        if not above:
+            print(f"Maven Central lists no {pin[0]}.x release of {name} above the pin {args.pin}")
+            return
         for v in above:
             base = f"{central}/{args.group.replace('.', '/')}/{args.artifact}/{v}/{args.artifact}-{v}"
             try:

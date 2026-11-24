@@ -304,6 +304,33 @@ R released --central "$BASE/moved" --api "$API" --repo "$OWNER/$LIB" --artifact 
 [ $? = 1 ] && pass "released: a redirect is no answer, exit 1, never spent" || fail "released: a redirect did not exit 1"
 expect "released: and names it" 1 "HTTP 301" R released --central "$BASE/moved" --api "$API" --repo "$OWNER/$LIB" --artifact "$DA" 6.6.6
 
+# newest: the newest x.y.z release that Central lists for every artifact asked, for
+# make zio-json-newest. Anything it cannot read stops it, so the tests never run against a guess.
+meta() { # GROUP DIRECTORY ARTIFACT VERSION...: Central's maven-metadata.xml in GROUP/DIRECTORY, naming ARTIFACT
+  local g="$1" d="$S/central/${1//.//}/$2" a="$3"; shift 3; mkdir -p "$d"
+  { printf '<?xml version="1.0" encoding="UTF-8"?>\n<metadata><groupId>%s</groupId><artifactId>%s</artifactId><versioning><versions>' "$g" "$a"
+    printf '<version>%s</version>' "$@"; printf '</versions></versioning></metadata>\n'; } > "$d/maven-metadata.xml"
+}
+NW() { R newest --central "$CENTRAL" --group org.example "$@"; }
+meta org.example lib_3 lib_3 0.7.1 0.7.9 0.7.43 0.7.44 0.8.0-RC1 1.0.0-M1 0.7.45-SNAPSHOT
+meta org.example lib_sjs1_3 lib_sjs1_3 0.7.1 0.7.9 0.7.43 0.8.0-RC1
+meta org.example pre_3 pre_3 0.8.0-RC1 1.0.0-M1
+meta org.example other_3 other_3 0.6.0
+expect "newest: the newest x.y.z, compared as numbers, not text" 0 "0.7.44" NW lib_3
+[ "$(NW lib_3 2>/dev/null)" = 0.7.44 ] && pass "newest: prints the version alone" || fail "newest: printed '$(NW lib_3 2>&1)'"
+[ "$(NW lib_3 lib_sjs1_3 2>/dev/null)" = 0.7.43 ] && pass "newest: the newest that every artifact has" || fail "newest: not the common version: '$(NW lib_3 lib_sjs1_3 2>&1)'"
+expect "newest: only milestones and candidates is no answer" 1 "no x.y.z release" NW pre_3
+expect "newest: artifacts with no version in common is no answer" 1 "no x.y.z release" NW lib_3 other_3
+expect "newest: an artifact Central does not list stops it" 1 "HTTP 404" NW lib_3 missing_3
+printf 'not xml' > "$S/central/org/example/other_3/maven-metadata.xml"
+expect "newest: an answer that is not XML stops it" 1 "not XML" NW other_3
+meta org.example other_3 lib_3 0.6.0
+expect "newest: the metadata of another artifact stops it" 1 "not the maven-metadata.xml of other_3" NW other_3
+expect "newest: a redirect stops it" 1 "HTTP 301" R newest --central "$BASE/moved" --group org.example lib_3
+expect "newest: a group that is no Maven group is refused" 1 "not a Maven group" R newest --central "$CENTRAL" --group ../x lib_3
+expect "newest: an artifact with .. is refused" 1 "not a Maven group" NW ..
+expect "newest: Central over http is refused" 1 "not an https URL" R newest --central "http://localhost:$PORT/central" --group org.example lib_3
+
 # --- the Makefile targets, with a stand-in for Mill ---------------------------------------------
 G="$W/repo"; mkdir -p "$G/scripts" "$G/keys"
 cp "$REPO/Makefile" "$G/"; cp "$REPO/scripts/release.py" "$G/scripts/"; cp "$W/release-key.asc" "$G/keys/"
@@ -327,7 +354,7 @@ case "\$*" in
   "show "*".pom") cat "$POMS_JSON";;
   "show "*".javaHome") echo "\"\${STANDIN_JAVA_HOME:-/nowhere}\"";;
   "show __."*) cat "$RESOLVED_JSON";;
-  *".testForked"*) echo "tests \$*" >> "$MLOG.tests";;
+  *".testForked"*) echo "tests zio-json=\${ZIO_JSON_TEST_VERSION-unset} \$*" >> "$MLOG.tests";;
   "--no-daemon mill.javalib.SonatypeCentralPublishModule/"*)
     for v in MILL_SONATYPE_USERNAME MILL_SONATYPE_PASSWORD MILL_PGP_SECRET_BASE64 MILL_PGP_PASSPHRASE MILL_TESTS_PUBLISH_DRY_RUN; do
       if [ "\${!v-}" = dry-run-no-upload ]; then echo "\$v placeholder"
@@ -407,6 +434,26 @@ expect "test-java-17 refuses a test module that does not fork on it" 1 "does not
 expect "test-java-17 runs the tests on a JDK 17 every module forks on" 0 "" \
   env TAIHEI_TEST_JAVA_HOME="$W/jdk-17.0.9" STANDIN_JAVA_HOME="$W/jdk-17.0.9" "${M[@]}" test-java-17
 grep -q '\.testForked' "$MLOG.tests" 2>/dev/null && pass "test-java-17: the tests ran" || fail "test-java-17: no test ran"
+
+# zio-json-newest: with no version given it runs the zio-json tests against the newest release
+# both zio-json artifacts have on Central; a version given in the environment or on the command
+# line is used as it is, and Central is not asked; when Central cannot tell, no test runs.
+ZJ="ziojson.jvm,ziojson.js"
+for a in zio-json_3 zio-json_sjs1_3; do meta dev.zio "$a" "$a" 0.7.3 0.7.10 0.8.0-RC1; done
+ran_with() { grep -qF "tests zio-json=$1 {$ZJ}.test.zioJsonTested + {$ZJ}.test.testForked" "$MLOG.tests" 2>/dev/null; }
+rm -f "$MLOG.tests"
+expect "zio-json-newest finds the newest zio-json on Central itself" 0 "the newest zio-json on Maven Central is 0.7.10" env -u ZIO_JSON_TEST_VERSION "${M[@]}" zio-json-newest
+ran_with 0.7.10 && pass "zio-json-newest: and runs the tests against it" || fail "zio-json-newest: the tests ran with: $(cat "$MLOG.tests" 2>/dev/null)"
+rm -f "$MLOG.tests"; : > "$W/log"
+expect "zio-json-newest takes a version from the environment" 0 "" env ZIO_JSON_TEST_VERSION=0.7.3 "${M[@]}" zio-json-newest
+ran_with 0.7.3 && pass "zio-json-newest: the tests ran against the environment's version" || fail "zio-json-newest: the tests ran with: $(cat "$MLOG.tests" 2>/dev/null)"
+! grep -q 'maven-metadata' "$W/log" && pass "zio-json-newest: a version given does not ask Central" || fail "zio-json-newest: asked Central for a version it was given"
+rm -f "$MLOG.tests"
+expect "zio-json-newest takes a version from make's command line" 0 "" env -u ZIO_JSON_TEST_VERSION "${M[@]}" zio-json-newest ZIO_JSON_TEST_VERSION=0.7.3
+ran_with 0.7.3 && pass "zio-json-newest: the tests ran against the command line's version" || fail "zio-json-newest: the tests ran with: $(cat "$MLOG.tests" 2>/dev/null)"
+rm -f "$MLOG.tests" "$S/central/dev/zio/zio-json_sjs1_3/maven-metadata.xml"
+expect "zio-json-newest stops when Central cannot tell" 1 "cannot tell the newest zio-json" env -u ZIO_JSON_TEST_VERSION "${M[@]}" zio-json-newest
+[ ! -e "$MLOG.tests" ] && pass "zio-json-newest: and no test ran" || fail "zio-json-newest ran tests without a version"
 
 grep -q '^PUT\|^POST' "$W/log" && fail "something was uploaded to a stand-in server" || pass "nothing was ever uploaded"
 [ "$FAILED" = 0 ] && echo "[release-test] all checks passed" || echo "[release-test] FAILED"

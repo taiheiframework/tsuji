@@ -34,6 +34,10 @@ problem on stderr, when anything is not exactly as expected.
            leaves, is invisible without a token (the API answers 404), so it counts as spent too.
            Any other answer, a redirect from Central or a release that is not immutable included,
            exits 1. The MiMa baseline passes over a spent tag only.
+  newest   --central URL --group G ARTIFACT...
+           Print the newest release (x.y.z, no milestone or candidate) that Maven Central lists in
+           the maven-metadata.xml of every ARTIFACT of group G. Fails when any of them cannot be
+           read, is not that file, or no such version is in all of them: it never guesses.
 """
 
 import argparse
@@ -548,6 +552,37 @@ def released(args):
     print(f"{args.version} has an immutable GitHub Release")
 
 
+RELEASE_VERSION = re.compile(r"^(0|[1-9]\d{0,8})\.(0|[1-9]\d{0,8})\.(0|[1-9]\d{0,8})$")
+GROUP = re.compile(r"^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$")
+ARTIFACT = re.compile(r"^[A-Za-z0-9_.-]+$")
+
+
+def listed_versions(central, group, artifact):
+    """The x.y.z versions Central's maven-metadata.xml lists for group:artifact."""
+    url = f"{central}/{group.replace('.', '/')}/{artifact}/maven-metadata.xml"
+    code, body = http_get(url, MAX_JSON, follow=False)
+    if code == 404:
+        raise Refused(f"{url}: HTTP 404, Maven Central lists no {group}:{artifact}")
+    try:
+        root = ET.fromstring(body)
+    except ET.ParseError:
+        raise Refused(f"{url}: not XML")
+    if root.tag != "metadata" or root.findtext("artifactId") != artifact:
+        raise Refused(f"{url}: not the maven-metadata.xml of {artifact}")
+    return {v.text.strip() for v in root.findall("versioning/versions/version") if v.text and RELEASE_VERSION.match(v.text.strip())}
+
+
+def newest(args):
+    central = args.central.rstrip("/")
+    check_url(central + "/")
+    if not GROUP.match(args.group) or not all(ARTIFACT.match(a) and ".." not in a for a in args.artifacts):
+        fail([f"not a Maven group and artifacts: {args.group} {' '.join(args.artifacts)}"])
+    common = set.intersection(*(listed_versions(central, args.group, a) for a in args.artifacts))
+    if not common:
+        fail([f"Maven Central lists no x.y.z release of {args.group} that all of {' '.join(args.artifacts)} have"])
+    print(max(common, key=lambda v: tuple(int(n) for n in v.split("."))))
+
+
 def main():
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
@@ -572,9 +607,13 @@ def main():
     for opt in ("--central", "--api", "--repo", "--artifact"):
         rl.add_argument(opt, required=True)
     rl.add_argument("version")
+    nw = sub.add_parser("newest")
+    for opt in ("--central", "--group"):
+        nw.add_argument(opt, required=True)
+    nw.add_argument("artifacts", nargs="+")
     args = parser.parse_args()
     commands = {"pins": pins, "no-repos": no_repos, "resolvers": resolvers, "build-repos": build_repos,
-                "resolved": resolved, "released": released}
+                "resolved": resolved, "released": released, "newest": newest}
     try:
         commands[args.command](args)
     except Refused as e:

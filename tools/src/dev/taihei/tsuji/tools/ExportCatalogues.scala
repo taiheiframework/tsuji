@@ -97,7 +97,7 @@ object ExportCatalogues:
         val families = found.collect { case (_, Right(f)) => f }.distinct.sortBy(_.prefix)
         missing.foreach(err.println)
         if families.isEmpty then
-          err.println("no message family found")
+          err.println("no message family could be loaded")
           2
         else
           val status =

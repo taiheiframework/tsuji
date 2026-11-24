@@ -104,6 +104,6 @@ Runs on the JVM, in a module whose classpath holds the families (for a cross-bui
 JVM side of its shared code). Writes `<dir>/<tag>.json` per language, merging every family found
 (libraries included): the source templates for families in that language, else classpath files
 over inline translations. Failing templates, and family objects that cannot be loaded, are left
-out and printed (exit 1, or 2 when no family could be loaded at all, and then nothing is
-written); a `--scan` that finds no family and a classpath jar or directory that cannot be read
-are printed too (exit 1); usage errors exit 2. Run as `runMain` (Mill) or a forked `run` (sbt).
+out and printed (exit 1); a `--scan` that finds no family and a classpath jar or directory that
+cannot be read are printed too (exit 1). When no family could be loaded at all, nothing is
+written and the exit is 2, as for usage errors. Run as `runMain` (Mill) or a forked `run` (sbt).

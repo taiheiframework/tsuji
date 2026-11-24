@@ -46,6 +46,11 @@ object ExportCataloguesSpec extends ZIOSpecDefault:
 
   private def tempDir(): Path = kept(Files.createTempDirectory("taihei-export"))
 
+  private def emptyDir(dir: Path): Boolean =
+    val entries = Files.list(dir)
+    try entries.findAny.isEmpty
+    finally entries.close()
+
   // Exploding's line on stderr, with its reason: the first test to touch it sees the
   // initialiser's own message, every later one the JVM's NoClassDefFoundError.
   private def explodingReported(err: String, prefix: String): Boolean =
@@ -142,6 +147,19 @@ object ExportCataloguesSpec extends ZIOSpecDefault:
         out.isEmpty,
         explodingReported(err, ""),
         !err.contains("not a MessageFamily object"),
+        err.contains("no message family could be loaded"),
+        emptyDir(dir),
+      )
+    },
+    test("a misspelt scan alone writes nothing and makes the status 2") {
+      val dir              = tempDir()
+      val (status, out, e) = run("--out", dir.toString, "--scan", "dev.taihei.tsuji.toolz")
+      assertTrue(
+        status == 2,
+        out.isEmpty,
+        e.contains("dev.taihei.tsuji.toolz: no message family found in this package"),
+        e.contains("no message family could be loaded"),
+        emptyDir(dir),
       )
     },
     test("an exception without a message is described by its class, never as null") {

@@ -38,9 +38,19 @@ problem on stderr, when anything is not exactly as expected.
            Print the newest release (x.y.z, no milestone or candidate) that Maven Central lists in
            the maven-metadata.xml of every ARTIFACT of group G. Fails when any of them cannot be
            read, is not that file, or no such version is in all of them: it never guesses.
+  candidates --central URL --group G --artifact A --pin VERSION --key FILE --fingerprint FPR
+           The J2 reading (ADR 0006) for moving a pin: every x.y.z release of G:A on Maven Central
+           above VERSION in its major, in order, each with the date Central published it (the
+           POM's Last-Modified), whether that is 14 days or more ago, the licence its POM names,
+           a release-notes link when the POM's scm is on GitHub, and a check that its jar and POM
+           are signed by FPR, whose public key alone FILE holds. Then the newest that qualifies.
+           Any version it cannot read in full (no answer, a redirect, no date, no licence, no or
+           a bad signature) fails the command after the list.
 """
 
 import argparse
+import datetime
+import email.utils
 import hashlib
 import json
 import os
@@ -238,6 +248,12 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 def http_get(url, limit, follow=True, accept=None):
     """(status, body) for a GET without credentials: 200 with the body, 404 with none; any other
     answer, a body over `limit` or a network error is Refused."""
+    code, body, _ = http_get_headers(url, limit, follow, accept)
+    return code, body
+
+
+def http_get_headers(url, limit, follow=True, accept=None):
+    """http_get, with the answer's headers as well (empty for a 404)."""
     if urllib.parse.urlparse(url).scheme != "https":
         raise Refused(f"{url}: only https")
     opener = urllib.request.build_opener(
@@ -251,10 +267,10 @@ def http_get(url, limit, follow=True, accept=None):
             body = r.read(limit + 1)
             if len(body) > limit:
                 raise Refused(f"{url}: more than {limit} bytes")
-            return r.status, body
+            return r.status, body, r.headers
     except urllib.error.HTTPError as e:
         if e.code == 404:
-            return 404, b""
+            return 404, b"", {}
         hint = " (GitHub's limit for requests without a token; wait an hour)" if e.code in (403, 429) and "api" in url else ""
         raise Refused(f"{url}: HTTP {e.code}{hint}")
     except (urllib.error.URLError, OSError, ValueError) as e:
@@ -583,6 +599,101 @@ def newest(args):
     print(max(common, key=lambda v: tuple(int(n) for n in v.split("."))))
 
 
+# J2 (ADR 0006): a dependency version qualifies once it has been on Maven Central this long.
+COOLING_OFF_DAYS = 14
+
+
+def numbers(version):
+    return tuple(int(n) for n in version.split("."))
+
+
+def central_file(url, limit):
+    """(body, headers) of a file Central answers 200 for, without following a redirect; else Refused."""
+    code, body, headers = http_get_headers(url, limit, follow=False)
+    if code != 200:
+        raise Refused(f"{url}: HTTP {code}")
+    return body, headers
+
+
+def published(url, headers):
+    """When Central published the file: its Last-Modified, which Central sets at upload and never
+    changes, since a file there is never replaced."""
+    try:
+        when = email.utils.parsedate_to_datetime(headers.get("Last-Modified") or "")
+    except (TypeError, ValueError):
+        when = None
+    if when is None or when.tzinfo is None:
+        raise Refused(f"{url}: no Last-Modified date, so its age on Central is unknown")
+    return when.astimezone(datetime.timezone.utc)
+
+
+def pom_text(root, path):
+    """The text at path in a POM, which may or may not use the POM namespace."""
+    return [e.text.strip() for e in root.findall("/".join("{*}" + p for p in path.split("/"))) if e.text and e.text.strip()]
+
+
+def candidates(args):
+    central = args.central.rstrip("/")
+    check_url(central + "/")
+    if not GROUP.match(args.group) or not ARTIFACT.match(args.artifact) or ".." in args.artifact:
+        fail([f"not a Maven group and artifact: {args.group} {args.artifact}"])
+    if not RELEASE_VERSION.match(args.pin):
+        fail([f"the pin '{args.pin}' is not an x.y.z version"])
+    pin = numbers(args.pin)
+    above = sorted((v for v in listed_versions(central, args.group, args.artifact) if numbers(v)[0] == pin[0] and numbers(v) > pin), key=numbers)
+    name = f"{args.group}:{args.artifact}"
+    if not above:
+        print(f"Maven Central lists no {pin[0]}.x release of {name} above the pin {args.pin}")
+        return
+    now = datetime.datetime.now(datetime.timezone.utc)
+    cooling = datetime.timedelta(days=COOLING_OFF_DAYS)
+    keyring = Keyring(args.key, args.fingerprint)
+    problems, qualified = [], []
+    try:
+        for v in above:
+            base = f"{central}/{args.group.replace('.', '/')}/{args.artifact}/{v}/{args.artifact}-{v}"
+            try:
+                pom, headers = central_file(f"{base}.pom", MAX_JSON)
+                when = published(f"{base}.pom", headers)
+                try:
+                    root = ET.fromstring(pom)
+                except ET.ParseError:
+                    raise Refused(f"{base}.pom: not XML")
+                if pom_text(root, "artifactId") != [args.artifact] or pom_text(root, "version") != [v]:
+                    raise Refused(f"{base}.pom: not the POM of {args.artifact} {v}")
+                # Printed to a terminal: nothing but printable ASCII from the POM.
+                licences = [re.sub(r"[^ -~]", "?", n) for n in pom_text(root, "licenses/license/name")]
+                if not licences:
+                    raise Refused(f"{base}.pom: names no licence")
+                jar, _ = central_file(f"{base}.jar", MAX_FILE)
+                for suffix, data in ((".jar", jar), (".pom", pom)):
+                    asc, _ = central_file(f"{base}{suffix}.asc", MAX_ASC)
+                    path = os.path.join(keyring.home, "file")
+                    with open(path, "wb") as f:
+                        f.write(data)
+                    reason = keyring.verify(asc, path, f"{base}{suffix}")
+                    if reason:
+                        raise Refused(reason)
+            except Refused as e:
+                problems.append(str(e))
+                print(f"{v}  cannot be read: {e}")
+                continue
+            age = now - when
+            j2 = age >= cooling
+            if j2:
+                qualified.append(v)
+            scm = [u for u in pom_text(root, "scm/url") if re.match(r"^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/?$", u)]
+            notes = f"  notes {scm[0].rstrip('/')}/releases/tag/v{v}" if scm else ""
+            print(f"{v}  on Central since {when:%Y-%m-%d} ({age.days} days)  J2 {'yes' if j2 else 'no'}  "
+                  f"jar and POM signed by {keyring.fingerprint}  licence {', '.join(licences)}{notes}")
+    finally:
+        keyring.close()
+    if problems:
+        fail(problems)
+    print(f"newest on Central for {COOLING_OFF_DAYS} days or more: {qualified[-1]}" if qualified
+          else f"none above {args.pin} has been on Central for {COOLING_OFF_DAYS} days or more")
+
+
 def main():
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
@@ -611,9 +722,12 @@ def main():
     for opt in ("--central", "--group"):
         nw.add_argument(opt, required=True)
     nw.add_argument("artifacts", nargs="+")
+    cd = sub.add_parser("candidates")
+    for opt in ("--central", "--group", "--artifact", "--pin", "--key", "--fingerprint"):
+        cd.add_argument(opt, required=True)
     args = parser.parse_args()
     commands = {"pins": pins, "no-repos": no_repos, "resolvers": resolvers, "build-repos": build_repos,
-                "resolved": resolved, "released": released, "newest": newest}
+                "resolved": resolved, "released": released, "newest": newest, "candidates": candidates}
     try:
         commands[args.command](args)
     except Refused as e:

@@ -40,7 +40,7 @@ PUBLISHED = tsuji.js.publishArtifacts tsuji.jvm.publishArtifacts tsuji.tools.pub
 # (a redirect is an answer that stops a check), 000 when there is no answer.
 HTTP_CODE = { curl -q -s --proto '=https' --max-time 30 -o /dev/null -w '%{http_code}' "$$URL" || true; }
 
-.PHONY: clean fix fmt lint compile prepare build test test-java-17 mima no-zio zio-json-newest repo-guard release-test validate deps \
+.PHONY: clean fix fmt lint compile prepare build test test-java-17 mima no-zio zio-json-newest jsoniter-candidates repo-guard release-test validate deps \
         publishLocal publish-dry-run
 
 # ---------------------------------------------------------------------------
@@ -182,6 +182,26 @@ zio-json-newest:
 		echo "[zio-json-newest] ZIO_JSON_TEST_VERSION names zio-json $$V; Maven Central is not asked"; \
 	fi; \
 	ZIO_JSON_TEST_VERSION="$$V" ./mill '{ziojson.jvm,ziojson.js}.test.zioJsonTested' + '{ziojson.jvm,ziojson.js}.test.testForked'
+
+# The J2 reading (ADR 0006) a move of the jsoniter-scala-core pin needs: every release of the
+# pin's major above build.mill's V.jsoniter on Maven Central, with its publication date, whether
+# it has been there 14 days or more, its licence, its release-notes link, and its jar and POM
+# checked against the committed public key of the jsoniter-scala release key, in a temporary gpg
+# home (release.py candidates). It reads Central over https, without credentials or redirects,
+# and fails when it cannot read a version in full. It takes no variable, so a permission profile
+# can allow exactly `make jsoniter-candidates`.
+JSONITER_GROUP = com.github.plokhotnyuk.jsoniter-scala
+JSONITER_ARTIFACT = jsoniter-scala-core_3
+JSONITER_KEY = FDB76691F8E8BCFD47AF384C2E0AE1A6C673B7AA
+JSONITER_KEY_FILE = $(CURDIR)/keys/jsoniter-scala.asc
+jsoniter-candidates:
+	@set -euo pipefail; \
+	PIN=$$(sed -n -E 's/^ *val jsoniter *= *"([^"]*)" *$$/\1/p' build.mill); \
+	[ -n "$$PIN" ] || { echo "[jsoniter-candidates] build.mill has no val jsoniter = \"x.y.z\""; exit 1; }; \
+	[ -f "$(JSONITER_KEY_FILE)" ] || { echo "[jsoniter-candidates] $(JSONITER_KEY_FILE) is missing: commit the public key of $(JSONITER_KEY)"; exit 1; }; \
+	echo "[jsoniter-candidates] $(JSONITER_GROUP):$(JSONITER_ARTIFACT) above the pin $$PIN on Maven Central"; \
+	python3 -I -B scripts/release.py candidates --central "$(CENTRAL)" --group "$(JSONITER_GROUP)" --artifact "$(JSONITER_ARTIFACT)" \
+		--pin "$$PIN" --key "$(JSONITER_KEY_FILE)" --fingerprint "$(JSONITER_KEY)"
 
 # Checks and never rewrites: run make fix and make fmt first, so unformatted code fails here
 # and in the release run instead of passing reformatted.

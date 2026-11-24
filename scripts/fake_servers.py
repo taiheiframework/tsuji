@@ -7,11 +7,14 @@ scripts/test-release.sh, over HTTPS on localhost only. Everything is served read
   /api/<path>       the GitHub API: the JSON file ROOT/api/<path>
   /download/<path>  a release asset: the file ROOT/download/<path>
 
+A file is served with its modification time as Last-Modified, unless that is 0.
+
 Every request is logged as "<method> <path> auth=<none|present>", never a credential itself.
 
   python3 -I -B fake_servers.py ROOT PORT CERT KEY LOG
 """
 
+import email.utils
 import http.server
 import os
 import ssl
@@ -48,8 +51,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if self.path.startswith("/central/") and os.path.isdir(target):
             return self.answer(200, b"<html>listing</html>")
         if os.path.isfile(target):
+            # A file's modification time is its Last-Modified, as Central's upload date; a file
+            # dated 1970-01-01 is served without one.
+            mtime = os.stat(target).st_mtime
+            dated = [("Last-Modified", email.utils.formatdate(mtime, usegmt=True))] if mtime else []
             with open(target, "rb") as f:
-                return self.answer(200, f.read())
+                return self.answer(200, f.read(), dated)
         self.answer(404)
 
     def do_PUT(self):

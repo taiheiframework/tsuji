@@ -17,7 +17,7 @@ make mima              # against the newest released tag of release.majorLine (o
                        # immutable GitHub Release); a spent tag, with neither, is passed over;
                        # MIMA_BASELINE=x.y.z|none overrides
 make test              # ./mill __.test.testForked (JS tests run under Node)
-make lint              # ./mill __.checkFormat, then __.fix --check: CI's lint steps
+make lint              # ./mill __.checkFormat, then __.fix --check: CI's lint step
 TAIHEI_TEST_JAVA_HOME=<a JDK 17> make test-java-17   # the JVM tests on Java 17, as CI and the release workflow run them
 make publish-dry-run   # the bundle Maven Central would receive, written to out/ (a throwaway key in
                        # MILL_PGP_SECRET_BASE64 and MILL_PGP_PASSPHRASE)

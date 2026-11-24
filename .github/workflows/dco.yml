@@ -9,13 +9,15 @@ on:
     branches:
       - main
 
-permissions:
-  contents: read
+# No permission at workflow level: the job names its own.
+permissions: {}
 
 jobs:
   dco:
     name: Signed-off-by on every commit
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout the pull request
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0

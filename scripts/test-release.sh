@@ -445,7 +445,7 @@ rm -f "$MLOG.tests"
 expect "zio-json-newest finds the newest zio-json on Central itself" 0 "the newest zio-json on Maven Central is 0.7.10" env -u ZIO_JSON_TEST_VERSION "${M[@]}" zio-json-newest
 ran_with 0.7.10 && pass "zio-json-newest: and runs the tests against it" || fail "zio-json-newest: the tests ran with: $(cat "$MLOG.tests" 2>/dev/null)"
 rm -f "$MLOG.tests"; : > "$W/log"
-expect "zio-json-newest takes a version from the environment" 0 "" env ZIO_JSON_TEST_VERSION=0.7.3 "${M[@]}" zio-json-newest
+expect "zio-json-newest takes a version from the environment, and says so" 0 "ZIO_JSON_TEST_VERSION names zio-json 0.7.3" env ZIO_JSON_TEST_VERSION=0.7.3 "${M[@]}" zio-json-newest
 ran_with 0.7.3 && pass "zio-json-newest: the tests ran against the environment's version" || fail "zio-json-newest: the tests ran with: $(cat "$MLOG.tests" 2>/dev/null)"
 ! grep -q 'maven-metadata' "$W/log" && pass "zio-json-newest: a version given does not ask Central" || fail "zio-json-newest: asked Central for a version it was given"
 rm -f "$MLOG.tests"

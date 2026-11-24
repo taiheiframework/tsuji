@@ -166,9 +166,10 @@ no-zio:
 # taihei-tsuji-zio-json's tests against another zio-json (ADR 0006): before a release, the
 # newest on Central, since a user's build may evict the pin upward. The tests check that they ran
 # against the version asked for. Without ZIO_JSON_TEST_VERSION it asks Maven Central for the newest
-# x.y.z release that both zio-json artifacts have, and stops when Central cannot tell. The version
-# is read from the environment, where make also puts a command-line value, and never expanded into
-# the recipe.
+# x.y.z release that both zio-json artifacts have, and stops when Central cannot tell. The recipe
+# reads the version from the environment, where make also puts a command-line value, so it is not
+# pasted into the shell line; make itself still expands a command-line value as it exports it, so
+# only a run that passes no variable, as the plain target needs none, is free of that.
 ZIO_JSON_ARTIFACTS = zio-json_3 zio-json_sjs1_3
 zio-json-newest:
 	@set -euo pipefail; \
@@ -177,6 +178,8 @@ zio-json-newest:
 		V=$$(python3 -I -B scripts/release.py newest --central "$(CENTRAL)" --group dev.zio $(ZIO_JSON_ARTIFACTS)) \
 			|| { echo "[zio-json-newest] cannot tell the newest zio-json on Maven Central; ZIO_JSON_TEST_VERSION=x.y.z names one"; exit 1; }; \
 		echo "[zio-json-newest] the newest zio-json on Maven Central is $$V"; \
+	else \
+		echo "[zio-json-newest] ZIO_JSON_TEST_VERSION names zio-json $$V; Maven Central is not asked"; \
 	fi; \
 	ZIO_JSON_TEST_VERSION="$$V" ./mill '{ziojson.jvm,ziojson.js}.test.zioJsonTested' + '{ziojson.jvm,ziojson.js}.test.testForked'
 

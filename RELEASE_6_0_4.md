@@ -21,5 +21,6 @@ A build that pins jsoniter-scala-core itself should pin 2.43.0 or later.
 
 ## Compatibility
 
-Scala 3.9 (LTS), JVM (Java 17 or later) and Scala.js 1.x, as 6.0.3. The library's behaviour is
-unchanged.
+Scala 3.9 (LTS), JVM (Java 17 or later) and Scala.js 1.x, as 6.0.3. Tsuji's own messages and
+catalogues read and write as in 6.0.3; the upstream fixes matter most to code that reads JSON
+with jsoniter-scala-core itself.

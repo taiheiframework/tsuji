@@ -391,6 +391,8 @@ expect "candidates: control characters in the notes are escaped" 0 '  | \x1b[31m
 CAND --pin 2.8.0 2>&1 | LC_ALL=C grep -q '[^ -~]' && fail "candidates: printed a byte outside printable ASCII" \
   || pass "candidates: prints nothing outside printable ASCII"
 expect "candidates: a marker line in the notes stays prefixed" 0 "  |   end of the release notes of v2.10.0" CAND --pin 2.8.0
+cand_notes 2.10.0 '"a literal \\x1b"'
+expect "candidates: a backslash in the notes is escaped, so it cannot pass for an escape" 0 '  | a literal \\x1b' CAND --pin 2.8.0
 cand_notes 2.10.0 null
 expect "candidates: a release without notes says so" 0 "  | (no release notes)" CAND --pin 2.8.0
 rm "$S/api/repos/$CR/releases/tags/v2.10.0"

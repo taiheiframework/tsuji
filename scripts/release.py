@@ -662,8 +662,9 @@ def release_notes(api, repo, version):
 def as_data(text):
     """The text in printable ASCII only: every other character written as its Python escape
     (\\x1b, \\u202e), so no control character, escape sequence or bidi control from upstream
-    reaches the terminal or changes how the lines around it read."""
-    return "".join(c if " " <= c <= "~" else c.encode("unicode_escape").decode("ascii") for c in text)
+    reaches the terminal or changes how the lines around it read. A backslash is escaped too, so
+    upstream text cannot pass for an escaped character."""
+    return "".join(c if " " <= c <= "~" and c != "\\" else c.encode("unicode_escape").decode("ascii") for c in text)
 
 
 def print_notes(version, repo, notes):
@@ -710,7 +711,7 @@ def candidates(args):
                 if pom_text(root, "artifactId") != [args.artifact] or pom_text(root, "version") != [v]:
                     raise Refused(f"{base}.pom: not the POM of {args.artifact} {v}")
                 # Printed to a terminal: nothing but printable ASCII from the POM.
-                licences = [re.sub(r"[^ -~]", "?", n) for n in pom_text(root, "licenses/license/name")]
+                licences = [as_data(n) for n in pom_text(root, "licenses/license/name")]
                 if not licences:
                     raise Refused(f"{base}.pom: names no licence")
                 jar, _ = central_file(f"{base}.jar", MAX_FILE)

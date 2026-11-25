@@ -39,13 +39,17 @@ problem on stderr, when anything is not exactly as expected.
            the maven-metadata.xml of every ARTIFACT of group G. Fails when any of them cannot be
            read, is not that file, or no such version is in all of them: it never guesses.
   candidates --central URL --group G --artifact A --pin VERSION --key FILE --fingerprint FPR
+             --api URL --repo OWNER/NAME
            The J2 reading (ADR 0006) for moving a pin: every x.y.z release of G:A on Maven Central
            above VERSION in its major, in order, each with the date Central published it (the
            POM's Last-Modified), whether that is 14 days or more ago, the licence its POM names,
-           a release-notes link when the POM's scm is on GitHub, and a check that its jar and POM
-           are signed by FPR, whose public key alone FILE holds. Then the newest that qualifies.
-           Any version it cannot read in full (no answer, a redirect, no date, no licence, no or
-           a bad signature) fails the command after the list.
+           a release-notes link when the POM's scm is on GitHub, a check that its jar and POM
+           are signed by FPR, whose public key alone FILE holds, and the release notes of the tag
+           vVERSION of the GitHub repository OWNER/NAME, asked without a token. The notes are
+           upstream text: printed between marker lines, every line prefixed, every character
+           outside printable ASCII escaped. Then the newest that qualifies. Any version it cannot
+           read in full (no answer, a redirect, no date, no licence, no or a bad signature, no
+           GitHub Release or a rate limit) fails the command after the list.
 """
 
 import argparse
@@ -632,11 +636,54 @@ def pom_text(root, path):
     return [e.text.strip() for e in root.findall("/".join("{*}" + p for p in path.split("/"))) if e.text and e.text.strip()]
 
 
+GITHUB_REPO = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+
+
+def release_notes(api, repo, version):
+    """The notes of the GitHub Release of tag vVERSION, asked without a token and following no
+    redirect; a missing release, a rate limit or any other answer is Refused."""
+    url = f"{api}/repos/{repo}/releases/tags/v{version}"
+    code, body = http_get(url, MAX_JSON, follow=False, accept="application/vnd.github+json")
+    if code == 404:
+        raise Refused(f"{url}: HTTP 404, {repo} has no GitHub Release v{version}")
+    try:
+        release = json.loads(body)
+    except (ValueError, RecursionError):
+        raise Refused(f"{url}: not JSON")
+    if not isinstance(release, dict) or release.get("tag_name") != f"v{version}":
+        raise Refused(f"{url}: not the GitHub Release v{version}")
+    notes = release.get("body")
+    # GitHub answers null for a release without notes.
+    if not isinstance(notes, (str, type(None))):
+        raise Refused(f"{url}: its body is not text")
+    return notes or ""
+
+
+def as_data(text):
+    """The text in printable ASCII only: every other character written as its Python escape
+    (\\x1b, \\u202e), so no control character, escape sequence or bidi control from upstream
+    reaches the terminal or changes how the lines around it read."""
+    return "".join(c if " " <= c <= "~" else c.encode("unicode_escape").decode("ascii") for c in text)
+
+
+def print_notes(version, repo, notes):
+    """Upstream text between two marker lines, every line of it prefixed, so it cannot pass for
+    this command's own output."""
+    print(f"  release notes of v{version} from GitHub {repo}, untrusted upstream text, printed as data:")
+    for line in notes.split("\n") if notes.strip() else ["(no release notes)"]:
+        print(f"  | {as_data(line.removesuffix(chr(13)))}")
+    print(f"  end of the release notes of v{version}")
+
+
 def candidates(args):
     central = args.central.rstrip("/")
     check_url(central + "/")
+    api = args.api.rstrip("/")
+    check_url(api + "/")
     if not GROUP.match(args.group) or not ARTIFACT.match(args.artifact) or ".." in args.artifact:
         fail([f"not a Maven group and artifact: {args.group} {args.artifact}"])
+    if not GITHUB_REPO.match(args.repo) or ".." in args.repo:
+        fail([f"not a GitHub repository OWNER/NAME: {args.repo}"])
     if not RELEASE_VERSION.match(args.pin):
         fail([f"the pin '{args.pin}' is not an x.y.z version"])
     pin = numbers(args.pin)
@@ -675,6 +722,7 @@ def candidates(args):
                     reason = keyring.verify(asc, path, f"{base}{suffix}")
                     if reason:
                         raise Refused(reason)
+                notes = release_notes(api, args.repo, v)
             except Refused as e:
                 problems.append(str(e))
                 print(f"{v}  cannot be read: {e}")
@@ -684,9 +732,10 @@ def candidates(args):
             if j2:
                 qualified.append(v)
             scm = [u for u in pom_text(root, "scm/url") if re.match(r"^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/?$", u)]
-            notes = f"  notes {scm[0].rstrip('/')}/releases/tag/v{v}" if scm else ""
+            link = f"  notes {scm[0].rstrip('/')}/releases/tag/v{v}" if scm else ""
             print(f"{v}  on Central since {when:%Y-%m-%d} ({age.days} days)  J2 {'yes' if j2 else 'no'}  "
-                  f"jar and POM signed by {keyring.fingerprint}  licence {', '.join(licences)}{notes}")
+                  f"jar and POM signed by {keyring.fingerprint}  licence {', '.join(licences)}{link}")
+            print_notes(v, args.repo, notes)
     finally:
         keyring.close()
     if problems:
@@ -724,7 +773,7 @@ def main():
         nw.add_argument(opt, required=True)
     nw.add_argument("artifacts", nargs="+")
     cd = sub.add_parser("candidates")
-    for opt in ("--central", "--group", "--artifact", "--pin", "--key", "--fingerprint"):
+    for opt in ("--central", "--group", "--artifact", "--pin", "--key", "--fingerprint", "--api", "--repo"):
         cd.add_argument(opt, required=True)
     args = parser.parse_args()
     commands = {"pins": pins, "no-repos": no_repos, "resolvers": resolvers, "build-repos": build_repos,

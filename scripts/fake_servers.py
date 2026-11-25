@@ -7,7 +7,8 @@ scripts/test-release.sh, over HTTPS on localhost only. Everything is served read
   /api/<path>       the GitHub API: the JSON file ROOT/api/<path>
   /download/<path>  a release asset: the file ROOT/download/<path>
 
-A file is served with its modification time as Last-Modified, unless that is 0.
+A file is served with its modification time as Last-Modified, unless that is 0. A file
+<path>.status beside a path makes the path answer that HTTP status, with no body (a rate limit).
 
 Every request is logged as "<method> <path> auth=<none|present>", never a credential itself.
 
@@ -48,6 +49,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         target = local(self.path)
         if self.path.startswith("/moved/"):
             return self.answer(301, headers=[("Location", "/site/" + self.path[len("/moved/"):])])
+        if os.path.isfile(target + ".status"):
+            with open(target + ".status") as f:
+                return self.answer(int(f.read().strip()))
         if self.path.startswith("/central/") and os.path.isdir(target):
             return self.answer(200, b"<html>listing</html>")
         if os.path.isfile(target):

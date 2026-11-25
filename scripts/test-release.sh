@@ -340,14 +340,20 @@ cand_release() { # VERSION DAYS-AGO|none [LICENCE-XML]: a release of $CG:$CA on 
     "$CA" "$v" "${3-<licenses><license><name>MIT</name></license></licenses>}" > "$d/$CA-$v.pom"
   printf 'jar %s\n' "$v" > "$d/$CA-$v.jar"
   sign "$KEY" "$d/$CA-$v.pom"; sign "$KEY" "$d/$CA-$v.jar"; dated "$d/$CA-$v.pom" "$2"
+  cand_notes "$v" "\"Fixes in $v.\\r\\nMore.\""
 }
+cand_notes() { # VERSION BODY-JSON: the stand-in API's GitHub Release of tag vVERSION in $CR
+  local t="$S/api/repos/$CR/releases/tags"; mkdir -p "$t"; rm -f "$t/v$1.status"
+  printf '{"tag_name": "v%s", "body": %s}\n' "$1" "$2" > "$t/v$1"
+}
+CR=example/cand
 since() { sed -n "$(( $1 + 1 )),\$p" "$W/log"; } # the stand-in's log after its first N lines
 CL=$(wc -l < "$W/log")
 CG=org.example.cand; CA=core_3; CJ="$S/central/org/example/cand/$CA/2.10.0/$CA-2.10.0.jar"
 meta "$CG" "$CA" "$CA" 2.7.0 2.8.0 2.10.0 2.9.0 2.11.0-RC1 3.0.0
 # Only the versions above the pin have files: reading any other would fail with HTTP 404.
 cand_release 2.9.0 15; cand_release 2.10.0 13
-CAND() { R candidates --central "$CENTRAL" --group "$CG" --artifact "$CA" --key "$W/release-key.asc" --fingerprint "$KEY" "$@"; }
+CAND() { R candidates --central "$CENTRAL" --group "$CG" --artifact "$CA" --key "$W/release-key.asc" --fingerprint "$KEY" --api "$API" --repo "$CR" "$@"; }
 expect "candidates: the newest release on Central for 14 days or more" 0 "newest on Central for 14 days or more: 2.9.0" CAND --pin 2.8.0
 [ "$(CAND --pin 2.8.0 2>/dev/null | grep -E '^[0-9]' | cut -d' ' -f1 | tr '\n' ' ')" = "2.9.0 2.10.0 " ] \
   && pass "candidates: the releases of the pin's major above it, in order of their numbers" || fail "candidates: listed $(CAND --pin 2.8.0 2>&1 | tr '\n' ';')"
@@ -371,15 +377,48 @@ expect "candidates: a POM that names no licence stops it" 1 "names no licence" C
 cand_release 2.10.0 none
 expect "candidates: a POM without a date stops it" 1 "no Last-Modified date" CAND --pin 2.8.0
 cand_release 2.10.0 13
-grep -q 'auth=present' <<<"$(since "$CL")" && fail "candidates: sent credentials" || pass "candidates: asks Central without credentials"
+# The release notes: GitHub's text, which the upstream writes, printed only as marked data.
+expect "candidates: the release notes, marked as untrusted upstream text" 0 \
+  "release notes of v2.9.0 from GitHub $CR, untrusted upstream text, printed as data:" CAND --pin 2.8.0
+[ "$(CAND --pin 2.8.0 2>/dev/null | sed -n '/^  release notes of v2.9.0 /,/^  end of the release notes of v2.9.0$/p' | tr '\n' ';')" \
+  = "  release notes of v2.9.0 from GitHub $CR, untrusted upstream text, printed as data:;  | Fixes in 2.9.0.;  | More.;  end of the release notes of v2.9.0;" ] \
+  && pass "candidates: every line of the notes prefixed, between the markers" || fail "candidates: notes printed as $(CAND --pin 2.8.0 2>&1 | tr '\n' ';')"
+# The notes hold ESC, BEL, a right-to-left override (UTF-8 e2 80 ae), NEL and an e-acute (c3 a9),
+# written here as bytes so that this file stays ASCII; U is a backslash and a u.
+U=$(printf '\\%s' u)
+cand_notes 2.10.0 '"\u001b[31mred\u001b]0;title\u0007 '$'\xe2\x80\xae''evil\u0085 '$'\xc3\xa9''\tend\n  end of the release notes of v2.10.0"'
+expect "candidates: control characters in the notes are escaped" 0 '  | \x1b[31mred\x1b]0;title\x07 '"$U"'202eevil\x85 \xe9\tend' CAND --pin 2.8.0
+CAND --pin 2.8.0 2>&1 | LC_ALL=C grep -q '[^ -~]' && fail "candidates: printed a byte outside printable ASCII" \
+  || pass "candidates: prints nothing outside printable ASCII"
+expect "candidates: a marker line in the notes stays prefixed" 0 "  |   end of the release notes of v2.10.0" CAND --pin 2.8.0
+cand_notes 2.10.0 null
+expect "candidates: a release without notes says so" 0 "  | (no release notes)" CAND --pin 2.8.0
+rm "$S/api/repos/$CR/releases/tags/v2.10.0"
+expect "candidates: a version without a GitHub Release stops it" 1 "$CR has no GitHub Release v2.10.0" CAND --pin 2.8.0
+expect "candidates: and still prints the others' notes" 1 "  | Fixes in 2.9.0." CAND --pin 2.8.0
+for code in 403 429; do
+  cand_release 2.10.0 13; echo "$code" > "$S/api/repos/$CR/releases/tags/v2.10.0.status"
+  expect "candidates: GitHub's rate limit ($code) stops it" 1 "v2.10.0: HTTP $code (GitHub's limit" CAND --pin 2.8.0
+done
+cand_notes 2.10.0 '"x"'; printf '{"tag_name": "v2.9.1", "body": "x"}\n' > "$S/api/repos/$CR/releases/tags/v2.10.0"
+expect "candidates: another tag's release stops it" 1 "not the GitHub Release v2.10.0" CAND --pin 2.8.0
+cand_release 2.10.0 13
+AL=$(wc -l < "$W/log")
+expect "candidates: a redirect from the GitHub API stops it" 1 "HTTP 301" CAND --pin 2.8.0 --api "$BASE/moved"
+! since "$AL" | grep -q '^GET /site/' && pass "candidates: and is not followed" || fail "candidates: followed the API's redirect"
+expect "candidates: the GitHub API over http is refused" 1 "not an https URL" CAND --pin 2.8.0 --api "http://localhost:$PORT/api"
+expect "candidates: a repository that is not OWNER/NAME is refused" 1 "not a GitHub repository" CAND --pin 2.8.0 --repo "a/../b"
+grep -q 'auth=present' <<<"$(since "$CL")" && fail "candidates: sent credentials" || pass "candidates: asks Central and GitHub without credentials"
+grep -q "^GET /api/repos/$CR/releases/tags/v2.9.0 " <<<"$(since "$CL")" && pass "candidates: asked the GitHub API for the notes" || fail "candidates: never asked the GitHub API"
 CL=$(wc -l < "$W/log")
 expect "candidates: a key file that is not the pinned key stops it" 1 "is not the key $OTHER" CAND --pin 2.8.0 --fingerprint "$OTHER"
 [ -z "$(since "$CL")" ] && pass "candidates: and asks Central nothing" || fail "candidates: asked Central with the wrong key: $(since "$CL" | tr '\n' ';')"
 expect "candidates: a pin that is not x.y.z is refused" 1 "is not an x.y.z version" CAND --pin 2.8
-expect "candidates: a redirect stops it" 1 "HTTP 301" R candidates --central "$BASE/moved" --group "$CG" --artifact "$CA" --pin 2.8.0 --key "$W/release-key.asc" --fingerprint "$KEY"
-expect "candidates: Central over http is refused" 1 "not an https URL" R candidates --central "http://localhost:$PORT/central" --group "$CG" --artifact "$CA" --pin 2.8.0 --key "$W/release-key.asc" --fingerprint "$KEY"
+expect "candidates: a redirect stops it" 1 "HTTP 301" CAND --central "$BASE/moved" --pin 2.8.0
+expect "candidates: Central over http is refused" 1 "not an https URL" CAND --central "http://localhost:$PORT/central" --pin 2.8.0
 DEAD=$(python3 -I -B -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
-expect "candidates: Central unreachable stops it" 1 "maven-metadata.xml" R candidates --central "https://localhost:$DEAD/central" --group "$CG" --artifact "$CA" --pin 2.8.0 --key "$W/release-key.asc" --fingerprint "$KEY"
+expect "candidates: Central unreachable stops it" 1 "maven-metadata.xml" CAND --central "https://localhost:$DEAD/central" --pin 2.8.0
+expect "candidates: the GitHub API unreachable stops it, saying so" 1 "2.9.0  cannot be read: https://localhost:$DEAD/api/repos/$CR/releases/tags/v2.9.0" CAND --api "https://localhost:$DEAD/api" --pin 2.8.0
 
 # --- the Makefile targets, with a stand-in for Mill ---------------------------------------------
 G="$W/repo"; mkdir -p "$G/scripts" "$G/keys"
@@ -509,12 +548,16 @@ expect "zio-json-newest stops when Central cannot tell" 1 "cannot tell the newes
 # Makefile's coordinates; only the key is the stand-in's.
 CG=$(from_makefile JSONITER_GROUP); CA=$(from_makefile JSONITER_ARTIFACT)
 [ "$CG:$CA" = "com.github.plokhotnyuk.jsoniter-scala:jsoniter-scala-core_3" ] && pass "jsoniter-candidates reads jsoniter-scala-core_3" || fail "jsoniter-candidates reads $CG:$CA"
+CR=$(from_makefile JSONITER_REPO)
+[ "$CR" = "plokhotnyuk/jsoniter-scala" ] && pass "jsoniter-candidates reads the notes of plokhotnyuk/jsoniter-scala" || fail "jsoniter-candidates reads the notes of $CR"
 meta "$CG" "$CA" "$CA" 2.41.7 2.42.0 2.42.1 2.43.0
 cand_release 2.42.1 20; cand_release 2.43.0 2
 JC=("${M[@]}" "JSONITER_KEY=$KEY" "JSONITER_KEY_FILE=$G/keys/release-key.asc")
 { override "$SITE"; printf '  val jsoniter      = "2.42.0"\n'; } > "$G/build.mill"
 expect "jsoniter-candidates names the pin, Central and the key it uses" 0 "above the pin 2.42.0 on $CENTRAL, key $G/keys/release-key.asc" "${JC[@]}" jsoniter-candidates
 expect "jsoniter-candidates: and gives the J2 reading" 0 "newest on Central for 14 days or more: 2.42.1" "${JC[@]}" jsoniter-candidates
+expect "jsoniter-candidates names the GitHub API it reads the notes from" 0 "notes of $CR on $API" "${JC[@]}" jsoniter-candidates
+expect "jsoniter-candidates: and prints each version's notes" 0 "  | Fixes in 2.43.0." "${JC[@]}" jsoniter-candidates
 CL=$(wc -l < "$W/log")
 expect "jsoniter-candidates stops without the committed key" 1 "keys/none.asc is missing" "${M[@]}" jsoniter-candidates "JSONITER_KEY_FILE=$G/keys/none.asc"
 [ -z "$(since "$CL")" ] && pass "jsoniter-candidates: and asks Central nothing" || fail "jsoniter-candidates asked Central without a key"

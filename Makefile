@@ -187,13 +187,15 @@ zio-json-newest:
 # pin's major above build.mill's V.jsoniter on Maven Central, with its publication date, whether
 # it has been there 14 days or more, its licence, its release-notes link, and its jar and POM
 # checked against the committed public key of the jsoniter-scala release key, in a temporary gpg
-# home (release.py candidates). It reads Central over https, without credentials or redirects,
+# home, and the notes of its GitHub Release, printed as marked, escaped upstream text (release.py
+# candidates). It reads Central and the GitHub API over https, without credentials or redirects,
 # and fails when it cannot read a version in full. It takes no variable, so a permission profile
 # can allow exactly `make jsoniter-candidates`; that rule is narrow only while the agent cannot
 # edit this Makefile or scripts/ and runs in the launcher's environment (MAKEFLAGS can set
-# variables too), so the first line names the Central and the key file actually used.
+# variables too), so the first line names the Central, the GitHub API and the key file actually used.
 JSONITER_GROUP = com.github.plokhotnyuk.jsoniter-scala
 JSONITER_ARTIFACT = jsoniter-scala-core_3
+JSONITER_REPO = plokhotnyuk/jsoniter-scala
 JSONITER_KEY = FDB76691F8E8BCFD47AF384C2E0AE1A6C673B7AA
 JSONITER_KEY_FILE = $(CURDIR)/keys/jsoniter-scala.asc
 jsoniter-candidates:
@@ -201,9 +203,9 @@ jsoniter-candidates:
 	PIN=$$(sed -n -E 's/^ *val jsoniter *= *"([^"]*)" *$$/\1/p' build.mill); \
 	[ -n "$$PIN" ] || { echo "[jsoniter-candidates] build.mill has no val jsoniter = \"x.y.z\""; exit 1; }; \
 	[ -f "$(JSONITER_KEY_FILE)" ] || { echo "[jsoniter-candidates] $(JSONITER_KEY_FILE) is missing: commit the public key of $(JSONITER_KEY)"; exit 1; }; \
-	echo "[jsoniter-candidates] $(JSONITER_GROUP):$(JSONITER_ARTIFACT) above the pin $$PIN on $(CENTRAL), key $(JSONITER_KEY_FILE)"; \
+	echo "[jsoniter-candidates] $(JSONITER_GROUP):$(JSONITER_ARTIFACT) above the pin $$PIN on $(CENTRAL), key $(JSONITER_KEY_FILE), notes of $(JSONITER_REPO) on $(GITHUB_API)"; \
 	python3 -I -B scripts/release.py candidates --central "$(CENTRAL)" --group "$(JSONITER_GROUP)" --artifact "$(JSONITER_ARTIFACT)" \
-		--pin "$$PIN" --key "$(JSONITER_KEY_FILE)" --fingerprint "$(JSONITER_KEY)"
+		--pin "$$PIN" --key "$(JSONITER_KEY_FILE)" --fingerprint "$(JSONITER_KEY)" --api "$(GITHUB_API)" --repo "$(JSONITER_REPO)"
 
 # Checks and never rewrites: run make fix and make fmt first, so unformatted code fails here
 # and in the release run instead of passing reformatted.

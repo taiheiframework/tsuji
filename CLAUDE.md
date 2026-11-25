@@ -21,6 +21,8 @@ make lint              # ./mill __.checkFormat, then __.fix --check: CI's lint s
 TAIHEI_TEST_JAVA_HOME=<a JDK 17> make test-java-17   # the JVM tests on Java 17, as CI and the release workflow run them
 make publish-dry-run   # the bundle Maven Central would receive, written to out/ (a throwaway key in
                        # MILL_PGP_SECRET_BASE64 and MILL_PGP_PASSPHRASE)
+make jsoniter-candidates  # the J2 reading of a jsoniter-scala pin move: releases above the pin, their
+                       # Central dates, licence and signature against keys/jsoniter-scala.asc
 ```
 
 Only the maintainer releases, through the family's release workflow (ADR 0014): his signed
@@ -55,7 +57,8 @@ branch. Credentials never go on make's command line; never read or print `~/.edo
   bytes and the exported catalogues of 5.0.2 per platform; not published.
 - `scripts/`: repo-guard's and the MiMa baseline's Python and the tests of the build checks
   (`release.py`, `fake_servers.py`, `test-release.sh`, `test-mill-launcher`), shared with mihon.
-- `keys/release-key.asc`: the public half of the release key.
+- `keys/release-key.asc`: the public half of the release key; `keys/jsoniter-scala.asc`: the
+  public key of jsoniter-scala's Central releases (FDB76691F8E8BCFD47AF384C2E0AE1A6C673B7AA).
 - `docs/skill/`: the API reference for the library's Claude Code skill.
 
 ## Rules

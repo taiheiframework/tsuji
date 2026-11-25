@@ -22,7 +22,7 @@ object V {
   val zio           = "2.1.27"
   // Exact, never a range (ADR 0006): re-pinned before a release to the newest 2.x that has
   // been on Maven Central for 14 days, never below 2.41.7; the same as taihei-mihon's.
-  val jsoniter      = "2.42.0"
+  val jsoniter      = "2.43.0"
   val scalaJavaTime = "2.8.0"
   // Exact, never a range (ADR 0006): the dependency of taihei-tsuji-zio-json alone, whose
   // decoders use zio.json.internal. Its tests also run against the newest zio-json on Central
